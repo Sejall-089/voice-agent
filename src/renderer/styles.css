@@ -1,0 +1,56 @@
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+#root {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100vh;
+  padding-top: 24px;
+  box-sizing: border-box;
+}
+
+.command-bar {
+  width: 560px;
+  background: rgba(28, 28, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  padding: 14px 16px;
+  -webkit-app-region: drag;
+}
+
+.command-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f4f4f6;
+  font-size: 20px;
+  line-height: 1.4;
+  -webkit-app-region: no-drag;
+}
+
+.command-input::placeholder {
+  color: rgba(244, 244, 246, 0.4);
+}
+
+.command-echo {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: #9ad0ff;
+  font-size: 15px;
+  word-break: break-word;
+}
