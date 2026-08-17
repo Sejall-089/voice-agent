@@ -6,23 +6,12 @@ import type {
   ToolChoice,
   ToolInput,
   ToolSchema,
-} from "./types.ts";
+} from "../types.ts";
+import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
 
-// Planner model — pinned by spec.md §3. Do not substitute without asking.
+// Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
+// see factory.ts.
 const PLANNER_MODEL = "gpt-5";
-
-// System prompt for the tool-choice call. The registry's descriptions/schemas do the
-// real routing work; this just frames the job.
-const CHOOSE_SYSTEM = [
-  "You are the planner for a desktop assistant.",
-  "Pick exactly one tool from the provided tools that best fulfills the user's instruction,",
-  "given the on-screen context. If no tool fits, do not call a tool — reply with a short",
-  "explanation instead. Never invent a tool that is not in the list.",
-  "You may also be shown the previous turn (the last instruction, tool, and result). Use it",
-  "ONLY to resolve a correction or a pronoun reference in the CURRENT instruction ('no, I",
-  "meant...', 'actually...', 'that's wrong'). Otherwise ignore it and treat the current",
-  "instruction as an independent request.",
-].join(" ");
 
 // Real LLM client. The planner and handlers only see the LLMClient interface, so tests
 // swap in a fake with no network/API key.
@@ -90,41 +79,4 @@ export class OpenAILLMClient implements LLMClient {
     });
     return (response.choices[0]?.message.content ?? "").trim();
   }
-}
-
-// Serialize the instruction + captured context (+ previous turn, if any) into the user message.
-function renderRequest(
-  instruction: string,
-  context: CapturedContext,
-  previousTurn: ActionLogEntry | null,
-): string {
-  const parts: string[] = [];
-  if (previousTurn) {
-    parts.push(`${renderPreviousTurn(previousTurn)}\n`);
-  }
-  parts.push(`Instruction: ${instruction}`);
-  if (context.selectedText) {
-    parts.push(`\nSelected text (clipboard):\n${context.selectedText}`);
-  }
-  if (context.activeWindowTitle) {
-    parts.push(`\nActive window: ${context.activeWindowTitle}`);
-  }
-  return parts.join("\n");
-}
-
-// A short, bounded description of the previous turn — enough to resolve a correction,
-// not so much that one verbose prior result balloons every subsequent prompt.
-function renderPreviousTurn(entry: ActionLogEntry): string {
-  const toolPart = entry.tool ? `called \`${entry.tool}\`` : "found no matching tool";
-  const argsPart = entry.arguments ? ` with ${JSON.stringify(entry.arguments)}` : "";
-  const resultPart = entry.result ? ` → ${preview(entry.result)}` : "";
-  return (
-    `Previous turn (for resolving corrections/pronouns only — otherwise ignore):\n` +
-    `Instruction: "${entry.instruction}" — ${toolPart}${argsPart}${resultPart}`
-  );
-}
-
-function preview(text: string, max = 300): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }

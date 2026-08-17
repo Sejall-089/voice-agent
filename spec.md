@@ -57,10 +57,10 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | UI (renderer)      | **React + Vite + TypeScript**            | Command bar + result popup only. |
 | Language           | **TypeScript** everywhere                | Strict mode on. |
 | Memory store       | **better-sqlite3** (local file)          | Synchronous, embedded, zero-config. |
-| Planner LLM        | **OpenAI SDK** (`openai`)                | Tool-calling. Model `gpt-5` for planning. |
+| Planner LLM        | **Selectable via `LLM_PROVIDER`**        | `anthropic` → `@anthropic-ai/sdk`, `claude-sonnet-4-6`. `openai` → `openai`, `gpt-5`. Tool-calling either way; see `src/core/llm/factory.ts`. |
 | External action    | **Slack Incoming Webhook** (via `fetch`) | The only connector in v0. |
 | Active window      | `active-win` (optional)                  | If it complicates the build, skip; context still works from clipboard. |
-| Config / secrets   | `.env` (dotenv), never committed         | `OPENAI_API_KEY`, `SLACK_WEBHOOK_URL`. |
+| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`. |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
 interface (§4) so a Mac/Linux shell can be added later without touching the core.
@@ -81,7 +81,7 @@ Recommended repo layout:
     memory/
       db.ts        better-sqlite3 setup + migrations
       memory.ts    read / write / resolve / version (§7)
-    llm.ts         OpenAI client + tool-call request/parse
+    llm/           anthropic.ts + openai.ts clients, shared prompt.ts, factory.ts (LLM_PROVIDER)
     types.ts       shared types
   /renderer        React + Vite UI
     CommandBar.tsx
@@ -142,7 +142,8 @@ Given the user's instruction and captured context, run exactly this sequence:
    pronoun in the CURRENT instruction ("no, I meant..."). This is not conversation
    history — it's one bounded fact, and it's still exactly one tool call per
    instruction; the planner never chains actions on its own.
-2. **LLM picks a tool** — call OpenAI with tool-calling. Expect a `tool_call`:
+2. **LLM picks a tool** — call the configured provider (§3, `LLM_PROVIDER`) with
+   tool-calling. Expect a `tool_call`:
    `{ name, input }`. The model may also decline (return only text).
 3. **Guard: registry check** — if `name` is not in the registry (hallucinated tool)
    OR the model declined, DO NOT act. Fall to graceful refusal (§8) and log a miss.
@@ -324,8 +325,16 @@ referred to. Fixed by giving the planner one turn of state (§5 step 1: the prev
 `ActionLog` entry, passed to `chooseTool` for correction/pronoun resolution only). This
 narrows the gap, it doesn't eliminate model judgment for genuinely ambiguous phrasing —
 the tests prove the mechanism, not perfect routing. If a correction still mis-routes,
-the fix is the `remember` **description** or the previous-turn framing in `llm.ts`, not
-the planner's control flow.
+the fix is the `remember` **description** or the previous-turn framing in
+`src/core/llm/prompt.ts`, not the planner's control flow.
+
+**Provider is now selectable, not pinned:** `LLM_PROVIDER` (§3) chooses `AnthropicLLMClient`
+or `OpenAILLMClient` at startup (`src/core/llm/factory.ts`), both behind the same
+`LLMClient` interface. Only **OpenAI/gpt-5** has been live-verified (the findings above,
+3/3 consistent runs on the correction-routing fix). **Anthropic/claude-sonnet-4-6 has not
+been live-tested at all** — it's implemented against the same interface and typechecks,
+but its actual tool-calling behavior against a real key (including the correction-routing
+case above) is unverified until someone runs it live.
 
 ---
 

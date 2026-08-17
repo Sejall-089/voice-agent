@@ -18,6 +18,7 @@
     "predev": "npm run rebuild:electron"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.7",
     "openai": "^7.4.0"

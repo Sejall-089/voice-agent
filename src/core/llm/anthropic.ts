@@ -1,0 +1,84 @@
+import Anthropic from "@anthropic-ai/sdk";
+import type {
+  ActionLogEntry,
+  CapturedContext,
+  LLMClient,
+  ToolChoice,
+  ToolInput,
+  ToolSchema,
+} from "../types.ts";
+import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
+
+// Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
+// see factory.ts.
+const PLANNER_MODEL = "claude-sonnet-4-6";
+
+// Real LLM client. The planner and handlers only see the LLMClient interface, so tests
+// swap in a fake with no network/API key.
+export class AnthropicLLMClient implements LLMClient {
+  private readonly apiKey: string | undefined;
+  private client: Anthropic | null = null;
+
+  constructor(apiKey: string | undefined = process.env["ANTHROPIC_API_KEY"]) {
+    // Read (but never log) the key. Missing key is surfaced later as a friendly error
+    // inside chooseTool/complete, so the app doesn't crash at startup (spec.md §10).
+    this.apiKey = apiKey;
+  }
+
+  private getClient(): Anthropic {
+    if (!this.apiKey) {
+      throw new Error("ANTHROPIC_API_KEY is missing — add it to your .env file.");
+    }
+    if (!this.client) {
+      this.client = new Anthropic({ apiKey: this.apiKey });
+    }
+    return this.client;
+  }
+
+  async chooseTool(
+    instruction: string,
+    context: CapturedContext,
+    tools: ToolSchema[],
+    previousTurn: ActionLogEntry | null,
+  ): Promise<ToolChoice> {
+    const response = await this.getClient().messages.create({
+      model: PLANNER_MODEL,
+      max_tokens: 1024,
+      system: CHOOSE_SYSTEM,
+      tools: tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        // Adapt the vendor-neutral JSONSchema to the SDK's InputSchema at this boundary.
+        input_schema: t.inputSchema as unknown as Anthropic.Tool.InputSchema,
+      })),
+      tool_choice: { type: "auto" },
+      messages: [{ role: "user", content: renderRequest(instruction, context, previousTurn) }],
+    });
+
+    for (const block of response.content) {
+      if (block.type === "tool_use") {
+        return { kind: "tool", name: block.name, input: (block.input ?? {}) as ToolInput };
+      }
+    }
+    return { kind: "none", text: joinText(response.content) };
+  }
+
+  async complete(system: string, user: string): Promise<string> {
+    const response = await this.getClient().messages.create({
+      model: PLANNER_MODEL,
+      max_tokens: 4096,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+    return joinText(response.content);
+  }
+}
+
+// Concatenate all text blocks of a response into a single string.
+function joinText(content: Anthropic.Messages.ContentBlock[]): string {
+  return content
+    .filter((block): block is Anthropic.Messages.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("")
+    .trim();
+}

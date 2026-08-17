@@ -4,7 +4,7 @@ import { app, BrowserWindow, globalShortcut, screen } from "electron";
 import { WindowsShell } from "./shell/WindowsShell.ts";
 import { Planner } from "../core/planner.ts";
 import { registry } from "../core/registry.ts";
-import { OpenAILLMClient } from "../core/llm.ts";
+import { createLLMClient } from "../core/llm/factory.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
 import { SlackSender } from "../core/senders/SlackSender.ts";
@@ -63,10 +63,10 @@ app.whenReady().then(() => {
   const shell = new WindowsShell(commandBar);
 
   // Compose the core brain. The planner drives the loop; it only knows the interfaces,
-  // never electron or the concrete OpenAI client directly.
+  // never electron or the concrete LLM client directly.
   //
   // The DB path is decided HERE and injected — /core never asks electron where it lives.
-  const llm = new OpenAILLMClient();
+  const llm = createLLMClient();
   const memory = new SqliteMemory(createDatabase(join(app.getPath("userData"), "memory.db")));
   seedIfEmpty(memory);
   // Secrets are read HERE, in composition — /core never touches process.env. Never log the URL.

@@ -38,7 +38,7 @@ flowchart TB
         Core <--> Memory
     end
 
-    LLM["LLM (OpenAI)<br/>reasoning / tool choice"]
+    LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
     OS["OS &amp; target apps<br/>browser, clipboard"]
 
