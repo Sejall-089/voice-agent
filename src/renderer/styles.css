@@ -13,15 +13,18 @@ body {
 
 #root {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   height: 100vh;
-  padding-top: 24px;
   box-sizing: border-box;
 }
 
 .command-bar {
   width: 560px;
+  max-height: calc(100vh - 48px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   background: rgba(28, 28, 32, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
@@ -47,10 +50,25 @@ body {
 }
 
 .command-echo {
+  flex: 1 1 auto;
+  min-height: 0;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   color: #9ad0ff;
   font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
   word-break: break-word;
+  overflow-y: auto;
+  -webkit-app-region: no-drag;
+}
+
+.command-echo::-webkit-scrollbar {
+  width: 8px;
+}
+
+.command-echo::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
 }

@@ -33,11 +33,14 @@ export type ToolChoice =
   | { kind: "none"; text: string | null };
 
 export interface LLMClient {
-  // Pick one tool from the menu (or decline).
+  // Pick one tool from the menu (or decline). `previousTurn` is the single most recent
+  // logged action (or null) — the one piece of state the planner carries between
+  // instructions, so a bare correction ("no, I meant...") has something to resolve against.
   chooseTool(
     instruction: string,
     context: CapturedContext,
     tools: ToolSchema[],
+    previousTurn: ActionLogEntry | null,
   ): Promise<ToolChoice>;
   // Free-form generation used inside tool handlers (e.g. summarize).
   complete(system: string, user: string): Promise<string>;
@@ -137,6 +140,9 @@ export interface ActionLogEntry {
 export interface ActionLog {
   logAction(entry: ActionLogEntry): void;
   logMiss(instruction: string): void; // records a "no_tool" miss
+  // The single most recently logged entry, or null on a fresh session — the planner's
+  // one turn of state, fed back into the next chooseTool call.
+  getLast(): ActionLogEntry | null;
 }
 
 // --- Planner result ---

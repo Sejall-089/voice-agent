@@ -71,4 +71,23 @@ describe("Planner (M1: general path with summarize on the menu)", () => {
     expect(shell.results[0]).toMatch(/something went wrong/i);
     expect(log.entries[0]).toMatchObject({ status: "error", tool: "summarize" });
   });
+
+  it("passes the previous turn to chooseTool, so a bare correction has something to resolve against", async () => {
+    const shell = new MockShell({ context: contextWith("some text") });
+    const llm = new FakeLLM({ kind: "tool", name: "summarize", input: {} }, "SUMMARY");
+    const log = new InMemoryActionLog();
+    const planner = new Planner(llm, shell, registry, new NoopMemoryResolver(), log);
+
+    // First run: nothing logged yet, so there's no previous turn to offer.
+    await planner.run("summarize this");
+    expect(llm.lastPreviousTurnOffered).toBeNull();
+
+    // Second run: the FIRST run's own logged entry is what's offered this time.
+    await planner.run("no I meant this");
+    expect(llm.lastPreviousTurnOffered).toMatchObject({
+      instruction: "summarize this",
+      tool: "summarize",
+      status: "ok",
+    });
+  });
 });

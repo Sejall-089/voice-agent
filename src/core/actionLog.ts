@@ -21,4 +21,8 @@ export class InMemoryActionLog implements ActionLog {
       status: "no_tool",
     });
   }
+
+  getLast(): ActionLogEntry | null {
+    return this.entries[this.entries.length - 1] ?? null;
+  }
 }

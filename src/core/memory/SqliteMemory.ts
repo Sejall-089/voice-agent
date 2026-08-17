@@ -135,4 +135,30 @@ export class SqliteMemory implements Memory, ActionLog {
       status: "no_tool",
     });
   }
+
+  getLast(): ActionLogEntry | null {
+    const row = this.db
+      .prepare<
+        [],
+        {
+          ts: string;
+          instruction: string;
+          tool: string | null;
+          arguments: string | null;
+          result: string | null;
+          status: ActionLogEntry["status"];
+        }
+      >(`SELECT ts, instruction, tool, arguments, result, status FROM action_log ORDER BY id DESC LIMIT 1`)
+      .get();
+
+    if (!row) return null;
+    return {
+      ts: row.ts,
+      instruction: row.instruction,
+      tool: row.tool,
+      arguments: row.arguments ? (JSON.parse(row.arguments) as ToolInput) : null,
+      result: row.result,
+      status: row.status,
+    };
+  }
 }

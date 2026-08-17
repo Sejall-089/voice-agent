@@ -57,10 +57,10 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | UI (renderer)      | **React + Vite + TypeScript**            | Command bar + result popup only. |
 | Language           | **TypeScript** everywhere                | Strict mode on. |
 | Memory store       | **better-sqlite3** (local file)          | Synchronous, embedded, zero-config. |
-| Planner LLM        | **Anthropic SDK** (`@anthropic-ai/sdk`)  | Tool-calling. Model `claude-sonnet-4-6` for planning. |
+| Planner LLM        | **OpenAI SDK** (`openai`)                | Tool-calling. Model `gpt-5` for planning. |
 | External action    | **Slack Incoming Webhook** (via `fetch`) | The only connector in v0. |
 | Active window      | `active-win` (optional)                  | If it complicates the build, skip; context still works from clipboard. |
-| Config / secrets   | `.env` (dotenv), never committed         | `ANTHROPIC_API_KEY`, `SLACK_WEBHOOK_URL`. |
+| Config / secrets   | `.env` (dotenv), never committed         | `OPENAI_API_KEY`, `SLACK_WEBHOOK_URL`. |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
 interface (§4) so a Mac/Linux shell can be added later without touching the core.
@@ -81,7 +81,7 @@ Recommended repo layout:
     memory/
       db.ts        better-sqlite3 setup + migrations
       memory.ts    read / write / resolve / version (§7)
-    llm.ts         Anthropic client + tool-call request/parse
+    llm.ts         OpenAI client + tool-call request/parse
     types.ts       shared types
   /renderer        React + Vite UI
     CommandBar.tsx
@@ -137,9 +137,13 @@ hotkey". Simulated-copy (injecting Ctrl+C) is a later refinement, not v0.
 Given the user's instruction and captured context, run exactly this sequence:
 
 1. **Assemble request** — build the LLM call: the instruction + context + the tool
-   schemas from the registry (§6).
-2. **LLM picks a tool** — call Anthropic with tool-calling. Expect a `tool_use`
-   block: `{ name, input }`. The model may also decline (return only text).
+   schemas from the registry (§6), plus one turn of state: the single most recently
+   logged action (`ActionLog.getLast()`), scoped strictly to resolving a correction or
+   pronoun in the CURRENT instruction ("no, I meant..."). This is not conversation
+   history — it's one bounded fact, and it's still exactly one tool call per
+   instruction; the planner never chains actions on its own.
+2. **LLM picks a tool** — call OpenAI with tool-calling. Expect a `tool_call`:
+   `{ name, input }`. The model may also decline (return only text).
 3. **Guard: registry check** — if `name` is not in the registry (hallucinated tool)
    OR the model declined, DO NOT act. Fall to graceful refusal (§8) and log a miss.
 4. **Resolve arguments** — for each argument that looks like a vague reference
@@ -310,12 +314,18 @@ harness (`npm run eval`, `tests/eval/`) runs the memory story as one continuous
 scenario — cold memory refuses → teaching fixes it → a correction versions it →
 recall reveals it — plus the seven demo tasks and the closed-world refusal.
 
-**The one open item:** no live run has been done. Every LLM call and the Slack POST
-are proved only against fakes, because no `ANTHROPIC_API_KEY` / `SLACK_WEBHOOK_URL`
-has been available. In particular, whether the model reliably *routes* a correction
-("no, I meant…") to `remember` rests on its judgment, not on deterministic code — the
-tests prove the mechanism, not the routing. If it mis-routes, the fix is the
-`remember` **description**, not the planner.
+**Live-run findings:** a real run against `gpt-5` confirmed the mechanism works — tool
+choice, memory resolve/write, and correction versioning all fire correctly end to end.
+It also surfaced a real gap: a correction that names its subject ("no, my dashboard is
+actually `<url>`") routes to `remember` reliably, but a *bare* correction ("no I meant
+this `<url>`") was inconsistent — the model sometimes declined, sometimes mis-fired
+`openTarget` — because `chooseTool` was stateless and had no way to know what "this"
+referred to. Fixed by giving the planner one turn of state (§5 step 1: the previous
+`ActionLog` entry, passed to `chooseTool` for correction/pronoun resolution only). This
+narrows the gap, it doesn't eliminate model judgment for genuinely ambiguous phrasing —
+the tests prove the mechanism, not perfect routing. If a correction still mis-routes,
+the fix is the `remember` **description** or the previous-turn framing in `llm.ts`, not
+the planner's control flow.
 
 ---
 

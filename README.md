@@ -65,7 +65,7 @@ npm run dev               # press Ctrl+Shift+Space anywhere
 
 | Key | Needed for |
 |---|---|
-| `ANTHROPIC_API_KEY` | Everything — tool choice, summarizing, rewriting, formatting |
+| `OPENAI_API_KEY` | Everything — tool choice, summarizing, rewriting, formatting |
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
 
 > **Native-module note.** `better-sqlite3` needs a different binary for Node (tests) than for

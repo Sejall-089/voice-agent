@@ -141,4 +141,25 @@ describe("action log persistence", () => {
       { instruction: "book me a flight", tool: null, status: "no_tool" },
     ]);
   });
+
+  it("getLast() returns null when empty, then the most recently logged entry", () => {
+    const { memory } = freshMemory();
+    expect(memory.getLast()).toBeNull();
+
+    memory.logAction({
+      ts: new Date().toISOString(),
+      instruction: "summarize this",
+      tool: "summarize",
+      arguments: { style: "bullets" },
+      result: "SUMMARY",
+      status: "ok",
+    });
+    memory.logMiss("book me a flight");
+
+    expect(memory.getLast()).toMatchObject({
+      instruction: "book me a flight",
+      tool: null,
+      status: "no_tool",
+    });
+  });
 });

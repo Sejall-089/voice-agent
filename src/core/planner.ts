@@ -32,8 +32,16 @@ export class Planner {
     // 1. Capture context from the shell.
     const context = await this.shell.getContext();
 
-    // 2. LLM picks a tool (or declines).
-    const choice = await this.llm.chooseTool(instruction, context, toToolSchemas(this.registry));
+    // 2. LLM picks a tool (or declines). The previous turn — the planner's one turn of
+    //    state — goes along too, so a bare correction ("no, I meant...") has something to
+    //    resolve against instead of routing on the current instruction alone.
+    const previousTurn = this.log.getLast();
+    const choice = await this.llm.chooseTool(
+      instruction,
+      context,
+      toToolSchemas(this.registry),
+      previousTurn,
+    );
 
     // 3. Registry check — declined or hallucinated tool → graceful refusal + log a miss.
     if (choice.kind === "none") {
