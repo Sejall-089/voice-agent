@@ -310,14 +310,34 @@ Work strictly top to bottom. Build against `MockShell` until M0's real hotkey st
 Definition of done for v0: M0–M6 complete, all tests green against MockShell, the
 seven demo tasks work on Windows, and misses are logged.
 
-**v0 status: complete.** 57 tests green against `MockShell` (`npm test`). The eval
+**v0 status: complete.** 63 tests green against `MockShell` (`npm test`). The eval
 harness (`npm run eval`, `tests/eval/`) runs the memory story as one continuous
 scenario — cold memory refuses → teaching fixes it → a correction versions it →
 recall reveals it — plus the seven demo tasks and the closed-world refusal.
 
-**Live-run findings:** a real run against `gpt-5` confirmed the mechanism works — tool
-choice, memory resolve/write, and correction versioning all fire correctly end to end.
-It also surfaced a real gap: a correction that names its subject ("no, my dashboard is
+**Live-run findings:** what actually got tested, against a real `OPENAI_API_KEY` and a real
+Slack webhook, and how it went:
+
+- `open my dashboard` (cold, before any fact existed) → correctly refused, no action fired.
+- `remember my dashboard is <url>` → fact stored; `open my dashboard` immediately after →
+  resolved and opened the corrected URL. Resolve/write round-trip confirmed live, not just
+  against `MockShell`.
+- `summarize this` → real `complete()` call against `gpt-5`, summary returned and displayed.
+  (This is also what surfaced the command-bar UI bugs — result area wasn't scrollable and
+  the window was mis-sized/mis-positioned — fixed in `styles.css` / `main.ts`, unrelated to
+  the LLM layer itself.)
+- `send this to the team` → cold run correctly refused with "I don't know which channel...";
+  after `remember the team is #social`, the retry resolved the channel, passed the confirm
+  gate, formatted the notes, and **posted for real** to the Slack webhook — confirmed
+  delivered. The one-shot nature of `WindowsShell.showInput()` matters operationally here:
+  each instruction needs its own hotkey press, retyping into an already-submitted bar is a
+  no-op because that cycle's IPC listener is already removed.
+- The correction-routing case below was the one real bug this surfaced, and it's now fixed.
+
+Tool choice, memory resolve/write, the confirm gate, and correction versioning all fire
+correctly end to end on real infrastructure — this app works live, not just against fakes.
+
+The correction-routing case surfaced a real gap, though: a correction that names its subject ("no, my dashboard is
 actually `<url>`") routes to `remember` reliably, but a *bare* correction ("no I meant
 this `<url>`") was inconsistent — the model sometimes declined, sometimes mis-fired
 `openTarget` — because `chooseTool` was stateless and had no way to know what "this"
