@@ -1,21 +1,21 @@
 import type { AudioClip, Transcriber } from "../../core/types.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
 
-// The tap-to-toggle state machine (M7). ONE hotkey drives all of it, so the current state
-// — not timing, not how long the key was held — decides what a press means:
+// The dictation capture session (M8). There is only ONE hotkey now: it opens the command
+// bar and starts listening at the same time. So this is no longer a toggle — it is a
+// session tied to the bar being open, and the bar's own Enter/Escape drive it:
 //
-//   idle ──press──► recording ──press──► transcribing ──► idle
-//                       └────── 90s cap ──────┘
+//   idle ──begin()──► recording ──finish()──► transcribing ──► idle (returns the transcript)
+//                         │  └──90s cap──► stopped ──finish()──► transcribing
+//                         └──abandon()──► idle (silent: you started typing instead)
 //
-// It is a plain class with injected dependencies and no electron import, so the whole
-// toggle behaviour is testable headless, exactly like the planner.
+// It never calls the planner. main.ts PULLS a transcript with finish() and feeds it to the
+// same runInstruction the typed path uses, which is what keeps one planner call site.
 //
-// What it deliberately does NOT do: talk to the planner. It hands the transcript to the
-// `onTranscript` callback main.ts gives it — the same callback the typed path uses — so
-// there is only ever one planner call site.
+// No electron import, injected dependencies: the whole thing is testable headless.
 
-const DEFAULT_MAX_RECORDING_MS = 90_000; // an accidental left-open recording stops itself
-const DEFAULT_MIN_CLIP_MS = 300; // shorter than this is a stray double-tap, not speech
+const DEFAULT_MAX_RECORDING_MS = 90_000;
+const DEFAULT_MIN_CLIP_MS = 300; // shorter than this is a stray keypress, not speech
 
 const NOTHING_HEARD = "I didn't catch that — nothing was recorded.";
 
@@ -27,6 +27,8 @@ export interface VoiceSessionOptions {
 export class VoiceSession {
   private state: VoiceState = "idle";
   private capTimer: ReturnType<typeof setTimeout> | null = null;
+  // Audio captured by the 90s cap, held until you press Enter (or walk away).
+  private heldClip: AudioClip | null = null;
 
   private readonly maxRecordingMs: number;
   private readonly minClipMs: number;
@@ -34,9 +36,6 @@ export class VoiceSession {
   constructor(
     private readonly shell: VoiceShell,
     private readonly transcriber: Transcriber,
-    // Where a finished transcript goes. main.ts passes the same function the typed path
-    // uses, which is what makes voice "just another way to produce the string".
-    private readonly onTranscript: (text: string) => Promise<void>,
     options: VoiceSessionOptions = {},
   ) {
     this.maxRecordingMs = options.maxRecordingMs ?? DEFAULT_MAX_RECORDING_MS;
@@ -47,99 +46,102 @@ export class VoiceSession {
     return this.state;
   }
 
-  // The single hotkey entry point. Branches on state — never on timing.
-  async toggle(): Promise<void> {
-    switch (this.state) {
-      case "idle":
-        return this.start();
-      case "recording":
-        return this.stopAndTranscribe();
-      case "transcribing":
-        // Decided behaviour: a press while whisper is still running is IGNORED. Starting a
-        // fresh capture here would race the transcript already in flight, and the user has
-        // no way to tell which one produced the action. The bar reads "Transcribing…", so
-        // the no-op is visible rather than mysterious.
-        return;
-    }
+  // Deliberately not `this.state === s`: an early-return guard narrows `this.state` for the
+  // rest of the method, and TypeScript cannot see that enter() reassigns it.
+  private is(s: VoiceState): boolean {
+    return this.state === s;
   }
 
-  // Escape while recording: throw the audio away, run nothing.
-  async cancel(): Promise<void> {
-    if (this.state !== "recording") return;
-    this.enter("idle");
-    try {
-      await this.shell.cancelRecording();
-    } catch {
-      // Nothing to report: the user asked for this recording to disappear, and it has.
-    }
-  }
+  // The bar just opened: start listening.
+  async begin(): Promise<void> {
+    if (!this.is("idle")) return;
 
-  private async start(): Promise<void> {
-    // Flip the state BEFORE awaiting the mic. getUserMedia takes a moment, and a double-tap
-    // during that window must read as start-then-stop, never as two overlapping captures.
+    // Flip state BEFORE awaiting the mic: getUserMedia takes a moment, and a keystroke in
+    // that window must be able to abandon a session that is already considered live.
     this.enter("recording");
-    this.capTimer = setTimeout(() => void this.autoStop(), this.maxRecordingMs);
+    this.capTimer = setTimeout(() => void this.stopAtCap(), this.maxRecordingMs);
 
     try {
       await this.shell.startRecording();
     } catch (error) {
-      // Only unwind if that second tap didn't already move us on.
-      if (this.state === "recording") {
+      // Only unwind if nothing else moved us on in the meantime.
+      if (this.is("recording")) {
         this.enter("idle");
         this.shell.showResult(`Couldn't start recording: ${messageOf(error)}`);
       }
     }
   }
 
-  // The recording cap. Runs the SAME path as a manual second press, so a forgotten
-  // recording still transcribes and still acts — it just stops deciding for itself when.
-  private async autoStop(): Promise<void> {
-    if (this.state !== "recording") return;
-    await this.stopAndTranscribe();
-  }
+  // Enter was pressed with nothing typed: stop listening and hand back what was said.
+  // Returns "" whenever there is nothing to run — abandoned, blank, too short, or failed.
+  async finish(): Promise<string> {
+    if (this.state === "idle" || this.state === "transcribing") return "";
 
-  private async stopAndTranscribe(): Promise<void> {
-    this.enter("transcribing"); // also clears the cap timer
-
-    let clip: AudioClip;
-    try {
-      clip = await this.shell.stopRecording();
-    } catch (error) {
-      return this.abort(`Couldn't finish recording: ${messageOf(error)}`);
-    }
+    const clip = this.state === "stopped" ? this.heldClip : await this.stopRecording();
+    this.heldClip = null;
+    if (!clip) return "";
 
     if (clip.durationMs < this.minClipMs || clip.wav.byteLength === 0) {
-      return this.abort(NOTHING_HEARD);
+      return this.giveUp(NOTHING_HEARD);
     }
 
+    this.enter("transcribing");
     let transcript: string;
     try {
       transcript = await this.transcriber.transcribe(clip);
     } catch (error) {
-      return this.abort(`Couldn't transcribe that: ${messageOf(error)}`);
+      return this.giveUp(`Couldn't transcribe that: ${messageOf(error)}`);
     }
 
     const text = transcript.trim();
-    if (text.length === 0) {
-      return this.abort(NOTHING_HEARD);
-    }
+    if (text.length === 0) return this.giveUp(NOTHING_HEARD);
 
-    // Back to idle BEFORE handing the transcript on. The planner call is slow and may open
-    // a confirm dialog; the hotkey has to be live again the moment voice's own work is
-    // done, and a hung planner must never strand the session mid-state.
     this.enter("idle", text);
-    try {
-      await this.onTranscript(text);
-    } catch (error) {
-      this.shell.showResult(`Something went wrong: ${messageOf(error)}`);
+    return text;
+  }
+
+  // You started typing (or hit Escape). Drop the recording and say NOTHING about it —
+  // typing is not an error, and a "didn't catch that" here would be noise.
+  async abandon(): Promise<void> {
+    if (this.state === "idle") return;
+    const wasCapturing = this.state === "recording";
+    this.heldClip = null;
+    this.enter("idle");
+    if (wasCapturing) {
+      try {
+        await this.shell.cancelRecording();
+      } catch {
+        // The recording is meant to disappear, and it has.
+      }
     }
   }
 
-  // Every failure lands here: back to idle, say why. There is no path that leaves the
-  // session in a state where the hotkey does nothing.
-  private abort(message: string): void {
+  // The 90s cap: release the microphone, keep the audio. Nothing is transcribed and
+  // nothing runs — Enter still submits it, Escape still throws it away. Holding the mic
+  // open is the actual harm; spending whisper CPU on audio you may not want is waste.
+  private async stopAtCap(): Promise<void> {
+    if (!this.is("recording")) return;
+    const clip = await this.stopRecording();
+    if (!clip) return;
+    this.heldClip = clip;
+    this.enter("stopped");
+  }
+
+  private async stopRecording(): Promise<AudioClip | null> {
+    try {
+      return await this.shell.stopRecording();
+    } catch (error) {
+      this.giveUp(`Couldn't finish recording: ${messageOf(error)}`);
+      return null;
+    }
+  }
+
+  // Every failure lands here: back to idle with an honest message, never stuck in a state
+  // where the next hotkey press does nothing.
+  private giveUp(message: string): string {
     this.enter("idle");
     this.shell.showResult(message);
+    return "";
   }
 
   private enter(state: VoiceState, detail?: string): void {

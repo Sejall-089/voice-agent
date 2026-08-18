@@ -27,11 +27,11 @@ shared and portable. The LLM and Slack are external services the app talks to.
 
 ```mermaid
 flowchart TB
-    User(["You — hotkey + typed or spoken command"])
+    User(["You — one hotkey, then speak or type"])
 
     subgraph App["Your app"]
         direction TB
-        Shell["OS shell (thin, per-OS)<br/>hotkeys · capture · run actions · UI<br/>+ voice toggle (M7)"]
+        Shell["OS shell (thin, per-OS)<br/>one hotkey · capture · run actions · UI<br/>+ voice capture"]
         Core["Core (shared brain)<br/>planner + tool registry"]
         Memory["Memory engine<br/>SQLite: facts · confidence · versions"]
         Shell --> Core
@@ -52,7 +52,7 @@ flowchart TB
 
 **Where voice sits:** entirely in the shell. It converts speech into the same string the
 command bar would have returned, and hands it to the same call site. The core never
-learns it exists — which is why M7 changed no file in `/core` except adding one interface.
+learns it exists — which is why voice changed no file in `/core` except adding one interface.
 
 **Read it as:** you sit at the top; the stacked boxes are *your* app; the boxes on
 the right are things the app uses but does not own. The shell is the only part that
@@ -138,59 +138,70 @@ that sticks — is the thing a plain prompt can't fake, and it's the flagship de
 
 ---
 
-## 4a. Voice input (M7) — one hotkey, explicit state
+## 4a. Voice input — one hotkey, explicit state
 
-Dictation is a *second way to produce the instruction string*, nothing more. One hotkey
-(`Ctrl+Alt+Space`, or the first free fallback — see spec §4a) both starts and stops, so
-the current **state** decides what a press means — never timing, never how long the key
-was held.
+Dictation is a *second way to produce the instruction string*, nothing more. **One** hotkey
+opens the command bar and starts listening at the same moment, so you choose between
+speaking and typing *after* the bar is up. `Enter` submits either way.
 
 ```mermaid
 stateDiagram-v2
     [*] --> idle
-    idle --> recording: hotkey
-    recording --> transcribing: hotkey (same key)
-    recording --> transcribing: 90s cap
-    recording --> idle: Esc (discard)
-    transcribing --> idle: transcript → planner
-    transcribing --> transcribing: hotkey ignored
-    transcribing --> idle: blank / failure → honest message
+    idle --> recording: hotkey opens the bar
+    recording --> transcribing: Enter (nothing typed)
+    recording --> stopped: 90s cap - mic released, audio held
+    stopped --> transcribing: Enter
+    recording --> idle: you start typing (silent)
+    recording --> idle: Esc / click away (silent)
+    stopped --> idle: Esc / click away
+    transcribing --> idle: transcript returned to main.ts
 ```
 
-Three properties are what make the toggle safe rather than fiddly:
+Four properties are what make one hotkey safe rather than fiddly:
 
-- **A press while `transcribing` is ignored.** Starting a fresh capture there would race
-  the transcript already in flight, and the user could not tell which one produced the
-  action. The bar reads `Transcribing…`, so the no-op is visible rather than mysterious.
-- **The 90-second cap runs the *same* stop path**, so a recording you walked away from
-  still transcribes and still acts — it just stops deciding for itself when.
-- **Every failure returns to `idle`.** Blocked microphone, whisper crash, blank
-  transcript, sub-300 ms clip: all land back at `idle` with an honest message, so the
-  hotkey is never left dead.
+- **Typing silently cancels the recording.** No message, no stray transcript arriving behind
+  the text you typed. Typing is not an error, so it must not produce output.
+- **The 90-second cap releases the microphone but transcribes nothing.** Holding the mic open
+  is the real harm; whisper work on audio you may never submit is waste. The bar says it
+  stopped, and `Enter` still runs what you said.
+- **Nothing ever fires on its own.** Every path to the planner goes through your `Enter`.
+- **Every failure returns to `idle`** — blocked mic, whisper crash, blank transcript, clip
+  too short. The hotkey is never left dead.
 
 ```mermaid
 sequenceDiagram
     actor You
+    participant Main as main.ts
     participant Session as VoiceSession
     participant Shell as WindowsShell + renderer
     participant Whisper as whisper.cpp (local)
     participant Planner
 
-    You->>Session: Ctrl+Alt+Space
-    Session->>Shell: startRecording() · showVoiceState("recording")
-    Shell-->>You: ● Recording…
-    You->>Session: Ctrl+Alt+Space (same key)
-    Session->>Shell: stopRecording()
-    Shell-->>Session: 16 kHz mono WAV
+    You->>Main: hotkey
+    Main->>Shell: showInput()
+    Main->>Session: begin()
+    Session->>Shell: startRecording()
+    Shell-->>You: bar open, "Listening…"
+    You->>Shell: Enter (nothing typed)
+    Shell-->>Main: showInput() resolves ""
+    Main->>Session: finish()
     Session->>Whisper: transcribe(clip)
     Whisper-->>Session: "send these notes to the team"
-    Session->>Planner: the SAME callback typed text uses
+    Session-->>Main: the transcript
+    Main->>Planner: runInstruction(...) - THE one call site
 ```
 
-The load-bearing detail is that last arrow: `VoiceSession` never calls the planner
-itself. It hands the transcript to the `runInstruction` callback in `main.ts` — the one
-`showInput()` already feeds — so there is exactly **one planner call site** and a
-dictated instruction is indistinguishable from a typed one in the action log.
+The load-bearing detail is that `VoiceSession` never calls the planner. `main.ts` **pulls** a
+transcript and feeds it to the same `runInstruction` a typed instruction uses, so there is
+exactly one planner call site and a dictated instruction is indistinguishable from a typed
+one in the action log.
+
+**One capture at a time.** `showInput()` keeps its resolver on the shell instance rather than
+registering a listener per call, and every way of hiding the bar ends that capture. An
+earlier design registered per-call IPC listeners that only a submit or an Escape could
+remove, so clicking the bar away stranded one — and every stranded listener fired on the
+next submit, running the planner once per abandoned opening. Measured at six concurrent runs
+(twelve LLM calls) from a single keystroke before the fix.
 
 ---
 

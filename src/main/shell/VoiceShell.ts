@@ -4,7 +4,7 @@ import type { AudioClip } from "../../core/types.ts";
 // contract /core depends on (spec.md §4), and the core brain has no business knowing a
 // microphone exists. Voice capture is main-process wiring, so it gets its own parallel
 // contract here. WindowsShell implements both; a future Mac shell would too.
-export type VoiceState = "idle" | "recording" | "transcribing";
+export type VoiceState = "idle" | "recording" | "stopped" | "transcribing";
 
 export interface VoiceShell {
   startRecording(): Promise<void>;

@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MicRecorder } from "./audio/recorder.ts";
 
-type VoiceState = "idle" | "recording" | "transcribing";
+type VoiceState = "idle" | "recording" | "stopped" | "transcribing";
 
 export function CommandBar(): JSX.Element {
   const [text, setText] = useState("");
   const [echo, setEcho] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceState>("idle");
   const [heard, setHeard] = useState<string | null>(null);
-  // Which combo the OS actually granted — the requested one may have been taken.
-  const [voiceHotkey, setVoiceHotkey] = useState("Ctrl+Alt+Space");
   const inputRef = useRef<HTMLInputElement>(null);
   // One recorder for the window's lifetime — the mic is opened and released per recording.
-  const recorderRef = useRef<MicRecorder>(new MicRecorder());
+  // useRef(null) + lazy init, not useRef(new MicRecorder()): the latter constructs a
+  // throwaway recorder on every single render.
+  const recorderRef = useRef<MicRecorder | null>(null);
+  const recorder = (recorderRef.current ??= new MicRecorder());
+  // One "I started typing" signal per bar opening, not one per keystroke.
+  const typedRef = useRef(false);
   // Read inside IPC callbacks, which close over the first render's state otherwise.
   const voiceRef = useRef<VoiceState>("idle");
   voiceRef.current = voice;
@@ -27,6 +30,7 @@ export function CommandBar(): JSX.Element {
       setText("");
       setEcho(null);
       setHeard(null);
+      typedRef.current = false;
       focusInput();
     });
     const offEcho = window.api.onEcho((value) => setEcho(value));
@@ -41,26 +45,21 @@ export function CommandBar(): JSX.Element {
     const offVoiceStart = window.api.onVoiceStart(() => {
       setEcho(null);
       setHeard(null);
-      void recorderRef.current
+      void recorder
         .start()
         .then(() => window.api.voiceStarted())
         .catch((error: unknown) => window.api.voiceStarted(describe(error)));
     });
 
     const offVoiceStop = window.api.onVoiceStop(() => {
-      void recorderRef.current
+      void recorder
         .stop()
         .then((clip) => window.api.sendAudio(clip))
         .catch((error: unknown) => window.api.sendAudio(null, describe(error)));
     });
 
     const offVoiceCancel = window.api.onVoiceCancel(() => {
-      void recorderRef.current.cancel();
-    });
-
-    const offVoiceHotkey = window.api.onVoiceHotkey((combo) => {
-      // Electron's "CommandOrControl" is just "Ctrl" on Windows.
-      if (combo) setVoiceHotkey(combo.replace("CommandOrControl", "Ctrl"));
+      void recorder.cancel();
     });
 
     const offVoiceState = window.api.onVoiceState((state, detail) => {
@@ -76,24 +75,32 @@ export function CommandBar(): JSX.Element {
       offVoiceStart();
       offVoiceStop();
       offVoiceCancel();
-      offVoiceHotkey();
       offVoiceState();
     };
   }, []);
 
+  // Typing is how you say "not this time" to the microphone. Sent once per opening, on
+  // the first real text change, so it never fires for arrow keys or a stray Shift.
+  const onChange = (value: string): void => {
+    setText(value);
+    if (!typedRef.current && value.length > 0) {
+      typedRef.current = true;
+      window.api.notifyTyping();
+    }
+  };
+
+  const listening = voiceRef.current === "recording" || voiceRef.current === "stopped";
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === "Enter") {
       const value = text.trim();
-      if (value.length > 0) {
+      // An empty bar submits ONLY while dictating — there Enter means "stop talking, run
+      // it". With nothing typed and nothing recorded there is nothing to run.
+      if (value.length > 0 || listening) {
         window.api.submit(value);
       }
     } else if (e.key === "Escape") {
-      // While recording, Escape discards the take rather than closing the bar.
-      if (voiceRef.current === "recording") {
-        window.api.cancelVoice();
-      } else {
-        window.api.close();
-      }
+      window.api.close();
     }
   };
 
@@ -103,19 +110,26 @@ export function CommandBar(): JSX.Element {
         ref={inputRef}
         className="command-input"
         type="text"
-        placeholder="Type a command…  (Enter to run · Esc to close)"
+        placeholder="Speak, or type…  (Enter to run · Esc to cancel)"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         autoFocus
       />
 
-      {/* The "you left it running" cue. Without it a toggle mode is easy to forget. */}
+      {/* The "it is listening right now" cue, and what to do about it. */}
       {voice === "recording" && (
         <div className="voice-indicator recording">
           <span className="voice-dot" />
-          Recording…{" "}
-          <span className="voice-hint">{voiceHotkey} to stop · Esc to discard</span>
+          Listening…{" "}
+          <span className="voice-hint">Enter to run · type to cancel · Esc to close</span>
+        </div>
+      )}
+      {voice === "stopped" && (
+        <div className="voice-indicator stopped">
+          <span className="voice-dot" />
+          Stopped at 90s.{" "}
+          <span className="voice-hint">Enter to run what you said · Esc to discard</span>
         </div>
       )}
       {voice === "transcribing" && (

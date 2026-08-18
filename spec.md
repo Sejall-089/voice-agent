@@ -165,38 +165,60 @@ export interface Transcriber {
 }
 ```
 
-**The hotkey is negotiated, not assumed.** `registerHotkey()` returns a boolean (an OS
-can refuse a combo another app already owns), and `main.ts` claims the first free combo
-from an ordered list — `Ctrl+Alt+Space`, then `Ctrl+Alt+M`, `Ctrl+Shift+M`,
-`Alt+Shift+Space` — logging which one won and telling the renderer, so the recording
-indicator names the real key. `VOICE_HOTKEY` in `.env` overrides the list. This is not
-speculative: `Ctrl+Alt+Space` was already taken on the first machine M7 ran on, and a
-hotkey that silently never fires is indistinguishable from a broken app.
+**One hotkey, negotiated (M8).** `registerHotkey()` returns a boolean (the OS can refuse a
+combo another app owns), and `main.ts` claims the first free combo from an ordered list —
+`Ctrl+Shift+Space`, then `Ctrl+Alt+Space`, `Ctrl+Alt+M`, `Alt+Shift+Space` — logging which
+one won. `HOTKEY` in `.env` overrides the list. This is not speculative: `Ctrl+Alt+Space`
+was already taken on the first machine this ran on, and a hotkey that silently never fires
+is indistinguishable from a broken app.
 
-**The state machine (`src/main/shell/VoiceSession.ts`).** One hotkey both starts and
-stops, so *state* decides what a press means — never timing, never how long the key was
-held:
+M7 shipped *two* hotkeys — one to type, one to dictate — which forced the choice before the
+bar was even open. **M8 collapsed them into one:** the hotkey opens the bar *and* starts
+listening, and `Enter` submits either way.
 
-| State | a press does | why |
-|---|---|---|
-| `idle` | start recording, arm the 90 s cap | the press that starts |
-| `recording` | stop → transcribe → hand the transcript on | the same press stops |
-| `transcribing` | **nothing** | whisper is mid-run; a new capture would race the transcript already in flight |
+| You do | What happens |
+|---|---|
+| Speak, then `Enter` | Recording stops, transcribes, submits the transcript |
+| Start typing | Recording is **silently cancelled** — no message, no stray transcript |
+| Type, then `Enter` | Submits the typed text |
+| `Esc`, or click away | Recording discarded, bar closed, nothing runs |
+| Wait 90 s | Mic released, audio held; `Enter` still submits it |
 
-- **90-second cap.** A forgotten recording auto-stops — down the *identical* stop path,
-  so it still transcribes and still acts.
-- **Every failure returns to `idle`.** Blocked mic, whisper crash, blank transcript,
-  sub-300 ms clip: all land back at `idle` with an honest message. There is no path that
-  leaves the hotkey dead.
-- The state flips to `recording` **synchronously before** awaiting the microphone, so a
-  double-tap during mic warm-up reads as start-then-stop, never two captures.
-- `VoiceSession` imports no electron and takes injected dependencies, so the whole toggle
-  is tested headless — exactly like the planner.
+**The state machine (`src/main/shell/VoiceSession.ts`).** No longer a toggle — a capture
+session tied to the bar being open. The bar's own `Enter`/`Esc` drive it:
+
+```
+idle ──begin()──► recording ──finish()──► transcribing ──► idle (returns the transcript)
+                      │  └───90s cap───► stopped ──finish()──► transcribing
+                      └──abandon()──► idle (silent)
+```
+
+| State | `begin()` | `finish()` | `abandon()` |
+|---|---|---|---|
+| `idle` | → `recording` | `""` | no-op |
+| `recording` | no-op | stop → transcribe → transcript | discard, → `idle` |
+| `stopped` (cap hit, audio held) | no-op | transcribe the held audio | discard, → `idle` |
+| `transcribing` | no-op | `""` — never starts a second run | → `idle` |
+
+- **The 90 s cap releases the microphone but does not transcribe.** Holding the mic open is
+  the actual harm; whisper work on audio you may never submit is waste. Nothing fires on its
+  own — under M7's invisible bar an auto-submit was defensible, but the bar is now open and
+  focused in front of you.
+- **`abandon()` is silent.** Typing is not an error; a "didn't catch that" there would be
+  noise. Asserted directly in the suite.
+- **Every failure returns to `idle`** — blocked mic, whisper crash, blank transcript,
+  sub-300 ms clip. No path leaves the hotkey dead.
+- The state flips to `recording` **before** awaiting the microphone, so a keystroke during
+  mic warm-up can still abandon the session.
+
+**Voice off is a real state.** With `WHISPER_EXE_PATH`/`WHISPER_MODEL_PATH` unset,
+`createTranscriber()` returns `null`, no `VoiceSession` is built, the bar never opens the
+microphone, and `Enter` on an empty bar does nothing — exactly as before voice existed.
 
 **The one rule this milestone must not break:** voice produces a *string*, nothing more.
-`VoiceSession` never calls the planner — it hands the transcript to the same
-`runInstruction` callback `showInput()` feeds (`src/main/main.ts`), so there is exactly
-one planner call site and `/core` is unchanged by M7. Dictated instructions pass the same
+`VoiceSession` never calls the planner. `main.ts` *pulls* a transcript from
+`finish()` and feeds it to the same `runInstruction` the typed path uses, so there is
+exactly one planner call site and `/core` is unchanged by M7/M8. Dictated instructions pass the same
 registry check, the same resolution, and the same confirm gate; the planner cannot tell
 where the string came from.
 
@@ -382,10 +404,13 @@ seven demo tasks work on Windows, and misses are logged.
 
 Post-v0:
 
-- [x] **M7 — Voice input.** `Ctrl+Alt+Space` toggles recording; the transcript goes to
+- [x] **M7 — Voice input.** A second hotkey toggles recording; the transcript goes to
       `planner.run()` on the same path typed text does. Local whisper.cpp only. Adds
       `VoiceShell` + `VoiceSession` (§4a) and a `Transcriber` interface; `/core`'s
       planner, registry, tools, and memory are untouched.
+- [x] **M8 — One hotkey, and a duplicate-run fix.** Collapses M7's two hotkeys into one
+      that opens the bar *and* starts listening (§4a), and fixes a listener leak in
+      `showInput()` that was firing the planner once per abandoned bar opening.
 
 **v0 status: complete.** 87 tests green against `MockShell` (`npm test`) — 63 for v0,
 24 added by M7. The eval
@@ -464,6 +489,46 @@ registers the fallback, and reports it.
 
 Until someone runs it with a mic and a model, M7 is **mechanism-verified, not
 speech-verified** — the same distinction as Anthropic-vs-OpenAI above.
+
+### M8 — the duplicate-run bug, measured
+
+Live use after M7 felt slower, and **typed input was affected too** — the clue that pointed
+at the shared path rather than at voice. Measured with temporary instrumentation
+(`ipcMain.listenerCount` + a concurrency counter around `runInstruction`), driving the real
+app against the real API:
+
+| | before | after |
+|---|---|---|
+| Listeners on `commandbar:submit` after 5 abandoned bar openings | **1 → 5** | **1** (flat) |
+| Planner runs from ONE submit | **6 concurrent** | **1** |
+| LLM calls for that one keystroke | **12** | **2** |
+
+**Root cause:** `showInput()` registered a fresh `commandbar:submit` listener per call and
+removed it only on a submit or an Escape. Hiding the bar any *other* way — clicking away
+(blur) — stranded it. Every stranded listener fired on the next real submit, so one
+keystroke ran the planner once per abandoned opening.
+
+**This was not introduced by M7.** The blur path dates from M0; the M7 diff touches no
+planner or LLM code. What M7 changed was the *usage pattern* — dictating means far more
+hotkey presses and far more clicking between the bar and other windows, which is exactly
+what accumulates stranded listeners. A latent M0 bug that M7 made easy to hit.
+
+It was also a **correctness** bug, not merely a slow one: six duplicate runs meant six
+`action_log` rows and six executions of the chosen tool. Had the instruction routed to
+`sendMessage`, that would have been six confirm dialogs and six Slack posts.
+
+**Fix:** the pending resolver lives on the `WindowsShell` instance with **one** persistent
+listener registered in the constructor, and `hide()` — the single funnel for Escape, blur,
+and auto-hide — always ends the in-flight capture. The leak is no longer expressible.
+`hide()` also notifies `onDismissed`, so a dismissed bar abandons its recording instead of
+transcribing something the user walked away from.
+
+**Baseline latency, unchanged by any of this and NOT a regression:** `gpt-5` is a reasoning
+model, and it dominates every instruction. Measured per run: `chooseTool` **3.4–8.8 s**,
+`complete` **2.5–6.1 s**, end-to-end **6.5–12.7 s**. By contrast the UI is not the problem
+at all — hotkey → bar visible is **5–40 ms** warm (199 ms on the very first cold open). If
+instructions need to feel faster, the lever is the model choice or `reasoning_effort`, not
+the shell.
 
 ---
 

@@ -9,26 +9,20 @@ import { createLLMClient } from "../core/llm/factory.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
 import { SlackSender } from "../core/senders/SlackSender.ts";
-import {
-  UnavailableTranscriber,
-  WhisperCppTranscriber,
-} from "../core/transcribers/WhisperCppTranscriber.ts";
+import { WhisperCppTranscriber } from "../core/transcribers/WhisperCppTranscriber.ts";
 import type { Transcriber } from "../core/types.ts";
 
-// M0: global hotkey opens a command bar that echoes typed text and closes.
-// Kept in one constant so the combo is trivial to change (spec.md §2).
-const HOTKEY = "CommandOrControl+Shift+Space";
-// M7: tap once to start dictating, tap again to stop. Distinct from HOTKEY — this one is
-// a toggle, and both would fight over the same press.
+// ONE hotkey (M8). It opens the command bar AND starts listening, so you decide whether
+// to speak or type *after* the bar is up rather than before. Enter submits either way.
 //
 // A list, not a constant, because global shortcuts are first-come-first-served across the
-// whole OS: Ctrl+Alt+Space is taken by the Microsoft IME on some Windows installs, and a
-// hotkey that silently never fires is the worst possible failure. We take the first combo
-// the OS actually grants and say which one it was. VOICE_HOTKEY in .env overrides the list.
-const VOICE_HOTKEYS = [
+// whole OS, and a hotkey that silently never fires is the worst possible failure — this
+// actually happened here with Ctrl+Alt+Space (the Microsoft IME owns it). We take the
+// first combo the OS grants and say which one it was. HOTKEY in .env overrides the list.
+const HOTKEYS = [
+  "CommandOrControl+Shift+Space",
   "CommandOrControl+Alt+Space",
   "CommandOrControl+Alt+M",
-  "CommandOrControl+Shift+M",
   "Alt+Shift+Space",
 ];
 
@@ -88,11 +82,9 @@ app.whenReady().then(() => {
     callback(permission === "media");
   });
 
-  // The bar hides on blur, EXCEPT while a recording is live — it's unfocused on purpose
-  // then, and hiding would take the recording indicator with it.
-  commandBar.on("blur", () => {
-    if (shell.shouldHideOnBlur()) commandBar?.hide();
-  });
+  // Clicking away dismisses the bar. The shell decides (and cleans up the in-flight
+  // capture); main.ts just forwards the event.
+  commandBar.on("blur", () => shell.handleBlur());
 
   // Compose the core brain. The planner drives the loop; it only knows the interfaces,
   // never electron or the concrete LLM client directly.
@@ -113,42 +105,56 @@ app.whenReady().then(() => {
     await planner.run(instruction); // planner captures context, plans, and shows the result
   };
 
-  shell.registerHotkey(HOTKEY, () => {
-    void (async () => {
-      await runInstruction(await shell.showInput());
-    })();
-  });
+  // M8: voice is only wired up when it can actually work. No transcriber means the bar
+  // never opens the microphone and Enter on an empty bar does nothing — exactly as before
+  // voice existed.
+  const transcriber = createTranscriber();
+  const voice = transcriber ? new VoiceSession(shell, transcriber) : null;
 
-  // M7: the same instruction, spoken. VoiceSession owns the toggle state; it hands the
-  // finished transcript to the exact callback above.
-  const voice = new VoiceSession(shell, createTranscriber(), runInstruction);
-  const voiceHotkey = registerVoiceHotkey(shell, () => void voice.toggle());
-  shell.setVoiceHotkeyLabel(voiceHotkey);
-  shell.onCancelRequested(() => void voice.cancel());
+  // One hotkey: open the bar and start listening at the same moment.
+  const onHotkey = (): void => {
+    void (async () => {
+      const typed = shell.showInput(); // resolves on Enter/Escape with whatever was typed
+      void voice?.begin(); // ...and it is already listening
+
+      const text = await typed;
+      // Nothing typed means you dictated, and Enter was the "stop talking" gesture. If you
+      // typed (or dismissed the bar), the session was already abandoned and answers "".
+      const instruction = text.trim().length > 0 ? text : ((await voice?.finish()) ?? "");
+
+      await runInstruction(instruction);
+    })();
+  };
+  const hotkey = registerHotkey(shell, onHotkey);
+
+  // Typing, or dismissing the bar, silently discards the recording. Both are "I did not
+  // mean to dictate", and neither should ever produce a stray transcript.
+  shell.onTypingStarted(() => void voice?.abandon());
+  shell.onDismissed(() => void voice?.abandon());
 
   console.log(
-    `[main] ready - ${HOTKEY} to type, ${voiceHotkey ?? "(no free hotkey)"} to dictate`,
+    `[main] ready - ${hotkey ?? "(no free hotkey)"} opens the bar${voice ? " and starts listening" : " (voice off)"}`,
   );
 });
 
-// Claim the first voice combo the OS will actually grant. Returns null if every candidate
-// is taken — in which case typed commands still work and the log says why voice doesn't.
-function registerVoiceHotkey(shell: WindowsShell, onTrigger: () => void): string | null {
-  const configured = process.env["VOICE_HOTKEY"];
-  const candidates = configured ? [configured] : VOICE_HOTKEYS;
+// Claim the first combo the OS will actually grant. Returns null if every candidate is
+// taken — the app still runs, and the log says exactly why nothing responds.
+function registerHotkey(shell: WindowsShell, onTrigger: () => void): string | null {
+  const configured = process.env["HOTKEY"];
+  const candidates = configured ? [configured] : HOTKEYS;
 
   for (const combo of candidates) {
     if (shell.registerHotkey(combo, onTrigger)) {
       if (combo !== candidates[0]) {
-        console.log(`[main] voice hotkey fell back to ${combo} - earlier choices were taken`);
+        console.log(`[main] hotkey fell back to ${combo} - earlier choices were taken`);
       }
       return combo;
     }
   }
 
   console.error(
-    `[main] voice hotkey unavailable - all of ${candidates.join(", ")} are already in use. ` +
-      `Set VOICE_HOTKEY in .env to a free combo.`,
+    `[main] no hotkey available - all of ${candidates.join(", ")} are already in use. ` +
+      `Set HOTKEY in .env to a free combo.`,
   );
   return null;
 }
@@ -156,12 +162,12 @@ function registerVoiceHotkey(shell: WindowsShell, onTrigger: () => void): string
 // Secrets and paths are read HERE, in composition — /core never touches process.env.
 // Missing config is not fatal: the app still runs typed commands, and the first voice
 // attempt explains exactly what to set.
-function createTranscriber(): Transcriber {
+function createTranscriber(): Transcriber | null {
   const exePath = process.env["WHISPER_EXE_PATH"];
   const modelPath = process.env["WHISPER_MODEL_PATH"];
   if (!exePath || !modelPath) {
     console.log("[main] voice disabled - WHISPER_EXE_PATH / WHISPER_MODEL_PATH not set");
-    return new UnavailableTranscriber();
+    return null;
   }
   return new WhisperCppTranscriber({
     exePath,

@@ -104,18 +104,6 @@ export class WhisperCppTranscriber implements Transcriber {
   }
 }
 
-// The safe default when voice isn't configured: it never pretends to transcribe, and the
-// message says exactly which two settings are missing. Mirrors UnavailableSender.
-export class UnavailableTranscriber implements Transcriber {
-  transcribe(_clip: AudioClip): Promise<string> {
-    return Promise.reject(
-      new Error(
-        "Voice isn't set up — set WHISPER_EXE_PATH and WHISPER_MODEL_PATH in .env (see README).",
-      ),
-    );
-  }
-}
-
 // whisper annotates non-speech as bracketed tokens ([BLANK_AUDIO], [MUSIC], (silence)).
 // They are not something the user said, so they must not reach the planner as an
 // instruction — strip them and let the empty result mean "nothing was heard".

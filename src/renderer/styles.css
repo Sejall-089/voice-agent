@@ -67,6 +67,10 @@ body {
   color: #ff6b6b;
 }
 
+.voice-indicator.stopped {
+  color: #9ad0ff;
+}
+
 .voice-indicator.transcribing {
   color: #ffd479;
 }

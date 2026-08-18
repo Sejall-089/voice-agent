@@ -59,25 +59,26 @@ cp .env.example .env      # then fill in the keys below
 npm run dev               # press Ctrl+Shift+Space anywhere
 ```
 
-**Two hotkeys, one destination.**
+**One hotkey: `Ctrl+Shift+Space`.** It opens the command bar *and* starts listening, so you
+decide whether to speak or type after the bar is up.
 
-| Key | Does |
+| You do | It does |
 |---|---|
-| **Ctrl+Shift+Space** | Opens the command bar. Type the instruction, Enter to run. |
-| **Ctrl+Alt+Space** | **Tap once to start dictating, tap again to stop.** Same key both ways. |
+| **Speak**, then **Enter** | Stops, transcribes, runs it |
+| **Start typing** | Silently cancels the recording — no stray transcript |
+| Type, then **Enter** | Runs the typed text |
+| **Esc**, or click away | Discards everything. Nothing runs |
+| Wait **90 s** | Mic released, audio kept — **Enter** still runs it |
 
-Global shortcuts are first-come-first-served across the whole OS, and `Ctrl+Alt+Space` is taken on
-some Windows installs (the Microsoft IME claims it). So the app tries `Ctrl+Alt+Space` →
-`Ctrl+Alt+M` → `Ctrl+Shift+M` → `Alt+Shift+Space` and uses the first the OS grants, printing which
-one won on startup — the recording indicator names the real key too. Pin your own with
-`VOICE_HOTKEY` in `.env`.
+**Workflow:** select text → **Ctrl+C** → **Ctrl+Shift+Space** → speak or type.
 
-**Workflow:** select text → **Ctrl+C** → hotkey → type *or* speak your instruction.
+Global shortcuts are first-come-first-served across the whole OS (`Ctrl+Alt+Space` is claimed by
+the Microsoft IME on some installs), so the app takes the first free combo from
+`Ctrl+Shift+Space` → `Ctrl+Alt+Space` → `Ctrl+Alt+M` → `Alt+Shift+Space` and prints which one won.
+Pin your own with `HOTKEY` in `.env`.
 
-While recording, the bar shows a pulsing red **● Recording…** so a toggle you left running is
-impossible to miss; **Esc** discards the take, and it auto-stops after **90 seconds** regardless.
-The transcript is handed to the planner on exactly the path typed text takes — same registry
-check, same memory resolution, same confirm gate.
+Whichever way you produce it, the instruction goes to the planner on the same path — same registry
+check, same memory resolution, same confirm gate. Nothing ever runs without your **Enter**.
 
 **`.env` keys**
 
@@ -87,8 +88,8 @@ check, same memory resolution, same confirm gate.
 | `ANTHROPIC_API_KEY` | Only if `LLM_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` | Only if `LLM_PROVIDER=openai` |
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
-| `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice only. Optional — leave them blank and typed commands work exactly as before; the first voice attempt then tells you what to set. |
-| `VOICE_HOTKEY` | Optional. Pins the dictation combo instead of letting the app pick the first free one. |
+| `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice only. Optional — leave them blank and the bar never opens the microphone; typed commands work exactly as before. |
+| `HOTKEY` | Optional. Pins the combo instead of letting the app pick the first free one. |
 
 ### Setting up voice (optional)
 
@@ -138,7 +139,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (87 tests): the planner, each tool, the memory engine, the confirm gate,
+`npm test` runs everything (92 tests): the planner, each tool, the memory engine, the confirm gate,
 the LLM-provider factory, the voice state machine, and both eval suites. All headless against
 `MockShell` — **no API key, no network, no real Slack, no microphone, no whisper model.**
 
@@ -146,18 +147,34 @@ the LLM-provider factory, the voice state machine, and both eval suites. All hea
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (87 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (92 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
 
-**Voice (M7) — mechanism verified, speech not.** Every toggle transition is asserted directly,
-including the decided edge cases: a press *while transcribing* is ignored (it would race the
-transcript in flight), the 90 s cap runs the *same* stop path rather than discarding the take, and
-every failure — blocked mic, whisper crash, blank transcript, sub-300 ms clip — returns to `idle`
-with the hotkey still live. The load-bearing test is that a dictated instruction produces an
-`action_log` row **indistinguishable from a typed one**, and that a dictated irreversible action
-still stops at the confirm gate.
+**Voice — mechanism verified, speech not.** Every state transition is asserted directly,
+including the decided edge cases: typing cancels the recording **silently** (no message, no stray
+transcript), the 90 s cap releases the mic without transcribing while `Enter` still runs what you
+said, a second `Enter` during transcription never starts a second run, and every failure — blocked
+mic, whisper crash, blank transcript, sub-300 ms clip — returns to `idle` with the hotkey still
+live. The load-bearing test is that a dictated instruction produces an `action_log` row
+**indistinguishable from a typed one**, and that a dictated irreversible action still stops at the
+confirm gate.
+
+**One measured bug, found and fixed.** Live use felt slow, and typed input was affected too —
+which pointed at the shared path, not at voice. `showInput()` was registering a fresh IPC listener
+per call and only removing it on submit or Escape, so clicking the bar away stranded one. Measured:
+five abandoned openings left five stranded listeners, and the next single keystroke fired **six
+concurrent planner runs — twelve LLM calls, six `action_log` rows, and six executions of the
+chosen tool.** (Had it routed to `sendMessage`: six confirm dialogs, six Slack posts.) The resolver
+now lives on the shell instance behind one persistent listener, and every way of hiding the bar
+ends the capture. Re-measured after the fix: **one run, flat listener count.** Details and the
+before/after table are in [`spec.md`](spec.md).
+
+**Baseline latency is the model, not the app.** Measured end-to-end: `chooseTool` 3.4–8.8 s,
+`complete` 2.5–6.1 s, whole instruction 6.5–12.7 s — while hotkey → bar visible is 5–40 ms. `gpt-5`
+is a reasoning model and dominates every run; if instructions need to feel faster, that is the
+lever, not the shell.
 
 **Not verified: anything requiring a real microphone or model** — transcription accuracy and CPU
 latency, Windows 11 mic permission, the 48 kHz→16 kHz resample against a real device, and whether

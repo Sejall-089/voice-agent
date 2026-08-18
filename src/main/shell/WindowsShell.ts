@@ -25,18 +25,23 @@ export class WindowsShell implements OSShell, VoiceShell {
   // though it isn't focused, or the recording indicator vanishes the instant it appears.
   private voiceBusy = false;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+  // The single in-flight showInput(), if any. Held on the instance rather than captured by
+  // per-call IPC listeners: listeners registered inside showInput() could only ever be
+  // removed by a submit or an Escape, so any OTHER way of hiding the bar (a blur, an
+  // auto-hide) stranded them. One stranded listener = one extra planner run, and therefore
+  // one extra LLM call, on the next submit. Measured at 6 concurrent runs from a single
+  // keystroke. With one resolver on the instance the leak cannot be expressed.
+  private pendingInput: ((text: string) => void) | null = null;
+  // Fired when the bar goes away without a submit (Escape, blur, auto-hide) so voice can
+  // discard its recording instead of transcribing something the user walked away from.
+  private onDismiss: (() => void) | null = null;
 
   constructor(private readonly window: BrowserWindow) {
-    // Renderer asks to close the bar (Escape) → hide it. Persistent for the app's life.
+    // Both listeners are registered ONCE, for the app's lifetime.
     ipcMain.on("commandbar:close", () => this.hide());
-    // The bar hides on blur. While voice is live it is deliberately unfocused, so that
-    // handler has to be suppressed — main.ts registers blur AFTER us, so we expose the
-    // decision as a method instead of racing it.
-  }
-
-  // main.ts asks this before acting on a blur.
-  shouldHideOnBlur(): boolean {
-    return !this.voiceBusy;
+    ipcMain.on("commandbar:submit", (_event, text: unknown) => {
+      this.resolveInput(typeof text === "string" ? text : "");
+    });
   }
 
   registerHotkey(combo: string, onTrigger: () => void): boolean {
@@ -51,26 +56,34 @@ export class WindowsShell implements OSShell, VoiceShell {
   // Resolves with "" if the user dismisses the bar (Escape) without submitting.
   showInput(): Promise<string> {
     this.cancelAutoHide();
+    // A capture that never resolved must not outlive this one.
+    this.resolveInput("");
     this.window.show();
     this.window.focus();
     this.window.webContents.send("commandbar:show");
 
     return new Promise<string>((resolve) => {
-      const cleanup = (): void => {
-        ipcMain.removeListener("commandbar:submit", onSubmit);
-        ipcMain.removeListener("commandbar:close", onClose);
-      };
-      const onSubmit = (_event: Electron.IpcMainEvent, text: unknown): void => {
-        cleanup();
-        resolve(typeof text === "string" ? text : "");
-      };
-      const onClose = (): void => {
-        cleanup();
-        resolve("");
-      };
-      ipcMain.on("commandbar:submit", onSubmit);
-      ipcMain.on("commandbar:close", onClose);
+      this.pendingInput = resolve;
     });
+  }
+
+  // Ends the in-flight capture, if there is one. Safe to call any number of times.
+  private resolveInput(text: string): void {
+    const resolve = this.pendingInput;
+    this.pendingInput = null;
+    resolve?.(text);
+  }
+
+  // Blur, handled here rather than in main.ts so the "am I recording?" rule and the
+  // dismissal bookkeeping live together.
+  handleBlur(): void {
+    if (this.voiceBusy) return; // recording: unfocused on purpose, must stay visible
+    this.hide();
+  }
+
+  // main.ts routes this to VoiceSession.abandon().
+  onDismissed(handler: () => void): void {
+    this.onDismiss = handler;
   }
 
   showResult(text: string): void {
@@ -132,19 +145,10 @@ export class WindowsShell implements OSShell, VoiceShell {
     }
   }
 
-  // The renderer asked to discard the recording (Escape). main.ts routes this to
-  // VoiceSession.cancel(); the shell only carries the signal.
-  onCancelRequested(handler: () => void): void {
-    ipcMain.on("voice:cancelled", handler);
-  }
-
-  // Tell the bar which combo actually got registered, so the "…to stop" hint on the
-  // recording indicator names the real key rather than the one we hoped for.
-  setVoiceHotkeyLabel(combo: string | null): void {
-    const send = (): void => this.window.webContents.send("voice:hotkey", combo);
-    // The renderer may not have loaded yet at startup, so send on both events.
-    this.window.webContents.on("did-finish-load", send);
-    if (!this.window.webContents.isLoading()) send();
+  // The user started typing instead of speaking. main.ts routes this to
+  // VoiceSession.abandon(); the shell only carries the signal.
+  onTypingStarted(handler: () => void): void {
+    ipcMain.on("commandbar:typing", handler);
   }
 
   // One-shot request/response over IPC, with a timeout so a dead renderer can't hang the
@@ -189,6 +193,10 @@ export class WindowsShell implements OSShell, VoiceShell {
 
   private hide(): void {
     this.cancelAutoHide();
+    // Dismissing is not submitting: tell voice to throw its recording away BEFORE the
+    // capture resolves, so the awaiting caller already sees an abandoned session.
+    if (this.pendingInput !== null) this.onDismiss?.();
+    this.resolveInput("");
     this.window.webContents.send("commandbar:reset");
     this.window.hide();
   }

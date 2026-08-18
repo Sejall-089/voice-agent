@@ -64,15 +64,9 @@ const api = {
   sendAudio(clip: { wav: Uint8Array; durationMs: number } | null, error?: string): void {
     ipcRenderer.send("voice:audio", clip, error);
   },
-  // main → renderer: which combo the OS actually granted, for the "…to stop" hint.
-  onVoiceHotkey(callback: (combo: string | null) => void): () => void {
-    const listener = (_e: IpcRendererEvent, combo: string | null): void => callback(combo);
-    ipcRenderer.on("voice:hotkey", listener);
-    return () => ipcRenderer.removeListener("voice:hotkey", listener);
-  },
-  // renderer → main: Escape during recording asked to discard it.
-  cancelVoice(): void {
-    ipcRenderer.send("voice:cancelled");
+  // renderer → main: you started typing, so the recording should quietly go away.
+  notifyTyping(): void {
+    ipcRenderer.send("commandbar:typing");
   },
 };
 
