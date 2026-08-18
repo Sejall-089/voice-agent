@@ -127,7 +127,7 @@ app.whenReady().then(() => {
   shell.onCancelRequested(() => void voice.cancel());
 
   console.log(
-    `[main] ready — ${HOTKEY} to type, ${voiceHotkey ?? "(no free hotkey)"} to dictate`,
+    `[main] ready - ${HOTKEY} to type, ${voiceHotkey ?? "(no free hotkey)"} to dictate`,
   );
 });
 
@@ -140,14 +140,14 @@ function registerVoiceHotkey(shell: WindowsShell, onTrigger: () => void): string
   for (const combo of candidates) {
     if (shell.registerHotkey(combo, onTrigger)) {
       if (combo !== candidates[0]) {
-        console.log(`[main] voice hotkey fell back to ${combo} — earlier choices were taken`);
+        console.log(`[main] voice hotkey fell back to ${combo} - earlier choices were taken`);
       }
       return combo;
     }
   }
 
   console.error(
-    `[main] voice hotkey unavailable — all of ${candidates.join(", ")} are already in use. ` +
+    `[main] voice hotkey unavailable - all of ${candidates.join(", ")} are already in use. ` +
       `Set VOICE_HOTKEY in .env to a free combo.`,
   );
   return null;
@@ -160,7 +160,7 @@ function createTranscriber(): Transcriber {
   const exePath = process.env["WHISPER_EXE_PATH"];
   const modelPath = process.env["WHISPER_MODEL_PATH"];
   if (!exePath || !modelPath) {
-    console.log("[main] voice disabled — WHISPER_EXE_PATH / WHISPER_MODEL_PATH not set");
+    console.log("[main] voice disabled - WHISPER_EXE_PATH / WHISPER_MODEL_PATH not set");
     return new UnavailableTranscriber();
   }
   return new WhisperCppTranscriber({
