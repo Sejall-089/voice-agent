@@ -65,8 +65,14 @@ npm run dev               # press Ctrl+Shift+Space anywhere
 
 | Key | Needed for |
 |---|---|
-| `OPENAI_API_KEY` | Everything — tool choice, summarizing, rewriting, formatting |
+| `LLM_PROVIDER` | Which client `createLLMClient()` builds — `anthropic` or `openai`. Required; an unset or unrecognized value fails loudly at startup rather than guessing. |
+| `ANTHROPIC_API_KEY` | Only if `LLM_PROVIDER=anthropic` |
+| `OPENAI_API_KEY` | Only if `LLM_PROVIDER=openai` |
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
+
+The provider lives behind the same `LLMClient` interface either way (`src/core/llm/` —
+`anthropic.ts` / `openai.ts` / shared `prompt.ts` / `factory.ts`), so switching is a one-line
+`.env` change, not a code change.
 
 > **Native-module note.** `better-sqlite3` needs a different binary for Node (tests) than for
 > Electron (the app). The `pretest` / `predev` scripts rebuild it automatically, so switching
@@ -93,28 +99,37 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (57 tests): the planner, each tool, the memory engine, the confirm gate,
-and both eval suites. All headless against `MockShell` — **no API key, no network, no real Slack.**
+`npm test` runs everything (63 tests): the planner, each tool, the memory engine, the confirm gate,
+the LLM-provider factory, and both eval suites. All headless against `MockShell` — **no API key,
+no network, no real Slack.**
 
 ---
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (57 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (63 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
-failure-after-confirm, and graceful refusal.
+failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
 
-**Not verified — the one open item:** **no live run has ever happened.** No API key has been
-available, so every LLM call and the Slack POST are proved only against fakes. Specifically:
+**Live-verified: OpenAI / `gpt-5`.** A real run surfaced a genuine gap and it's now fixed: a
+correction that names its subject ("no, my dashboard is actually `<url>`") always routed to
+`remember` correctly, but a *bare* correction ("no I meant this `<url>`") was inconsistent —
+`chooseTool` had no memory of the previous instruction, so the model sometimes declined,
+sometimes mis-fired `openTarget`. Fixed by giving the planner one turn of state: `ActionLog.getLast()`
+is now passed into every `chooseTool` call, scoped strictly to resolving a correction/pronoun in
+the current instruction (`src/core/planner.ts`, `src/core/llm/prompt.ts`). Re-verified 3/3
+consistent after the fix. Slack send (confirm gate → format → real webhook POST) also confirmed
+working live.
 
-- Whether the model reliably **routes a correction** ("no, I meant…") to `remember` rather than
-  retrying the last action rests on *its judgment*, not on deterministic code. The tests prove the
-  mechanism works once `remember` is chosen — not that it gets chosen.
-- Prompt phrasing, summary/rewrite quality, and the real Slack HTTP call are all unexercised.
+**Not yet live-tested: Anthropic / `claude-sonnet-4-6`.** It's implemented against the exact same
+`LLMClient` interface and typechecks, but nobody has run it against a real Anthropic key yet — flip
+`LLM_PROVIDER=anthropic` in `.env` to try it. Until that happens, treat it as
+implemented-but-unverified, not proven.
 
-If correction-routing ever misfires, the fix belongs in the **`remember` tool's description**
-(`src/core/tools/remember.ts`) — that's where the prompt lives, deliberately — **not** in the planner.
+If correction-routing ever misfires again, the fix belongs in the **`remember` tool's description**
+(`src/core/tools/remember.ts`) or the previous-turn framing in `src/core/llm/prompt.ts` — **not**
+in the planner's control flow.
 
 ---
 
