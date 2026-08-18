@@ -36,8 +36,16 @@ Fuzzy human sentence  →  exact function call.
 - Confirmation step before any irreversible action.
 - An action log that also records "no tool matched" misses.
 
+**Added after v0 (M7):**
+- Voice input: a second global hotkey dictates the instruction instead of typing it.
+  Local transcription only (whisper.cpp) — no cloud STT. See §4a and §9's M7.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
-- Voice / speech-to-text.
+- ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
+  live-verified. It was out of v0 deliberately — voice is a second way to produce the
+  instruction string, and it was only worth building once the string reliably produced
+  the right action. It changes nothing downstream: the planner, registry, tools, and
+  memory are untouched by M7.
 - GUI computer-use / screenshot-driven automation.
 - macOS or Linux shells (architect for them via the interface, implement Windows only).
 - More than one external connector.
@@ -60,7 +68,8 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | Planner LLM        | **Selectable via `LLM_PROVIDER`**        | `anthropic` → `@anthropic-ai/sdk`, `claude-sonnet-4-6`. `openai` → `openai`, `gpt-5`. Tool-calling either way; see `src/core/llm/factory.ts`. |
 | External action    | **Slack Incoming Webhook** (via `fetch`) | The only connector in v0. |
 | Active window      | `active-win` (optional)                  | If it complicates the build, skip; context still works from clipboard. |
-| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`. |
+| Speech to text (M7)| **whisper.cpp**, local, via a spawned `whisper-cli.exe` | No cloud STT, no API key, no new npm dependency. Audio is captured in the renderer (Web Audio → 16 kHz mono WAV); `src/core/transcribers/`. |
+| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`. |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
 interface (§4) so a Mac/Linux shell can be added later without touching the core.
@@ -113,7 +122,7 @@ export type LocalAction =
   | { kind: "notify"; payload: string };
 
 export interface OSShell {
-  registerHotkey(combo: string, onTrigger: () => void): void;
+  registerHotkey(combo: string, onTrigger: () => void): boolean;  // false = combo taken
   getContext(): Promise<CapturedContext>;
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }>;
   showInput(): Promise<string>;                 // opens command bar, resolves with typed text
@@ -129,6 +138,67 @@ Electron. Wire the real `WindowsShell` last.
 v0 selection capture is intentionally simple: `getContext()` reads the current
 system clipboard as `selectedText`. The user workflow is "select → copy (Ctrl+C) →
 hotkey". Simulated-copy (injecting Ctrl+C) is a later refinement, not v0.
+
+---
+
+## 4a. Voice input (M7) — a parallel contract, not a change to OSShell
+
+`OSShell` above is the contract **`/core` depends on**, and the core brain has no
+business knowing a microphone exists. Voice is main-process wiring, so it gets its own
+interface next door in `src/main/shell/VoiceShell.ts`. `WindowsShell` implements both;
+`MockShell` implements both; a future Mac shell would implement both.
+
+```ts
+export type VoiceState = "idle" | "recording" | "transcribing";
+
+export interface VoiceShell {
+  startRecording(): Promise<void>;
+  stopRecording(): Promise<AudioClip>;   // resolves with 16 kHz mono WAV bytes
+  cancelRecording(): Promise<void>;      // discard — no transcript, no action
+  showVoiceState(state: VoiceState, detail?: string): void;
+  showResult(text: string): void;        // already on OSShell
+}
+
+// core/types.ts, beside LLMClient and MessageSender
+export interface Transcriber {
+  transcribe(clip: AudioClip): Promise<string>;
+}
+```
+
+**The hotkey is negotiated, not assumed.** `registerHotkey()` returns a boolean (an OS
+can refuse a combo another app already owns), and `main.ts` claims the first free combo
+from an ordered list — `Ctrl+Alt+Space`, then `Ctrl+Alt+M`, `Ctrl+Shift+M`,
+`Alt+Shift+Space` — logging which one won and telling the renderer, so the recording
+indicator names the real key. `VOICE_HOTKEY` in `.env` overrides the list. This is not
+speculative: `Ctrl+Alt+Space` was already taken on the first machine M7 ran on, and a
+hotkey that silently never fires is indistinguishable from a broken app.
+
+**The state machine (`src/main/shell/VoiceSession.ts`).** One hotkey both starts and
+stops, so *state* decides what a press means — never timing, never how long the key was
+held:
+
+| State | a press does | why |
+|---|---|---|
+| `idle` | start recording, arm the 90 s cap | the press that starts |
+| `recording` | stop → transcribe → hand the transcript on | the same press stops |
+| `transcribing` | **nothing** | whisper is mid-run; a new capture would race the transcript already in flight |
+
+- **90-second cap.** A forgotten recording auto-stops — down the *identical* stop path,
+  so it still transcribes and still acts.
+- **Every failure returns to `idle`.** Blocked mic, whisper crash, blank transcript,
+  sub-300 ms clip: all land back at `idle` with an honest message. There is no path that
+  leaves the hotkey dead.
+- The state flips to `recording` **synchronously before** awaiting the microphone, so a
+  double-tap during mic warm-up reads as start-then-stop, never two captures.
+- `VoiceSession` imports no electron and takes injected dependencies, so the whole toggle
+  is tested headless — exactly like the planner.
+
+**The one rule this milestone must not break:** voice produces a *string*, nothing more.
+`VoiceSession` never calls the planner — it hands the transcript to the same
+`runInstruction` callback `showInput()` feeds (`src/main/main.ts`), so there is exactly
+one planner call site and `/core` is unchanged by M7. Dictated instructions pass the same
+registry check, the same resolution, and the same confirm gate; the planner cannot tell
+where the string came from.
 
 ---
 
@@ -310,7 +380,15 @@ Work strictly top to bottom. Build against `MockShell` until M0's real hotkey st
 Definition of done for v0: M0–M6 complete, all tests green against MockShell, the
 seven demo tasks work on Windows, and misses are logged.
 
-**v0 status: complete.** 63 tests green against `MockShell` (`npm test`). The eval
+Post-v0:
+
+- [x] **M7 — Voice input.** `Ctrl+Alt+Space` toggles recording; the transcript goes to
+      `planner.run()` on the same path typed text does. Local whisper.cpp only. Adds
+      `VoiceShell` + `VoiceSession` (§4a) and a `Transcriber` interface; `/core`'s
+      planner, registry, tools, and memory are untouched.
+
+**v0 status: complete.** 87 tests green against `MockShell` (`npm test`) — 63 for v0,
+24 added by M7. The eval
 harness (`npm run eval`, `tests/eval/`) runs the memory story as one continuous
 scenario — cold memory refuses → teaching fixes it → a correction versions it →
 recall reveals it — plus the seven demo tasks and the closed-world refusal.
@@ -355,6 +433,37 @@ or `OpenAILLMClient` at startup (`src/core/llm/factory.ts`), both behind the sam
 been live-tested at all** — it's implemented against the same interface and typechecks,
 but its actual tool-calling behavior against a real key (including the correction-routing
 case above) is unverified until someone runs it live.
+
+### M7 voice — what is proved, and what still needs a microphone
+
+**Proved deterministically (24 tests, no audio / no model / no mic / no electron):** every
+toggle transition including the ignored press while transcribing; the 90 s cap running the
+same stop path; the cap being cleared by a manual stop; blank transcript, sub-300 ms clip,
+whisper failure and blocked-mic all returning to `idle` with the hotkey still live; cancel
+discarding a take; and — the load-bearing one — a transcript reaching the planner and
+producing an `action_log` row **indistinguishable from a typed run**, including a dictated
+irreversible action still passing the confirm gate. Plus the WAV encoder/downsampler
+against whisper's 16 kHz mono 16-bit contract.
+
+**NOT verified — needs a real microphone, a downloaded whisper.cpp binary, and a model
+file, none of which exist in this environment:**
+
+- whisper.cpp transcription accuracy and CPU latency (`ggml-base.en` vs `small.en`).
+- Microphone permission on Windows 11 (Settings → Privacy → Microphone must allow desktop
+  apps). The renderer names this failure explicitly, but the real dialog/rejection path is
+  untested.
+- The 48 kHz → 16 kHz downsample against a real device: the encoder is unit-tested, but
+  "does whisper transcribe *this* WAV well" is empirical.
+- Whether tap-to-toggle *feels* right — including whether 90 s is the right cap, and
+  whether the indicator is noticeable on an unfocused window.
+**Found live, and fixed:** `Ctrl+Alt+Space` was **already in use** on the first Windows
+machine this ran on — `globalShortcut.register` returned false and the voice hotkey did
+nothing at all. That's what prompted the negotiated-hotkey design above; the app now
+falls back to `Ctrl+Alt+M` there and says so on startup. Verified live: the app boots,
+registers the fallback, and reports it.
+
+Until someone runs it with a mic and a model, M7 is **mechanism-verified, not
+speech-verified** — the same distinction as Anthropic-vs-OpenAI above.
 
 ---
 

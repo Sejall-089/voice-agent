@@ -1,7 +1,7 @@
 # Voice-Action Agent — v0
 
-A desktop assistant that turns a short typed instruction, plus what's on your screen, plus what it
-remembers about you, into **exactly one concrete action**.
+A desktop assistant that turns a short instruction — typed, or **spoken** — plus what's on your
+screen, plus what it remembers about you, into **exactly one concrete action**.
 
 ```
 "send these notes to the team"   →   sendMessage(channel: "#design-team", text: "...")
@@ -59,7 +59,25 @@ cp .env.example .env      # then fill in the keys below
 npm run dev               # press Ctrl+Shift+Space anywhere
 ```
 
-**Workflow:** select text → **Ctrl+C** → **Ctrl+Shift+Space** → type your instruction.
+**Two hotkeys, one destination.**
+
+| Key | Does |
+|---|---|
+| **Ctrl+Shift+Space** | Opens the command bar. Type the instruction, Enter to run. |
+| **Ctrl+Alt+Space** | **Tap once to start dictating, tap again to stop.** Same key both ways. |
+
+Global shortcuts are first-come-first-served across the whole OS, and `Ctrl+Alt+Space` is taken on
+some Windows installs (the Microsoft IME claims it). So the app tries `Ctrl+Alt+Space` →
+`Ctrl+Alt+M` → `Ctrl+Shift+M` → `Alt+Shift+Space` and uses the first the OS grants, printing which
+one won on startup — the recording indicator names the real key too. Pin your own with
+`VOICE_HOTKEY` in `.env`.
+
+**Workflow:** select text → **Ctrl+C** → hotkey → type *or* speak your instruction.
+
+While recording, the bar shows a pulsing red **● Recording…** so a toggle you left running is
+impossible to miss; **Esc** discards the take, and it auto-stops after **90 seconds** regardless.
+The transcript is handed to the planner on exactly the path typed text takes — same registry
+check, same memory resolution, same confirm gate.
 
 **`.env` keys**
 
@@ -69,6 +87,25 @@ npm run dev               # press Ctrl+Shift+Space anywhere
 | `ANTHROPIC_API_KEY` | Only if `LLM_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` | Only if `LLM_PROVIDER=openai` |
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
+| `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice only. Optional — leave them blank and typed commands work exactly as before; the first voice attempt then tells you what to set. |
+| `VOICE_HOTKEY` | Optional. Pins the dictation combo instead of letting the app pick the first free one. |
+
+### Setting up voice (optional)
+
+Transcription is **local** — audio never leaves the machine and there's no STT API key.
+
+1. **Binary** — download a prebuilt Windows release from
+   [whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases), unzip it, and point
+   `WHISPER_EXE_PATH` at `whisper-cli.exe`.
+2. **Model** — download a ggml model (`ggml-base.en.bin` is a good starting point) from
+   [the model repo](https://huggingface.co/ggerganov/whisper.cpp/tree/main) and point
+   `WHISPER_MODEL_PATH` at it.
+3. **Microphone permission** — Windows Settings → Privacy & security → Microphone → allow
+   desktop apps.
+
+Both paths absolute. Audio is captured in the renderer via Web Audio, downsampled to the 16 kHz
+mono 16-bit WAV whisper.cpp expects, and passed to the binary as a temp file that's deleted
+immediately after.
 
 The provider lives behind the same `LLMClient` interface either way (`src/core/llm/` —
 `anthropic.ts` / `openai.ts` / shared `prompt.ts` / `factory.ts`), so switching is a one-line
@@ -99,18 +136,30 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (63 tests): the planner, each tool, the memory engine, the confirm gate,
-the LLM-provider factory, and both eval suites. All headless against `MockShell` — **no API key,
-no network, no real Slack.**
+`npm test` runs everything (87 tests): the planner, each tool, the memory engine, the confirm gate,
+the LLM-provider factory, the voice state machine, and both eval suites. All headless against
+`MockShell` — **no API key, no network, no real Slack, no microphone, no whisper model.**
 
 ---
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (63 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (87 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
+
+**Voice (M7) — mechanism verified, speech not.** Every toggle transition is asserted directly,
+including the decided edge cases: a press *while transcribing* is ignored (it would race the
+transcript in flight), the 90 s cap runs the *same* stop path rather than discarding the take, and
+every failure — blocked mic, whisper crash, blank transcript, sub-300 ms clip — returns to `idle`
+with the hotkey still live. The load-bearing test is that a dictated instruction produces an
+`action_log` row **indistinguishable from a typed one**, and that a dictated irreversible action
+still stops at the confirm gate.
+
+**Not verified: anything requiring a real microphone or model** — transcription accuracy and CPU
+latency, Windows 11 mic permission, the 48 kHz→16 kHz resample against a real device, and whether
+tap-to-toggle *feels* right in practice. The fakes prove the machinery, not the speech.
 
 **Live-verified: OpenAI / `gpt-5`.** A real run surfaced a genuine gap and it's now fixed: a
 correction that names its subject ("no, my dashboard is actually `<url>`") always routed to
@@ -135,6 +184,11 @@ in the planner's control flow.
 
 ## Scope
 
-v0 is deliberately small: one instruction → one plan → one action. **Not** in v0: voice,
-computer-use, multi-step agent loops, more than one external connector, macOS/Linux. Those are
-architected for (behind `OSShell` and the tool registry) but not built.
+v0 is deliberately small: one instruction → one plan → one action. **Voice was added in M7**, after
+v0 was complete — deliberately in that order, because voice is only a second way to produce the
+instruction string, and it was worth building only once the string reliably produced the right
+action. It changed nothing in `/core`.
+
+**Still not built:** computer-use, multi-step agent loops, more than one external connector,
+macOS/Linux. Those are architected for (behind `OSShell` / `VoiceShell` and the tool registry) but
+not built.

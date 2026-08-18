@@ -49,6 +49,63 @@ body {
   color: rgba(244, 244, 246, 0.4);
 }
 
+/* The recording cue. Deliberately loud: a toggle you forget you left on is the failure
+   mode this whole indicator exists to prevent. */
+.voice-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.voice-indicator.recording {
+  color: #ff6b6b;
+}
+
+.voice-indicator.transcribing {
+  color: #ffd479;
+}
+
+.voice-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: voice-pulse 1.1s ease-in-out infinite;
+}
+
+.voice-hint {
+  color: rgba(244, 244, 246, 0.45);
+  font-weight: 400;
+  font-size: 13px;
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+
+.voice-heard {
+  margin-top: 10px;
+  color: rgba(244, 244, 246, 0.6);
+  font-size: 14px;
+  font-style: italic;
+  word-break: break-word;
+  -webkit-app-region: no-drag;
+}
+
 .command-echo {
   flex: 1 1 auto;
   min-height: 0;

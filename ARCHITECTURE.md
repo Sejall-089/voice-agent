@@ -27,26 +27,32 @@ shared and portable. The LLM and Slack are external services the app talks to.
 
 ```mermaid
 flowchart TB
-    User(["You — hotkey + typed command"])
+    User(["You — hotkey + typed or spoken command"])
 
     subgraph App["Your app"]
         direction TB
-        Shell["OS shell (thin, per-OS)<br/>hotkey · capture · run actions · UI"]
+        Shell["OS shell (thin, per-OS)<br/>hotkeys · capture · run actions · UI<br/>+ voice toggle (M7)"]
         Core["Core (shared brain)<br/>planner + tool registry"]
         Memory["Memory engine<br/>SQLite: facts · confidence · versions"]
         Shell --> Core
         Core <--> Memory
     end
 
+    Whisper["whisper.cpp (local)<br/>speech → text · nothing leaves the machine"]
     LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
     OS["OS &amp; target apps<br/>browser, clipboard"]
 
     User --> Shell
     Shell <--> OS
+    Shell <--> Whisper
     Core <--> LLM
     Core --> Slack
 ```
+
+**Where voice sits:** entirely in the shell. It converts speech into the same string the
+command bar would have returned, and hands it to the same call site. The core never
+learns it exists — which is why M7 changed no file in `/core` except adding one interface.
 
 **Read it as:** you sit at the top; the stacked boxes are *your* app; the boxes on
 the right are things the app uses but does not own. The shell is the only part that
@@ -132,6 +138,62 @@ that sticks — is the thing a plain prompt can't fake, and it's the flagship de
 
 ---
 
+## 4a. Voice input (M7) — one hotkey, explicit state
+
+Dictation is a *second way to produce the instruction string*, nothing more. One hotkey
+(`Ctrl+Alt+Space`, or the first free fallback — see spec §4a) both starts and stops, so
+the current **state** decides what a press means — never timing, never how long the key
+was held.
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> recording: hotkey
+    recording --> transcribing: hotkey (same key)
+    recording --> transcribing: 90s cap
+    recording --> idle: Esc (discard)
+    transcribing --> idle: transcript → planner
+    transcribing --> transcribing: hotkey ignored
+    transcribing --> idle: blank / failure → honest message
+```
+
+Three properties are what make the toggle safe rather than fiddly:
+
+- **A press while `transcribing` is ignored.** Starting a fresh capture there would race
+  the transcript already in flight, and the user could not tell which one produced the
+  action. The bar reads `Transcribing…`, so the no-op is visible rather than mysterious.
+- **The 90-second cap runs the *same* stop path**, so a recording you walked away from
+  still transcribes and still acts — it just stops deciding for itself when.
+- **Every failure returns to `idle`.** Blocked microphone, whisper crash, blank
+  transcript, sub-300 ms clip: all land back at `idle` with an honest message, so the
+  hotkey is never left dead.
+
+```mermaid
+sequenceDiagram
+    actor You
+    participant Session as VoiceSession
+    participant Shell as WindowsShell + renderer
+    participant Whisper as whisper.cpp (local)
+    participant Planner
+
+    You->>Session: Ctrl+Alt+Space
+    Session->>Shell: startRecording() · showVoiceState("recording")
+    Shell-->>You: ● Recording…
+    You->>Session: Ctrl+Alt+Space (same key)
+    Session->>Shell: stopRecording()
+    Shell-->>Session: 16 kHz mono WAV
+    Session->>Whisper: transcribe(clip)
+    Whisper-->>Session: "send these notes to the team"
+    Session->>Planner: the SAME callback typed text uses
+```
+
+The load-bearing detail is that last arrow: `VoiceSession` never calls the planner
+itself. It hands the transcript to the `runInstruction` callback in `main.ts` — the one
+`showInput()` already feeds — so there is exactly **one planner call site** and a
+dictated instruction is indistinguishable from a typed one in the action log.
+
+---
+
 ## 5. Memory data model
 
 Two tables. `facts` carries the epistemic metadata (confidence, version, active) so
@@ -173,8 +235,11 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 
 - **Closed world.** The app can only do the six registered tools. "Not on the menu"
   → honest refusal, never a wrong action. This is what makes it demoable.
-- **Thin shell.** All OS-specific code sits behind `OSShell`. The core imports no
-  `electron`. Porting = reimplementing six methods.
+- **Thin shell.** All OS-specific code sits behind `OSShell` (and `VoiceShell` for
+  microphone capture). The core imports no `electron`. Porting = reimplementing those
+  interfaces, nothing else.
+- **Input is interchangeable.** Typed and spoken instructions converge on one call site
+  before the planner ever runs, so voice cannot become a way around the confirm gate.
 - **Propose vs dispose.** The LLM's output is a *proposal* the planner validates
   before anything runs. Irreversible actions always pass a confirm gate.
 - **Testable core.** A `MockShell` lets the whole brain + memory run headless, so
@@ -186,8 +251,9 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 
 ## 7. Where v1+ goes (not built in v0)
 
-- Voice / speech-to-text on the front of the loop (whisper.cpp, local).
+- ~~Voice / speech-to-text on the front of the loop (whisper.cpp, local).~~ **Built in
+  M7** — see §4a.
 - Generalize the single Slack action into MCP connectors (Teams, mail, calendar).
-- Mac and Linux shells behind the same `OSShell` interface.
+- Mac and Linux shells behind the same `OSShell` + `VoiceShell` interfaces.
 - Multi-step plans and a real agent loop (the closed→open world jump).
 - Point the memory engine at the Postgres/Neon personal OS instead of local SQLite.

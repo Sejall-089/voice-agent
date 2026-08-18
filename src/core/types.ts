@@ -57,6 +57,22 @@ export interface MessageSender {
   send(channel: string, text: string): Promise<SendResult>;
 }
 
+// --- Speech to text, behind an interface like LLMClient / MessageSender (M7) ---
+
+// A captured recording, already in the one format the transcriber wants: 16 kHz mono
+// 16-bit PCM WAV. Normalizing at the capture site (the renderer) keeps every Transcriber
+// implementation free of resampling concerns.
+export interface AudioClip {
+  wav: Uint8Array;
+  durationMs: number;
+}
+
+export interface Transcriber {
+  // Speech → text. Throws (never returns a sentinel) when transcription fails; returns
+  // an empty string when the audio held no speech.
+  transcribe(clip: AudioClip): Promise<string>;
+}
+
 // --- Memory resolve seam (M1 no-op; M3 becomes SQLite-backed) ---
 
 export interface MemoryResolver {

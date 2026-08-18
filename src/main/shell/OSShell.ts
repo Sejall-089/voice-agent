@@ -13,7 +13,10 @@ export type LocalAction =
   | { kind: "notify"; payload: string };
 
 export interface OSShell {
-  registerHotkey(combo: string, onTrigger: () => void): void;
+  // Returns false when the OS refused the combo — another app already owns it. The caller
+  // decides what to do about it; silently doing nothing is not an option, because a dead
+  // hotkey is indistinguishable from a broken app.
+  registerHotkey(combo: string, onTrigger: () => void): boolean;
   getContext(): Promise<CapturedContext>;
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }>;
   showInput(): Promise<string>; // opens command bar, resolves with typed text
