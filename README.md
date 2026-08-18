@@ -113,7 +113,9 @@ The provider lives behind the same `LLMClient` interface either way (`src/core/l
 
 > **Native-module note.** `better-sqlite3` needs a different binary for Node (tests) than for
 > Electron (the app). The `pretest` / `predev` scripts rebuild it automatically, so switching
-> between `npm test` and `npm run dev` costs one short rebuild. Nothing to do manually.
+> between `npm test` and `npm run dev` costs one short rebuild. Nothing to do manually — except
+> **quit the app before running `npm test`**: a running Electron holds `better_sqlite3.node` open,
+> and the rebuild fails with `EBUSY` / `EPERM` rather than anything that names the real cause.
 
 ---
 
