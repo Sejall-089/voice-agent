@@ -46,7 +46,7 @@ export const recallTool: Tool = {
     },
     required: [],
   },
-  irreversible: false,
+  risk: "safe",
   // `subject` is a LOOKUP KEY, not a reference to dereference. If the planner resolved
   // "the team" -> "#design-team" first, we'd then search for a fact whose subject is
   // "#design-team" and find nothing. Same reasoning as `remember`.

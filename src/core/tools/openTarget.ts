@@ -58,7 +58,7 @@ export const openTargetTool: Tool = {
     },
     required: ["target"],
   },
-  irreversible: false,
+  risk: "reversible",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const target = typeof input["target"] === "string" ? input["target"] : "";
 

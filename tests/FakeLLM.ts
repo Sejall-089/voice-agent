@@ -13,6 +13,10 @@ import type {
 export class FakeLLM implements LLMClient {
   public lastToolsOffered: ToolSchema[] = [];
   public lastPreviousTurnOffered: ActionLogEntry | null = null;
+  // What the last complete() call was actually asked. M10 needs it: the difference between
+  // "revise this draft" and "answer this email again" is visible only in the prompt.
+  public lastSystemPrompt: string | null = null;
+  public lastUserPrompt: string | null = null;
 
   constructor(
     private readonly choice: ToolChoice,
@@ -30,7 +34,9 @@ export class FakeLLM implements LLMClient {
     return Promise.resolve(this.choice);
   }
 
-  complete(_system: string, _user: string): Promise<string> {
+  complete(system: string, user: string): Promise<string> {
+    this.lastSystemPrompt = system;
+    this.lastUserPrompt = user;
     return Promise.resolve(this.completion);
   }
 }

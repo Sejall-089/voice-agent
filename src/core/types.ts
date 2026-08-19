@@ -4,6 +4,8 @@
 // /core is OS-agnostic: it imports the OSShell contract TYPE-ONLY (OSShell.ts has no
 // electron import), which keeps /core free of electron per spec.md §10.
 import type { CapturedContext, LocalAction, OSShell } from "../main/shell/OSShell.ts";
+import type { DraftStore } from "./draft.ts";
+import type { Risk } from "./risk.ts";
 
 export type { CapturedContext, LocalAction };
 
@@ -78,6 +80,33 @@ export interface Transcriber {
   transcribe(clip: AudioClip): Promise<string>;
 }
 
+// --- The browser surface (M10), behind an interface like MessageSender / Transcriber ---
+
+// One email as the app sees it. Deliberately flat and app-neutral: nothing here says "Gmail",
+// so the writing side (core/compose.ts) never learns which client the message came out of.
+export interface EmailMessage {
+  subject: string | null;
+  from: string | null;
+  to: string | null;
+  body: string;
+}
+
+// Acting inside a live Gmail tab, split by what each operation costs if it goes wrong — the
+// tiers in core/risk.ts. Implementations must fail loudly rather than guess: every method here
+// either does exactly the named thing or throws with a human-readable reason.
+export interface GmailSurface {
+  readOpenEmail(): Promise<EmailMessage>; // SAFE — read-only
+  openReplyBox(): Promise<void>; // CAUTION — no undo, low stakes
+  readComposeText(): Promise<string | null>; // SAFE — null when no compose box is open
+  // SAFE. Read from the COMPOSE box, not from the original email: the confirm dialog must name
+  // who the reply will actually reach, which is not always who wrote to you.
+  readComposeRecipients(): Promise<string | null>;
+  setComposeText(text: string): Promise<void>; // CAUTION
+  // DANGEROUS. The planner's confirm gate is the only thing that may lead here — no handler
+  // calls this without having passed it.
+  clickSend(): Promise<void>;
+}
+
 // --- Memory resolve seam (M1 no-op; M3 becomes SQLite-backed) ---
 
 export interface MemoryResolver {
@@ -125,6 +154,10 @@ export interface ToolDeps {
   shell: OSShell;
   memory: Memory;
   sender: MessageSender;
+  // M10. Both have "unavailable"/empty defaults at the planner, so a tool can never reach a
+  // browser the app was not configured to drive.
+  gmail: GmailSurface;
+  draft: DraftStore;
 }
 
 // A handler returns the text to display; it throws on failure (planner catches).
@@ -132,7 +165,11 @@ export interface ToolDeps {
 export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 
 export interface Tool extends ToolSchema {
-  irreversible: boolean;
+  // What this tool costs if it goes wrong (M10, core/risk.ts). Replaced the earlier
+  // `irreversible: boolean` — see that file for why a boolean stopped being enough once tools
+  // could act inside another app's GUI. The planner reads it generically: it never knows which
+  // tool it is gating.
+  risk: Risk;
   handler: ToolHandler;
   // Whether the planner should run this tool's args through memory's reference resolution.
   // Defaults to true. Memory-WRITING tools set this false: their args are literals to store
@@ -141,8 +178,18 @@ export interface Tool extends ToolSchema {
   resolvesReferences?: boolean;
   // How to describe this action to the user at the confirm gate. The planner calls this with the
   // RESOLVED args, so the user always approves the concrete action ("Send to #design-team?"),
-  // never the vague one they typed ("send to the team"). Irreversible tools should define it.
-  confirmSummary?: (args: ToolInput) => string;
+  // never the vague one they typed ("send to the team"). `dangerous` tools should define it.
+  //
+  // It also gets `deps`, and may be async, so a GUI action can describe what is ACTUALLY there
+  // — the real recipient chips, the real text in the reply box — instead of the arguments the
+  // model guessed. Read-only (SAFE, core/risk.ts) work only: this runs BEFORE the user has
+  // agreed to anything, so it must never change the world it is describing. If it throws, the
+  // planner treats that as "we can't say what would happen" and nothing runs.
+  confirmSummary?: (args: ToolInput, deps: ToolDeps) => string | Promise<string>;
+  // What to tell the user BEFORE a `caution` tool acts. Same shape and same reasoning as
+  // confirmSummary — built from the resolved args — but it announces rather than asks, because
+  // a caution action runs on its own. Narration is what stands in for the undo that doesn't exist.
+  narrate?: (args: ToolInput) => string;
 }
 
 // --- Action log seam (M1 in-memory; M3 becomes SQLite action_log) ---

@@ -21,7 +21,8 @@
     "@anthropic-ai/sdk": "^0.117.1",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.7",
-    "openai": "^7.4.0"
+    "openai": "^7.4.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
@@ -29,9 +30,11 @@
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.3.1",
     "electron-vite": "^2.3.0",
+    "jsdom": "^30.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.3",

@@ -40,13 +40,23 @@ Fuzzy human sentence  →  exact function call.
 - Voice input: a second global hotkey dictates the instruction instead of typing it.
   Local transcription only (whisper.cpp) — no cloud STT. See §4a and §9's M7.
 
+**Added after v0 (M10):**
+- Instruction-driven email reply, scoped to **Gmail in Chrome and nothing else**: read the
+  open message, draft a reply in the stored tone, put it in the reply box, tweak it by
+  voice, and send only through an explicit confirm. See §6a and §9's M10.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
   live-verified. It was out of v0 deliberately — voice is a second way to produce the
   instruction string, and it was only worth building once the string reliably produced
   the right action. It changes nothing downstream: the planner, registry, tools, and
   memory are untouched by M7.
-- GUI computer-use / screenshot-driven automation.
+- ~~GUI computer-use / screenshot-driven automation.~~ **Narrowly, and only half of this,
+  moved into scope in M10.** The half that moved in is DOM/accessibility-based control of
+  ONE app (Gmail in Chrome), where every control is resolved by its real role and accessible
+  name. The half that did NOT move in — and is still explicitly out — is screenshot/vision
+  driven clicking anywhere on screen. The distinction is the whole point: reading a page's
+  real structure is checkable and refusable; guessing from pixels is not. See §6a.
 - macOS or Linux shells (architect for them via the interface, implement Windows only).
 - More than one external connector.
 - Multi-step / autonomous agent loops.
@@ -69,7 +79,8 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | External action    | **Slack Incoming Webhook** (via `fetch`) | The only connector in v0. |
 | Active window      | `active-win` (optional)                  | If it complicates the build, skip; context still works from clipboard. |
 | Speech to text (M7)| **whisper.cpp**, local, via a spawned `whisper-cli.exe` | No cloud STT, no API key, no new npm dependency. Audio is captured in the renderer (Web Audio → 16 kHz mono WAV); `src/core/transcribers/`. |
-| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`. |
+| Browser control (M10)| **Chrome DevTools Protocol** over `ws`, hand-rolled (~150 lines) | Attaches to a Chrome the user starts with `--remote-debugging-port` + a dedicated `--user-data-dir` (Chrome 136+ refuses the port on the default profile). `ws` is pure JS — no second native rebuild. Not puppeteer: the element-resolution logic is the safety-critical part and stays in our own tested code. |
+| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10, optional) `CHROME_DEBUG_URL`. |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
 interface (§4) so a Mac/Linux shell can be added later without touching the core.
@@ -301,34 +312,45 @@ Given the user's instruction and captured context, run exactly this sequence:
    (e.g. "the team", "my dashboard", "the usual tone"), call `memory.resolve()`
    (§7) to replace it with a concrete value. If a required reference can't be
    resolved, ask the user (via showInput) or refuse gracefully.
-5. **Validate** — all required args present and concrete? Is the tool marked
-   `irreversible`?
-6. **Confirm if needed** — if `irreversible`, call `shell.confirm(summary)`. Abort
-   on "no".
+5. **Validate** — all required args present and concrete? What is the tool's `risk`
+   tier (§6)?
+6. **Gate on the tier** — two steps, both driven by the tier alone (M10):
+   - **6a. Narrate** — a `caution` tool announces what it is about to do, via
+     `executeAction({ kind: "notify" })`, *before* the handler runs. It is not asked,
+     because it is routine; it is announced, because there is no undo.
+   - **6b. Confirm** — a `dangerous` tool must pass `shell.confirm(summary)`. Abort on
+     "no". The summary may read the world first (see `confirmSummary`, §6), so the user
+     approves the concrete action rather than the model's description of it.
 7. **Execute** — run the tool's handler. Handlers may call the LLM, memory, or the
    shell.
 8. **Record** — write an `action_log` row (instruction, tool, args, result,
    status). Show the result via `shell.showResult()`.
 
-Key rule: **the LLM proposes, the planner disposes.** Nothing irreversible runs
+Key rule: **the LLM proposes, the planner disposes.** Nothing `dangerous` runs
 without the registry check + validation + confirm gate. This separation is the most
 important design decision in the app.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
 
 | Tool          | Task(s) it serves                    | Reads memory? | Irreversible | Handler does |
 |---------------|--------------------------------------|---------------|--------------|--------------|
-| `summarize`   | 1. Summarize selection               | no            | no           | LLM summarizes `context.selectedText`; showResult |
-| `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | no           | LLM rewrites using stored tone; copyToClipboard |
-| `openTarget`  | 3. Open a named target               | yes (targets) | no           | resolve name→URL, `openUrl` |
-| `remember`    | 4. Remember X · 6. Correction sticks | writes        | no           | `memory.write()` (versions old fact on conflict) |
-| `sendMessage` | 5. Format notes and send             | yes (channel) | **yes**      | LLM formats notes → Slack webhook POST |
-| `recall`      | 7. What do you remember about…       | reads         | no           | `memory.query()` → showResult with metadata |
+| `summarize`   | 1. Summarize selection               | no            | safe         | LLM summarizes `context.selectedText`; showResult |
+| `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard |
+| `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` |
+| `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible   | `memory.write()` (versions old fact on conflict) |
+| `sendMessage` | 5. Format notes and send             | yes (channel) | **dangerous**| LLM formats notes → Slack webhook POST |
+| `recall`      | 7. What do you remember about…       | reads         | safe         | `memory.query()` → showResult with metadata |
+| `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft |
+| `reviseDraft` | 9. Tweak that reply                   | yes (tone)    | caution      | re-compose from the LIVE box text → replace it |
+| `sendReply`   | 10. Send it                           | no            | **dangerous**| confirm (recipient + whole draft) → click Gmail's Send |
+
+The `Irreversible` column above is the M10 `risk` tier — see the `risk` subsection below. The first six tools kept
+their exact behaviour through that migration: only `sendMessage` and `sendReply` confirm.
 
 Task 6 ("correction sticks") is not a separate tool — it's the `remember` tool
 updating an existing fact, which must (a) mark the old fact version inactive,
@@ -345,7 +367,33 @@ whose args are *literals to store*. Without this flag, a `remember` call carryin
 value before the handler ran. Like `irreversible`, the planner reads this property
 generically — it never knows which tool it is running.
 
-### `confirmSummary` (added in M5)
+### `risk` (added in M10 — replaced `irreversible`)
+
+Until M10 a tool answered one question: *is this irreversible?* A boolean was enough, because
+everything the app could do was either a local, undoable transform or the one Slack POST.
+Acting inside another app's GUI breaks that. Most GUI actions have no undo at all — you cannot
+un-open a reply box or un-type into a field — so "reversible?" stops being the useful question.
+Four tiers (`core/risk.ts`, adapted from clacky's `permission.py`) replace it:
+
+| Tier | Means | Planner does |
+|------|-------|--------------|
+| `safe` | read-only | run |
+| `reversible` | mutates, but recoverable (clipboard, a tab, a versioned fact) | run |
+| `caution` | irreversible but routine and low-stakes | run, but **narrate first** |
+| `dangerous` | irreversible **and** high-stakes | **confirm first**, no exceptions |
+
+Two things make this more than a rename:
+
+- **Narration stands in for the undo that doesn't exist.** A `caution` tool announces itself
+  through the `notify` action (§4) *before* the handler runs. That action kind had sat in the
+  `OSShell` contract unimplemented since M0; M10 is the first tool with something to say, so
+  narration needed no change to the portability contract.
+- **Default-deny on unidentified targets.** clacky's sharpest idea: a click whose target cannot
+  be identified is treated as dangerous. Here that lives one level down, in `gmailScript.ts` —
+  a control that matches zero elements *or more than one* is never clicked at all. If we cannot
+  say which button this is, we do not press it.
+
+### `confirmSummary` (added in M5, widened in M10)
 
 An irreversible tool should also define `confirmSummary(args): string`. The planner calls it
 with the **resolved** arguments (step 4 runs before step 6), so the confirm dialog always
@@ -353,6 +401,44 @@ describes the *concrete* action — "Send to #design-team?" — and never the va
 user typed ("send to the team"). Showing the unresolved version would be a trust bug: the
 user must approve what will actually happen. Tools without it fall back to a generic
 `Run <tool>?`.
+
+M10 widened it to `(args, deps) => string | Promise<string>`. A GUI action's concrete facts —
+who this reply would actually reach, what is sitting in the box right now — live in the app
+being acted on, not in the arguments the model proposed, so a dialog that could not read them
+would be describing a guess. It may do **SAFE work only**: it runs before the user has agreed
+to anything. If it throws, the planner never opens the dialog and nothing runs — "we cannot say
+what would happen" is itself a refusal.
+
+---
+
+## 6a. The Gmail reply flow (M10)
+
+Scoped to **Gmail in Chrome**, deliberately and only. Two halves, split because they age
+differently: the writing half (`core/compose.ts`) is app-agnostic — content + a free-form
+instruction + the stored tone → new text, the generalization of `rewrite` — and the finding
+half (`core/gmail/`) is not, and needs real per-app verification.
+
+- **How it reaches the page.** A hand-rolled CDP client (`CdpClient.ts`) attaches to a tab in
+  a Chrome the user started with remote debugging. `gmailScript.ts` is injected with
+  `Function.prototype.toString()`, which is why it imports nothing and takes its `document` as
+  a parameter — the same constraint that lets the identical function run under jsdom in tests.
+- **How it picks a tab.** Of the `mail.google.com` tabs, exactly one must satisfy the operation
+  (a message open, or a reply box open). Zero or several is a refusal: with two tabs mid-reply
+  there is no honest way to know which draft was meant.
+- **Iterative tweaks.** `core/draft.ts` holds one draft with a 15-minute TTL. It is deliberately
+  NOT in the memory engine: memory holds versioned facts about the user that should outlive the
+  session, and a draft is scratch state that should evaporate. A revision reads the **live**
+  compose box first and only falls back to the stored copy, so a hand-edit the user made is
+  never silently thrown away.
+- **Sending.** Only through `sendReply`, which is `dangerous`, whose dialog shows the real
+  recipients and the **whole** draft rather than a preview. Typed or dictated makes no
+  difference: both converge on one planner call site (§4a) and the gate reads the tool's tier.
+
+**Out of scope for M10, and not scaffolded:** any app other than Gmail-in-Chrome; any
+screenshot/vision-based clicking; composing a new email with none open; auto-selecting screen
+content; the Gmail API; multi-step autonomous loops. **Known limits:** Gmail's English UI only
+(the labels are matched literally, and a localised UI refuses rather than misfires), and one
+reply at a time.
 
 ---
 
@@ -469,13 +555,20 @@ Post-v0:
 - [x] **M8 — One hotkey, and a duplicate-run fix.** Collapses M7's two hotkeys into one
       that opens the bar *and* starts listening (§4a), and fixes a listener leak in
       `showInput()` that was firing the planner once per abandoned bar opening.
+- [x] **M10 — Instruction-driven email reply (Gmail in Chrome).** Adds the 4-tier `risk`
+      model (§6's `risk` subsection) replacing `irreversible`; `core/compose.ts` (the app-agnostic generalization
+      of `rewrite`); `core/draft.ts` (short-lived draft state for iterative tweaks); the
+      `GmailSurface` interface with a CDP-backed implementation in `core/gmail/`; and three
+      tools — `draftReply`, `reviseDraft`, `sendReply` (§6a). See "M10 — proven vs. live-only"
+      below for the honest split.
 - [x] **M9 — Make both fixes hold.** Binds capture cleanup to the window's own events so
       the leak cannot return silently (§4a), pins it with `tests/WindowsShell.capture.test.ts`,
       and turns a truncated `chooseTool` response into an explicit outcome instead of a
       misreported refusal (§3a).
 
-**v0 status: complete.** 87 tests green against `MockShell` (`npm test`) — 63 for v0,
-24 added by M7. The eval
+**v0 status: complete.** 163 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
+M8/M9, and 39 by M10 (against `MockShell`, a fake Gmail tab, and a jsdom fixture; no browser
+and no inbox is ever touched). The eval
 harness (`npm run eval`, `tests/eval/`) runs the memory story as one continuous
 scenario — cold memory refuses → teaching fixes it → a correction versions it →
 recall reveals it — plus the seven demo tasks and the closed-world refusal.
@@ -520,6 +613,30 @@ or `OpenAILLMClient` at startup (`src/core/llm/factory.ts`), both behind the sam
 been live-tested at all** — it's implemented against the same interface and typechecks,
 but its actual tool-calling behavior against a real key (including the correction-routing
 case above) is unverified until someone runs it live.
+
+### M10 — proven vs. live-only
+
+**Proven deterministically (39 new tests, no browser and no inbox):** drafting reads the email,
+opens exactly one reply box and puts the draft in it; the narration goes out *before* anything
+touches Gmail (asserted as an ordering fact across a shared timeline, not inferred); the draft
+is composed *before* the reply box is opened, so a model failure leaves Gmail untouched; a
+revision edits the same draft and never opens a second box; a revision prefers the user's
+hand-edited box text over the stored copy; an expired or absent draft refuses honestly rather
+than starting fresh; `sendReply` sends nothing on a declined confirm, exactly once on an
+accepted one, shows the real recipient and the whole draft, and never even opens the dialog when
+there is nothing to send; the draft is cleared after sending; the Gmail tools are absent from the
+menu entirely when Chrome is not configured. The injected script is tested under jsdom against a
+Gmail-shaped fixture: it clicks Reply and not Reply all, refuses on zero matches, refuses on
+ambiguity, ignores hidden controls, never matches on class or position, finds Send through
+Gmail's bidi label characters, and scopes Send to the reply's own dialog.
+
+**NOT proven, and only a live run can prove it:** that `gmailScript.ts`'s selectors match the
+real Gmail DOM. The fixture is something this repo wrote. Every selector is in that one file for
+exactly this reason, and each one fails loudly rather than guessing — so the failure mode of a
+Gmail redesign is a refusal, not a wrong click. Also unproven until run live: the CDP transport
+against a real Chrome, and whether the model reliably routes a follow-up tweak to `reviseDraft`
+rather than `draftReply` (the same class of model-judgment risk as the correction-routing case
+above; if it mis-routes, the fix is the tool **descriptions**, not the planner).
 
 ### M7 voice — what is proved, and what still needs a microphone
 

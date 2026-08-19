@@ -33,7 +33,7 @@ export const rewriteTool: Tool = {
     },
     required: [],
   },
-  irreversible: false,
+  risk: "reversible",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const text = deps.context.selectedText;
     if (!text || text.trim().length === 0) {

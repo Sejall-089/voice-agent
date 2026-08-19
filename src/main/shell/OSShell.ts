@@ -21,5 +21,5 @@ export interface OSShell {
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }>;
   showInput(): Promise<string>; // opens command bar, resolves with typed text
   showResult(text: string): void; // result popup
-  confirm(message: string): Promise<boolean>; // yes/no dialog for irreversible actions
+  confirm(message: string): Promise<boolean>; // yes/no dialog for `dangerous` actions (core/risk.ts)
 }

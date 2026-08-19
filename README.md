@@ -28,7 +28,12 @@ Three layers, one rule.
 
 **The one rule: the LLM proposes, the planner disposes.** The model's tool call is a *proposal*.
 The registry check, argument resolution, validation, and the confirm gate are deterministic code.
-The model never invents a capability, and nothing irreversible runs unconfirmed.
+The model never invents a capability, and nothing `dangerous` runs unconfirmed.
+
+Since **M10** that gate is four tiers rather than a boolean (`src/core/risk.ts`), because the app
+can now act *inside* another app, where most actions have no undo at all: `safe` and `reversible`
+run; `caution` runs but **says what it is about to do first**; `dangerous` stops for an explicit
+yes, every time.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for diagrams and [`spec.md`](spec.md) for the decisions.
 
@@ -45,6 +50,14 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for diagrams and [`spec.md`](spec.md) f
 | 5 | "send these notes to the team" | Formats + posts to Slack — **after you confirm** |
 | 6 | "no, I meant the design channel" | **Corrects** the fact: old row retired, new version active |
 | 7 | "what do you know about the team?" | Recalls it — with confidence, version, recency |
+
+…and three more in **M10**, with a Gmail message open in Chrome:
+
+| # | Say this | It does |
+|---|---|---|
+| 8 | "reply and say I can't make Tuesday, propose Thursday" | Reads the open email, drafts a reply **in your tone**, opens the reply box, puts it in |
+| 9 | "make it shorter" | Rewrites **that same draft** — including any edits you made by hand |
+| 10 | "send it" | Shows the real recipient and the **whole** draft, and sends only if you say yes |
 
 Anything else → an honest refusal, logged as a miss (a ranked backlog of what to build next).
 It never guesses.
@@ -90,6 +103,28 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
 | `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice only. Optional — leave them blank and the bar never opens the microphone; typed commands work exactly as before. |
 | `HOTKEY` | Optional. Pins the combo instead of letting the app pick the first free one. |
+| `CHROME_DEBUG_URL` | Tasks 8-10 only (the Gmail reply tools). Optional — leave it blank and those three tools are never offered at all. |
+
+### Setting up the Gmail reply tools (optional)
+
+DOM-based, not screenshot-based: the app finds the real **Reply** button by its role and
+accessible name, and refuses if it can't identify it. No pixel clicking anywhere.
+
+1. **Start Chrome with remote debugging and its own profile.** Since Chrome 136 the debugging
+   port is refused on your default profile, so the second flag isn't optional:
+
+   ```
+   chrome.exe --remote-debugging-port=9222 --user-data-dir="%LOCALAPPDATA%\voice-agent-chrome"
+   ```
+
+2. **Sign in to Gmail in that window.** Use a **throwaway/test account first** — task 10 really
+   does send email.
+3. **Set `CHROME_DEBUG_URL=http://127.0.0.1:9222`** in `.env`. Leave it blank and the three
+   Gmail tools are never even offered to the model — a capability the app can't exercise
+   shouldn't be on the menu it chooses from.
+
+Scoped to **Gmail in Chrome, English UI**, with one message open. Anything else — another app,
+another language, no message open, two matching Gmail tabs — is an honest refusal, never a guess.
 
 ### Setting up voice (optional)
 
@@ -139,15 +174,16 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (124 tests): the planner, each tool, the memory engine, the confirm gate,
-the LLM-provider factory, the voice state machine, and both eval suites. All headless against
-`MockShell` — **no API key, no network, no real Slack, no microphone, no whisper model.**
+`npm test` runs everything (163 tests): the planner, each tool, the memory engine, the risk gates,
+the LLM-provider factory, the voice state machine, the Gmail reply flow, and both eval suites. All
+headless against `MockShell`, a fake Gmail tab, and a jsdom fixture — **no API key, no network, no
+real Slack, no microphone, no whisper model, no browser, and no inbox.**
 
 ---
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (124 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (163 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
@@ -224,6 +260,13 @@ v0 was complete — deliberately in that order, because voice is only a second w
 instruction string, and it was worth building only once the string reliably produced the right
 action. It changed nothing in `/core`.
 
-**Still not built:** computer-use, multi-step agent loops, more than one external connector,
-macOS/Linux. Those are architected for (behind `OSShell` / `VoiceShell` and the tool registry) but
-not built.
+**M10 added acting inside one app** — Gmail in Chrome, via the DevTools Protocol, finding
+controls by role and accessible name. Deliberately one app: the writing half
+(`src/core/compose.ts`) is app-agnostic and free to reuse, but the finding half needs real
+verification per app, and "works everywhere, reliably nowhere" is the failure this project has
+been avoiding since day one.
+
+**Still not built:** screenshot/vision-driven clicking anywhere on screen, multi-step agent loops,
+more than one external connector, macOS/Linux, any email app but Gmail-in-Chrome. Those are
+architected for (behind `OSShell` / `VoiceShell` / `GmailSurface` and the tool registry) but not
+built.

@@ -39,6 +39,7 @@ flowchart TB
     end
 
     Whisper["whisper.cpp (local)<br/>speech → text · nothing leaves the machine"]
+    Chrome["Chrome (Gmail tab)<br/>DevTools Protocol · find by role + name<br/>never by pixel"]
     LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
     OS["OS &amp; target apps<br/>browser, clipboard"]
@@ -48,6 +49,7 @@ flowchart TB
     Shell <--> Whisper
     Core <--> LLM
     Core --> Slack
+    Core <--> Chrome
 ```
 
 **Where voice sits:** entirely in the shell. It converts speech into the same string the
@@ -68,7 +70,11 @@ knows it's on Windows.
   one validated tool call.
 - **Memory engine** — makes it *yours*. Resolves vague references before acting
   ("the team" → `#design-team`) and records facts after. This is the differentiator.
-- **LLM / Slack / OS** — rented reasoning, the one external action, and the things
+- **Gmail surface (M10)** — the one app the brain can act *inside*. Behind the `GmailSurface`
+  interface like everything else external, so tests run against a fake tab. It finds controls by
+  their real role and accessible name over the DevTools Protocol; it never clicks a coordinate,
+  and it refuses outright when a control is missing or ambiguous.
+- **LLM / Slack / Chrome / OS** — rented reasoning, the external actions, and the things
   the shell's hands touch.
 
 ---
@@ -87,17 +93,34 @@ flowchart TB
     D -- "yes" --> E["Resolve arguments<br/>look up in memory"]
     E --> F{"Args complete<br/>&amp; concrete?"}
     F -- "no" --> Q["Ask user / refuse"]
-    F -- "yes" --> G{"Irreversible?"}
-    G -- "yes" --> H["Confirm first"]
-    G -- "no" --> I["Run tool handler"]
+    F -- "yes" --> G{"Risk tier?"}
+    G -- "safe / reversible" --> I["Run tool handler"]
+    G -- "caution" --> N["Narrate first<br/>then run"]
+    G -- "dangerous" --> H["Confirm first"]
+    N --> I
     H -- "approved" --> I
     H -- "cancelled" --> X["Abort + log"]
     I --> J["Record in action log<br/>show result"]
 ```
 
 **The one rule that matters:** the LLM *proposes*, the planner *disposes*. The
-registry check, the validation, and the confirm gate are deterministic code — the
-model never gets to invent a capability or fire an irreversible action unchecked.
+registry check, the validation, and the risk gates are deterministic code — the
+model never gets to invent a capability or fire a dangerous action unchecked.
+
+**The four tiers (M10, `core/risk.ts`).** A boolean `irreversible` was enough while every
+action was either an undoable local transform or one Slack POST. Acting inside another app's
+GUI broke that — most GUI actions have no undo — so the question split in two: *is it
+recoverable* and *how much does it cost when it is wrong*.
+
+| Tier | Example | What happens |
+|------|---------|--------------|
+| `safe` | read the open email | run |
+| `reversible` | copy to clipboard, open a tab, version a fact | run |
+| `caution` | open the reply box, insert a draft | run, **after saying so** |
+| `dangerous` | Slack post, Gmail Send | **confirm first**, always |
+
+Narration is what stands in for the undo that does not exist: by the time the reply box is
+open there is nothing to roll back, so being told while it happens is the protection.
 
 ---
 
@@ -205,6 +228,51 @@ next submit, running the planner once per abandoned opening. Measured at six con
 
 ---
 
+## 4b. The Gmail reply flow (M10)
+
+Read the open email, draft a reply in your tone, put it in the box, tweak it, send only on an
+explicit yes. Two `caution` steps run on their own after announcing themselves; the one
+`dangerous` step cannot.
+
+```mermaid
+sequenceDiagram
+    actor You
+    participant Shell
+    participant Planner
+    participant Tool as draftReply / reviseDraft / sendReply
+    participant Gmail as Gmail tab (via CDP)
+
+    You->>Shell: hotkey + "reply: can't make Tuesday, propose Thursday"
+    Shell->>Planner: instruction + context
+    Planner->>Planner: tool = draftReply, risk = caution
+    Planner->>Shell: notify("Reading the open email and drafting a reply…")
+    Planner->>Tool: run
+    Tool->>Gmail: readOpenEmail (SAFE)
+    Tool->>Tool: composeReply(instruction + email + stored tone)
+    Tool->>Gmail: openReplyBox → setComposeText (CAUTION)
+    Note over Tool,Gmail: the draft is written BEFORE the box is opened —<br/>a model failure leaves Gmail untouched
+
+    You->>Shell: "make it shorter"
+    Planner->>Tool: reviseDraft (caution)
+    Tool->>Gmail: readComposeText — the LIVE box, so hand-edits survive
+    Tool->>Gmail: setComposeText (no second reply box)
+
+    You->>Shell: "send it"
+    Planner->>Planner: tool = sendReply, risk = DANGEROUS
+    Planner->>Gmail: read recipients + whole draft (SAFE, to describe it)
+    Planner->>Shell: confirm("Send this reply to alex@…?" + the full text)
+    Shell-->>Planner: approved
+    Planner->>Tool: run
+    Tool->>Gmail: clickSend
+```
+
+**Where the refusals are.** Every arrow into Gmail can end in an honest "no": no message open,
+no reply box, more than one Gmail tab matching, a control that cannot be found, a control that
+matches more than once. None of them fall back to guessing, which is what makes a Gmail redesign
+show up as a refusal rather than a wrong click.
+
+---
+
 ## 5. Memory data model
 
 Two tables. `facts` carries the epistemic metadata (confidence, version, active) so
@@ -252,7 +320,11 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 - **Input is interchangeable.** Typed and spoken instructions converge on one call site
   before the planner ever runs, so voice cannot become a way around the confirm gate.
 - **Propose vs dispose.** The LLM's output is a *proposal* the planner validates
-  before anything runs. Irreversible actions always pass a confirm gate.
+  before anything runs. `dangerous` actions always pass a confirm gate; `caution` actions
+  always announce themselves first (§3).
+- **Default-deny on anything unidentified.** A GUI control that resolves to zero elements —
+  or to more than one — is never touched. "I can see three things that look like Reply" is a
+  refusal, not a coin flip. This is the rule that keeps a UI change from becoming a wrong click.
 - **Testable core.** A `MockShell` lets the whole brain + memory run headless, so
   the eval suite runs in CI without a desktop.
 - **Misses are signal.** Every unregistered request is logged — a ranked backlog of
@@ -265,6 +337,10 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 - ~~Voice / speech-to-text on the front of the loop (whisper.cpp, local).~~ **Built in
   M7** — see §4a.
 - Generalize the single Slack action into MCP connectors (Teams, mail, calendar).
+- A clipboard-only `compose` tool: `core/compose.ts` is already app-agnostic, so an
+  instruction-driven draft that works in any app is a tool file, not a new subsystem.
+- More apps behind `GmailSurface`'s pattern (Outlook web, Slack) — each needs its own live
+  verification, but the finding-by-role-and-name approach transfers.
 - Mac and Linux shells behind the same `OSShell` + `VoiceShell` interfaces.
 - Multi-step plans and a real agent loop (the closed→open world jump).
 - Point the memory engine at the Postgres/Neon personal OS instead of local SQLite.

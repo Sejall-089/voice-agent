@@ -2,13 +2,19 @@ import type { OSShell } from "../main/shell/OSShell.ts";
 import { toToolSchemas } from "./registry.ts";
 import { UnresolvedReferenceError } from "./errors.ts";
 import { UnavailableSender } from "./senders/SlackSender.ts";
+import { UnavailableGmail } from "./gmail/UnavailableGmail.ts";
+import { InMemoryDraftStore } from "./draft.ts";
+import { needsConfirm, needsNarration } from "./risk.ts";
+import type { DraftStore } from "./draft.ts";
 import type {
   ActionLog,
+  GmailSurface,
   LLMClient,
   Memory,
   MessageSender,
   PlannerOutcome,
   Tool,
+  ToolDeps,
   ToolInput,
 } from "./types.ts";
 
@@ -29,6 +35,12 @@ export class Planner {
     private readonly log: ActionLog,
     // Optional with a safe default: a planner built without a sender cannot send anything.
     private readonly sender: MessageSender = new UnavailableSender(),
+    // Same idea for the browser (M10): a planner built without a configured Chrome cannot
+    // reach one. The default explains what to set rather than failing obscurely.
+    private readonly gmail: GmailSurface = new UnavailableGmail(),
+    // Scratch state for the reply being iterated on. Owned by the planner (one per app run),
+    // handed to handlers through ToolDeps like every other dependency.
+    private readonly draft: DraftStore = new InMemoryDraftStore(),
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -62,7 +74,7 @@ export class Planner {
 
     // 4. Resolve vague argument references via memory — unless the tool declares its args are
     //    literals to store rather than references to look up (memory-writing tools). Declarative,
-    //    like the irreversible gate below: the planner reads a property, it never knows the tool.
+    //    like the risk gates below: the planner reads a property, it never knows the tool.
     const args: ToolInput =
       tool.resolvesReferences === false
         ? choice.input
@@ -79,12 +91,43 @@ export class Planner {
       );
     }
 
-    // 6. Confirm gate — irreversible tools must pass shell.confirm() before running.
-    //    The summary is built from the RESOLVED args (step 4 ran above), so the user always
-    //    approves the concrete action ("Send to #design-team?"), never the vague one they typed.
-    //    Generic: the planner asks the tool how to describe itself; it never knows which tool.
-    if (tool.irreversible) {
-      const summary = tool.confirmSummary ? tool.confirmSummary(args) : `Run ${tool.name}?`;
+    // The dependency bundle every gate and the handler share. Built HERE, before the gates,
+    // because a GUI action's concrete facts — who this reply would actually go to, what is in
+    // the box right now — live in the app being acted on, not in the arguments the model
+    // proposed. A confirm dialog that could not read them would be describing a guess.
+    const deps: ToolDeps = {
+      context,
+      llm: this.llm,
+      shell: this.shell,
+      memory: this.memory,
+      sender: this.sender,
+      gmail: this.gmail,
+      draft: this.draft,
+    };
+
+    // 6a. Narration gate — a `caution` tool runs on its own, but must SAY what it is about to
+    //     do first (core/risk.ts). Before M10 nothing needed this, because nothing acted inside
+    //     another app; opening someone's reply box has no undo, so the announcement is the
+    //     protection. It goes out through the `notify` action the OSShell contract has always
+    //     had, which is why narration needed no change to that contract.
+    if (needsNarration(tool.risk) && tool.narrate) {
+      await this.shell.executeAction({ kind: "notify", payload: tool.narrate(args) });
+    }
+
+    // 6b. Confirm gate — `dangerous` tools must pass shell.confirm() before running.
+    //    The summary is built from the RESOLVED args (step 4 ran above) and may READ the world
+    //    through deps, so the user always approves the concrete action ("Send to #design-team?",
+    //    the actual text sitting in the reply box), never the vague one they typed. Generic: the
+    //    planner asks the tool how to describe itself; it never knows which tool.
+    if (needsConfirm(tool.risk)) {
+      let summary: string;
+      try {
+        summary = tool.confirmSummary ? await tool.confirmSummary(args, deps) : `Run ${tool.name}?`;
+      } catch (error) {
+        // If we cannot even describe what would happen, we certainly do not do it.
+        const message = error instanceof Error ? error.message : String(error);
+        return this.fail(instruction, tool.name, args, message);
+      }
       const approved = await this.shell.confirm(summary);
       if (!approved) {
         this.log.logAction({
@@ -101,13 +144,7 @@ export class Planner {
 
     // 7. Execute the handler.
     try {
-      const result = await tool.handler(args, {
-        context,
-        llm: this.llm,
-        shell: this.shell,
-        memory: this.memory,
-        sender: this.sender,
-      });
+      const result = await tool.handler(args, deps);
 
       // 8. Record + show.
       this.log.logAction({

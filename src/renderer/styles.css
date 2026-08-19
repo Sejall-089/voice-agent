@@ -137,3 +137,15 @@ body {
   background: rgba(255, 255, 255, 0.18);
   border-radius: 4px;
 }
+
+/* Narration for a `caution` action (M10): what is about to happen inside another app.
+   Deliberately quieter than .command-echo — it is a heads-up, not the answer. */
+.command-status {
+  margin-top: 10px;
+  color: #cbb8f0;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-app-region: no-drag;
+}

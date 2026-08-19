@@ -323,8 +323,17 @@ export class WindowsShell implements OSShell, VoiceShell {
           return { ok: true };
         }
         case "notify": {
-          // No tool emits this yet; wire it up when one does.
-          return { ok: false, error: "notify is not implemented yet" };
+          // Narration for `caution` tools (M10, core/risk.ts): what is about to happen inside
+          // another app, said before it happens. This is the action kind the OSShell contract
+          // has carried unimplemented since M0 — M10 is the first tool with something to say.
+          //
+          // showInactive, like showResult: a reply is drafted while the user is looking at
+          // Gmail, and stealing focus to announce it would pull them out of the thing being
+          // narrated. Auto-hide is cancelled because the run is still going.
+          if (!this.window.isVisible()) this.window.showInactive();
+          this.cancelAutoHide();
+          this.window.webContents.send("commandbar:status", action.payload);
+          return { ok: true };
         }
       }
     } catch (error) {
@@ -332,7 +341,7 @@ export class WindowsShell implements OSShell, VoiceShell {
     }
   }
 
-  // The gate in front of every irreversible action (spec.md §5 step 6). The message it shows is
+  // The gate in front of every `dangerous` action (spec.md §5 step 6b). The message it shows is
   // built by the planner from the RESOLVED arguments, so the user approves the concrete action.
   async confirm(message: string): Promise<boolean> {
     // The bar is still visible (and its Escape registration still live) at this point —

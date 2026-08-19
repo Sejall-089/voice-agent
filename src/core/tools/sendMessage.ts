@@ -18,7 +18,7 @@ function preview(text: string, max = 140): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
-// Task 5 (spec.md §6): format notes and send them to Slack. THE FIRST IRREVERSIBLE TOOL —
+// Task 5 (spec.md §6): format notes and send them to Slack. THE FIRST `dangerous` TOOL (§risk) —
 // it cannot be undone, so the planner forces it through shell.confirm() before the handler runs.
 // The Slack call goes through the injected MessageSender, so tests never touch real Slack.
 export const sendMessageTool: Tool = {
@@ -44,7 +44,7 @@ export const sendMessageTool: Tool = {
     },
     required: ["channel"],
   },
-  irreversible: true,
+  risk: "dangerous",
   // The planner calls this with the RESOLVED args, so the user approves the real destination.
   confirmSummary: (args: ToolInput): string => {
     const channel = typeof args["channel"] === "string" ? args["channel"] : "(unknown channel)";

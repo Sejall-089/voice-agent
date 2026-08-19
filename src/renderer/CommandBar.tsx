@@ -9,6 +9,9 @@ export function CommandBar(): JSX.Element {
   const [voice, setVoice] = useState<VoiceState>("idle");
   const [heard, setHeard] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
+  // Narration for a `caution` action (M10): "Reading the open email and drafting a reply…".
+  // Separate from `echo` because it is what is ABOUT to happen, not the result.
+  const [status, setStatus] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // One recorder for the window's lifetime — the mic is opened and released per recording.
   // useRef(null) + lazy init, not useRef(new MicRecorder()): the latter constructs a
@@ -32,15 +35,23 @@ export function CommandBar(): JSX.Element {
       setEcho(null);
       setHeard(null);
       setThinking(false);
+      setStatus(null);
       typedRef.current = false;
       focusInput();
     });
-    const offEcho = window.api.onEcho((value) => setEcho(value));
+    // The result supersedes the narration: once the action has happened, saying what it was
+    // about to do is just stale.
+    const offEcho = window.api.onEcho((value) => {
+      setStatus(null);
+      setEcho(value);
+    });
+    const offStatus = window.api.onStatus((value) => setStatus(value));
     const offReset = window.api.onReset(() => {
       setText("");
       setEcho(null);
       setHeard(null);
       setThinking(false);
+      setStatus(null);
     });
 
     const offThinking = window.api.onThinking((on) => setThinking(on));
@@ -78,6 +89,7 @@ export function CommandBar(): JSX.Element {
       offEcho();
       offReset();
       offThinking();
+      offStatus();
       offVoiceStart();
       offVoiceStop();
       offVoiceCancel();
@@ -150,6 +162,9 @@ export function CommandBar(): JSX.Element {
           Thinking…
         </div>
       )}
+      {/* What the app is about to do inside another app, said before it does it. There is no
+          undo for opening someone's reply box, so being told is the protection. */}
+      {status !== null && <div className="command-status">{status}</div>}
       {voice === "transcribing" && (
         <div className="voice-indicator transcribing">
           <span className="voice-dot" />

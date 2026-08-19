@@ -5,13 +5,16 @@ import { WindowsShell } from "./shell/WindowsShell.ts";
 import { VoiceSession } from "./shell/VoiceSession.ts";
 import { createRunInstruction } from "./runInstruction.ts";
 import { Planner } from "../core/planner.ts";
-import { registry } from "../core/registry.ts";
+import { buildRegistry } from "../core/registry.ts";
 import { createLLMClient } from "../core/llm/factory.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
 import { SlackSender } from "../core/senders/SlackSender.ts";
 import { WhisperCppTranscriber } from "../core/transcribers/WhisperCppTranscriber.ts";
-import type { Transcriber } from "../core/types.ts";
+import { ChromeGmail } from "../core/gmail/ChromeGmail.ts";
+import { UnavailableGmail } from "../core/gmail/UnavailableGmail.ts";
+import { InMemoryDraftStore } from "../core/draft.ts";
+import type { GmailSurface, Transcriber } from "../core/types.ts";
 
 // ONE hotkey (M8). It opens the command bar AND starts listening, so you decide whether
 // to speak or type *after* the bar is up rather than before. Enter submits either way.
@@ -96,8 +99,24 @@ app.whenReady().then(() => {
   seedIfEmpty(memory);
   // Secrets are read HERE, in composition — /core never touches process.env. Never log the URL.
   const sender = new SlackSender(process.env["SLACK_WEBHOOK_URL"]);
+  // M10: the Gmail tools are only on the menu when there is a Chrome to drive. A capability the
+  // app cannot exercise is never offered to the model in the first place.
+  const gmail = createGmail();
+  const tools = buildRegistry({ gmail: gmail !== null });
+  // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
+  // not a fact about the user, so it deliberately never reaches SQLite.
+  const draft = new InMemoryDraftStore();
   // SqliteMemory is both the resolver and the action log.
-  const planner = new Planner(llm, shell, registry, memory, memory, sender);
+  const planner = new Planner(
+    llm,
+    shell,
+    tools,
+    memory,
+    memory,
+    sender,
+    gmail ?? new UnavailableGmail(),
+    draft,
+  );
 
   // THE planner call site. Typed text and dictated text both funnel through here, so the
   // planner cannot tell them apart and voice needs no changes anywhere in /core.
@@ -172,6 +191,19 @@ function createTranscriber(): Transcriber | null {
     modelPath,
     language: process.env["WHISPER_LANGUAGE"] ?? "en",
   });
+}
+
+// Same shape as createTranscriber: config is read HERE, in composition, and a missing value
+// disables one capability rather than breaking the app. Chrome has to be started with
+// --remote-debugging-port AND a dedicated --user-data-dir (Chrome 136+ refuses the port on the
+// default profile), which is why this is opt-in rather than assumed.
+function createGmail(): GmailSurface | null {
+  const baseUrl = process.env["CHROME_DEBUG_URL"];
+  if (!baseUrl) {
+    console.log("[main] Gmail reply tools disabled - CHROME_DEBUG_URL not set");
+    return null;
+  }
+  return new ChromeGmail({ baseUrl });
 }
 
 // A couple of starter facts so a live "open my dashboard" / "rewrite in my tone" can be
