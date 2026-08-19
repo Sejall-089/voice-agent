@@ -21,9 +21,10 @@ const AUTO_HIDE_MS = 12_000;
 
 // Windows implementation of the OSShell contract, plus the VoiceShell contract (M7).
 export class WindowsShell implements OSShell, VoiceShell {
-  // Set while a recording/transcription is in flight: the bar must stay on screen even
-  // though it isn't focused, or the recording indicator vanishes the instant it appears.
-  private voiceBusy = false;
+  // What voice is doing right now. Tracked as the STATE rather than one "busy" boolean
+  // because two different questions hang off it and they have different answers in the
+  // "stopped" case — see the two getters below.
+  private voiceState: VoiceState = "idle";
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   // The single in-flight showInput(), if any. Held on the instance rather than captured by
   // per-call IPC listeners: listeners registered inside showInput() could only ever be
@@ -61,6 +62,20 @@ export class WindowsShell implements OSShell, VoiceShell {
     this.resolveInput("");
   }
 
+  // May a BLUR hide the bar? Not while the microphone is live or whisper is running: the
+  // bar is deliberately unfocused then, and hiding would take the indicator with it.
+  private get pinnedAgainstBlur(): boolean {
+    return this.voiceState === "recording" || this.voiceState === "transcribing";
+  }
+
+  // Is voice holding something the user has not decided about? Any non-idle state, and
+  // "stopped" is the one that matters: the 90s cap has released the microphone but the
+  // audio is still sitting there waiting for Enter. A TIMER must never throw that away.
+  // Only a deliberate act — Escape, clicking away, typing — may discard it.
+  private get hasUnsubmittedAudio(): boolean {
+    return this.voiceState !== "idle";
+  }
+
   registerHotkey(combo: string, onTrigger: () => void): boolean {
     const ok = globalShortcut.register(combo, onTrigger);
     if (!ok) {
@@ -94,7 +109,7 @@ export class WindowsShell implements OSShell, VoiceShell {
   // Blur, handled here rather than in main.ts so the "am I recording?" rule and the
   // dismissal bookkeeping live together.
   handleBlur(): void {
-    if (this.voiceBusy) return; // recording: unfocused on purpose, must stay visible
+    if (this.pinnedAgainstBlur) return; // unfocused on purpose, must stay visible
     this.hide();
   }
 
@@ -122,7 +137,7 @@ export class WindowsShell implements OSShell, VoiceShell {
 
   async startRecording(): Promise<void> {
     this.cancelAutoHide();
-    this.voiceBusy = true;
+    this.voiceState = "recording";
     // showInactive: dictation is about the app you are already in. Stealing focus to show a
     // recording dot would defeat the point of a global hotkey.
     this.window.showInactive();
@@ -147,7 +162,7 @@ export class WindowsShell implements OSShell, VoiceShell {
 
   async cancelRecording(): Promise<void> {
     this.window.webContents.send("voice:cancel");
-    this.voiceBusy = false;
+    this.voiceState = "idle";
     this.hide();
     return Promise.resolve();
   }
@@ -159,13 +174,23 @@ export class WindowsShell implements OSShell, VoiceShell {
     // clicking away should dismiss it like any other bar. Treating stopped as busy pinned
     // the bar on screen with a live capture and no auto-hide, which contradicted the
     // documented rule that clicking away discards everything.
-    this.voiceBusy = state === "recording" || state === "transcribing";
+    this.voiceState = state;
     this.window.webContents.send("voice:state", state, detail);
     if (state === "idle") {
       // Voice is done, but a planner result is usually seconds away — keep the bar up long
       // enough to show it rather than blinking out between the two.
       this.scheduleAutoHide();
     }
+  }
+
+  // The planner is working. Reuses the bar's existing status channel rather than adding a
+  // parallel one — the indicator is a general "what is the bar doing" line, and voice was
+  // simply its first user. Deliberately NOT part of VoiceState: thinking is not something
+  // VoiceSession can ever be doing, and widening its state machine to carry a planner
+  // concern would be a lie about the type.
+  showThinking(on: boolean): void {
+    if (on) this.cancelAutoHide(); // don't let the bar vanish mid-run
+    this.window.webContents.send("commandbar:thinking", on);
   }
 
   // The user started typing instead of speaking. main.ts routes this to
@@ -203,7 +228,12 @@ export class WindowsShell implements OSShell, VoiceShell {
     this.cancelAutoHide();
     this.autoHideTimer = setTimeout(() => {
       this.autoHideTimer = null;
-      if (!this.voiceBusy && !this.window.isFocused()) this.hide();
+      // The one automatic path to hide(), and hide() discards voice's held audio. So it
+      // must refuse whenever voice still has something unsubmitted — otherwise a recording
+      // the user stopped at the 90s cap could vanish while they were deciding what to do
+      // with it, with no action on their part. Nothing here may destroy unreviewed work.
+      if (this.hasUnsubmittedAudio) return;
+      if (!this.window.isFocused()) this.hide();
     }, AUTO_HIDE_MS);
   }
 

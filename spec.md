@@ -104,6 +104,24 @@ CLAUDE.md
 
 ---
 
+## 3b. The "Thinking…" indicator
+
+A planner run is 6–13 s, nearly all of it waiting on the model, and the bar used to show
+nothing at all during it — a wait indistinguishable from a hang. `shell.showThinking(on)`
+drives the same status line voice already used (`commandbar:thinking`), shown for typed and
+dictated instructions alike since both funnel through one call site.
+
+It is **perception only** — nothing runs faster. The model-side levers (lower reasoning
+effort, a smaller model for `chooseTool`) are deliberately untouched, because they trade
+against tool-choice accuracy and that needs an eval run rather than a guess.
+
+`createRunInstruction()` (`src/main/runInstruction.ts`) exists so that call site is a named,
+testable thing rather than a closure inside `app.whenReady()` — importing `main.ts` would
+boot electron. The indicator is turned off in a `finally`, so no path out of a planner run
+can leave the bar claiming to think forever.
+
+---
+
 ## 3a. Token budget and the truncated-response outcome (M9)
 
 `chooseTool` asks for **4096** tokens on both providers, not 1024. On a reasoning model the
@@ -236,6 +254,14 @@ idle ──begin()──► recording ──finish()──► transcribing ─�
   the actual harm; whisper work on audio you may never submit is waste. Nothing fires on its
   own — under M7's invisible bar an auto-submit was defensible, but the bar is now open and
   focused in front of you.
+- **A capped recording never expires.** `hide()` is what discards voice's held audio, and the
+  12 s auto-hide timer is the only path to `hide()` that no human triggered. It now refuses
+  to fire while voice holds anything unsubmitted, so a recording stopped at the cap survives
+  until *you* act on it — Enter runs it, Escape or clicking away discards it, and nothing
+  else may. Two questions hang off the voice state and they differ exactly here, so the shell
+  tracks the state rather than one boolean: blur-hide is suppressed only while the mic is
+  live or whisper is running, while the automatic timer is suppressed for any non-idle
+  state — including `stopped`.
 - **`abandon()` is silent.** Typing is not an error; a "didn't catch that" there would be
   noise. Asserted directly in the suite.
 - **Every failure returns to `idle`** — blocked mic, whisper crash, blank transcript,
@@ -575,6 +601,12 @@ open/hide cycles rotating through all five hide paths (submit, Escape, blur, a *
 settles. Verified to actually catch both shapes of the bug — reintroducing per-call
 listeners makes it fail with `expected 4 to be 1`, and removing the window-event binding
 fails the close/dismissal cases.
+
+**Microphone cost, measured** (6 open/close cycles, real hardware, 48 kHz device):
+`getUserMedia` is **683 ms cold** (first call of the session — permission check plus device
+open) and **151–173 ms warm** (mean ≈162 ms). Everything else in `start()` is under 50 ms.
+This is the number the mic-indicator decision turns on: every hotkey press pays ~162 ms and
+blinks the OS mic indicator, including the presses where you meant to type.
 
 **Baseline latency, unchanged by any of this and NOT a regression:** `gpt-5` is a reasoning
 model, and it dominates every instruction. Measured per run: `chooseTool` **3.4–8.8 s**,

@@ -64,6 +64,12 @@ const api = {
   sendAudio(clip: { wav: Uint8Array; durationMs: number } | null, error?: string): void {
     ipcRenderer.send("voice:audio", clip, error);
   },
+  // main → renderer: the planner is working (or has finished).
+  onThinking(callback: (on: boolean) => void): () => void {
+    const listener = (_e: IpcRendererEvent, on: boolean): void => callback(on);
+    ipcRenderer.on("commandbar:thinking", listener);
+    return () => ipcRenderer.removeListener("commandbar:thinking", listener);
+  },
   // renderer → main: you started typing, so the recording should quietly go away.
   notifyTyping(): void {
     ipcRenderer.send("commandbar:typing");

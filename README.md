@@ -68,7 +68,7 @@ decide whether to speak or type after the bar is up.
 | **Start typing** | Silently cancels the recording — no stray transcript |
 | Type, then **Enter** | Runs the typed text |
 | **Esc**, or click away | Discards everything. Nothing runs |
-| Wait **90 s** | Mic released, audio kept — **Enter** still runs it |
+| Wait **90 s** | Mic released, audio kept — **Enter** still runs it, however long you leave it |
 
 **Workflow:** select text → **Ctrl+C** → **Ctrl+Shift+Space** → speak or type.
 
@@ -139,7 +139,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (106 tests): the planner, each tool, the memory engine, the confirm gate,
+`npm test` runs everything (113 tests): the planner, each tool, the memory engine, the confirm gate,
 the LLM-provider factory, the voice state machine, and both eval suites. All headless against
 `MockShell` — **no API key, no network, no real Slack, no microphone, no whisper model.**
 
@@ -147,7 +147,7 @@ the LLM-provider factory, the voice state machine, and both eval suites. All hea
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (106 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (113 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
@@ -183,6 +183,9 @@ could return no tool call, and the app reported that as *"I don't have a tool fo
 it in the miss backlog as a missing capability. Both wrong, and invisible. The budget is now 4096,
 and truncation is its own outcome (`{ kind: "incomplete" }`) that surfaces the real reason and
 stays out of the build-next backlog.
+
+While the planner works, the bar shows **Thinking…** — a 6–13 s wait that shows work reads
+very differently from one that looks frozen. It makes nothing faster; it makes the time legible.
 
 **Baseline latency is the model, not the app.** Measured end-to-end: `chooseTool` 3.4–8.8 s,
 `complete` 2.5–6.1 s, whole instruction 6.5–12.7 s — while hotkey → bar visible is 5–40 ms. `gpt-5`

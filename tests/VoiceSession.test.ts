@@ -128,6 +128,26 @@ describe("VoiceSession (M8: one hotkey, bar-lifetime capture)", () => {
     expect(session.getState()).toBe("idle");
   });
 
+  it("holds the capped recording indefinitely — it never expires on its own", async () => {
+    // The worry this pins down: a recording you stopped at the 90s cap must still be there
+    // when you get back to it. Nothing on a timer may quietly discard unreviewed audio.
+    vi.useFakeTimers();
+    const transcriber = new FakeTranscriber("the thing I said before I got distracted");
+    const { shell, session } = setup({ transcriber, maxRecordingMs: 90_000 });
+
+    await session.begin();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(session.getState()).toBe("stopped");
+
+    // Ten minutes of the user doing something else entirely.
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    expect(session.getState()).toBe("stopped"); // still exactly where they left it
+    expect(shell.recordingsCancelled).toBe(0); // nothing discarded it
+    expect(shell.recordingsStopped).toBe(1); // and nothing stopped it twice
+    expect(await session.finish()).toBe("the thing I said before I got distracted");
+  });
+
   it("abandon() after the cap throws the held audio away", async () => {
     vi.useFakeTimers();
     const transcriber = new FakeTranscriber("held audio");

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, globalShortcut, screen, session } from "electron";
 import { WindowsShell } from "./shell/WindowsShell.ts";
 import { VoiceSession } from "./shell/VoiceSession.ts";
+import { createRunInstruction } from "./runInstruction.ts";
 import { Planner } from "../core/planner.ts";
 import { registry } from "../core/registry.ts";
 import { createLLMClient } from "../core/llm/factory.ts";
@@ -100,10 +101,7 @@ app.whenReady().then(() => {
 
   // THE planner call site. Typed text and dictated text both funnel through here, so the
   // planner cannot tell them apart and voice needs no changes anywhere in /core.
-  const runInstruction = async (instruction: string): Promise<void> => {
-    if (instruction.trim().length === 0) return;
-    await planner.run(instruction); // planner captures context, plans, and shows the result
-  };
+  const runInstruction = createRunInstruction(planner, shell);
 
   // M8: voice is only wired up when it can actually work. No transcriber means the bar
   // never opens the microphone and Enter on an empty bar does nothing — exactly as before

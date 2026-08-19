@@ -71,6 +71,10 @@ body {
   color: #9ad0ff;
 }
 
+.voice-indicator.thinking {
+  color: #b9a3ff;
+}
+
 .voice-indicator.transcribing {
   color: #ffd479;
 }

@@ -19,6 +19,7 @@ export class MockShell implements OSShell, VoiceShell {
   public readonly actions: LocalAction[] = [];
   public readonly confirmMessages: string[] = [];
   public readonly voiceStates: { state: VoiceState; detail?: string }[] = [];
+  public readonly thinking: boolean[] = [];
   public recordingsStarted = 0;
   public recordingsStopped = 0;
   public recordingsCancelled = 0;
@@ -52,6 +53,12 @@ export class MockShell implements OSShell, VoiceShell {
 
   showResult(text: string): void {
     this.results.push(text);
+  }
+
+  // Recorded as a sequence, not a flag: the thing worth asserting is that every `true` is
+  // followed by a `false`, on every path out of a planner run.
+  showThinking(on: boolean): void {
+    this.thinking.push(on);
   }
 
   confirm(message: string): Promise<boolean> {

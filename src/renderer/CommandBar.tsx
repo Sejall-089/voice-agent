@@ -8,6 +8,7 @@ export function CommandBar(): JSX.Element {
   const [echo, setEcho] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoiceState>("idle");
   const [heard, setHeard] = useState<string | null>(null);
+  const [thinking, setThinking] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   // One recorder for the window's lifetime — the mic is opened and released per recording.
   // useRef(null) + lazy init, not useRef(new MicRecorder()): the latter constructs a
@@ -30,6 +31,7 @@ export function CommandBar(): JSX.Element {
       setText("");
       setEcho(null);
       setHeard(null);
+      setThinking(false);
       typedRef.current = false;
       focusInput();
     });
@@ -38,7 +40,10 @@ export function CommandBar(): JSX.Element {
       setText("");
       setEcho(null);
       setHeard(null);
+      setThinking(false);
     });
+
+    const offThinking = window.api.onThinking((on) => setThinking(on));
 
     // --- Voice (M7). Main owns the state machine; the renderer just runs the microphone. ---
 
@@ -72,6 +77,7 @@ export function CommandBar(): JSX.Element {
       offShow();
       offEcho();
       offReset();
+      offThinking();
       offVoiceStart();
       offVoiceStop();
       offVoiceCancel();
@@ -130,6 +136,14 @@ export function CommandBar(): JSX.Element {
           <span className="voice-dot" />
           Stopped at 90s.{" "}
           <span className="voice-hint">Enter to run what you said · Esc to discard</span>
+        </div>
+      )}
+      {/* The planner is working. 6-13s of it is the model, and an empty bar during that
+          is indistinguishable from a hang. Shown for typed and dictated runs alike. */}
+      {thinking && (
+        <div className="voice-indicator thinking">
+          <span className="voice-dot" />
+          Thinking…
         </div>
       )}
       {voice === "transcribing" && (

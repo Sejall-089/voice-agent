@@ -182,6 +182,47 @@ describe("WindowsShell.showInput cleanup (M8 regression guard)", () => {
     }
   });
 
+  it("refuses to auto-hide while voice is holding a capped, unsubmitted recording", async () => {
+    // The regression this guards: auto-hide is the ONLY automatic route to hide(), and
+    // hide() tells voice to discard. Before this, "stopped" did not count as busy, so a
+    // pending auto-hide timer could throw away a recording the user had not decided about.
+    vi.useFakeTimers();
+    let dismissed = 0;
+    shell.onDismissed(() => (dismissed += 1));
+
+    const capture = shell.showInput();
+    shell.showVoiceState("recording");
+    shell.showVoiceState("stopped"); // the 90s cap: mic released, audio held
+
+    // A stale result lands while the bar is unfocused, which is what schedules auto-hide.
+    window.focused = false;
+    shell.showResult("a result from an earlier instruction");
+    vi.advanceTimersByTime(60_000);
+
+    expect(dismissed).toBe(0); // nothing discarded the held audio
+    expect(window.isVisible()).toBe(true); // and the bar is still there to press Enter on
+
+    // Still submittable, which is the whole point.
+    ipcMain.emit("commandbar:submit", {}, "");
+    await expect(capture).resolves.toBe("");
+    expect(dismissed).toBe(0); // submitting is not a dismissal
+  });
+
+  it("still auto-hides a plain result once voice has nothing pending", async () => {
+    // The control: the auto-hide must not be broken outright by the guard above.
+    vi.useFakeTimers();
+    const capture = shell.showInput();
+    ipcMain.emit("commandbar:submit", {}, "summarize this");
+    await capture;
+
+    shell.showVoiceState("idle");
+    window.focused = false;
+    shell.showResult("SUMMARY");
+    vi.advanceTimersByTime(60_000);
+
+    expect(window.isVisible()).toBe(false);
+  });
+
   it("does not dismiss a bar that was never capturing", () => {
     let dismissed = 0;
     shell.onDismissed(() => (dismissed += 1));
