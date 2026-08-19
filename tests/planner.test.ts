@@ -72,6 +72,33 @@ describe("Planner (M1: general path with summarize on the menu)", () => {
     expect(log.entries[0]).toMatchObject({ status: "error", tool: "summarize" });
   });
 
+  it("distinguishes a truncated response from a refusal, and keeps it out of the miss backlog", async () => {
+    // The model ran out of tokens before deciding anything. Telling the user "I don't have
+    // a tool for that" would send them looking for a capability that isn't the problem,
+    // and filing it as a miss would corrupt the "what to build next" list (spec §8).
+    const shell = new MockShell({ context: contextWith("some text") });
+    const llm = new FakeLLM({
+      kind: "incomplete",
+      reason: "the model hit its 4096-token limit before choosing a tool",
+    });
+    const log = new InMemoryActionLog();
+    const planner = new Planner(llm, shell, registry, new NoopMemoryResolver(), log);
+
+    const outcome = await planner.run("summarize this");
+
+    expect(outcome.status).toBe("no_tool");
+    expect(outcome.tool).toBeNull();
+    expect(shell.results[0]).toMatch(/ran out of room/i);
+    expect(shell.results[0]).not.toMatch(/don't have a tool/i);
+    expect(shell.results[0]).toMatch(/4096-token limit/); // the actionable detail survives
+    expect(shell.actions).toHaveLength(0); // nothing ran
+
+    // Logged as a miss by STATUS, with the reason — but not in the build-next backlog.
+    expect(log.entries).toHaveLength(1);
+    expect(log.entries[0]).toMatchObject({ status: "no_tool", tool: null });
+    expect(log.misses).toHaveLength(0);
+  });
+
   it("passes the previous turn to chooseTool, so a bare correction has something to resolve against", async () => {
     const shell = new MockShell({ context: contextWith("some text") });
     const llm = new FakeLLM({ kind: "tool", name: "summarize", input: {} }, "SUMMARY");

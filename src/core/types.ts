@@ -30,7 +30,12 @@ export type ToolInput = Record<string, unknown>;
 
 export type ToolChoice =
   | { kind: "tool"; name: string; input: ToolInput }
-  | { kind: "none"; text: string | null };
+  | { kind: "none"; text: string | null }
+  // The model never reached an answer — it hit its token ceiling first. Distinct from
+  // "none" on purpose: "I decline" and "I ran out of room" are different facts, and
+  // collapsing them makes a budget failure look like a missing capability. Reasoning
+  // models spend from the same budget the tool call has to fit in, so this is reachable.
+  | { kind: "incomplete"; reason: string };
 
 export interface LLMClient {
   // Pick one tool from the menu (or decline). `previousTurn` is the single most recent

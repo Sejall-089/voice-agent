@@ -13,6 +13,9 @@ import type {
 } from "./types.ts";
 
 const REFUSAL = "I can't do that yet — I don't have a tool for that.";
+const TRUNCATED =
+  "I couldn't work out what to do — the model ran out of room before it answered. " +
+  "Try a shorter, more direct instruction.";
 
 // The planner loop (spec.md §5). It is generic: it never names a specific tool. The LLM
 // PROPOSES a tool; the planner DISPOSES — registry check, resolve, validate, confirm gate,
@@ -44,6 +47,11 @@ export class Planner {
     );
 
     // 3. Registry check — declined or hallucinated tool → graceful refusal + log a miss.
+    //    A TRUNCATED response is handled separately: the model never decided anything, so
+    //    calling it "no tool for that" would be a lie about what happened.
+    if (choice.kind === "incomplete") {
+      return this.refuseIncomplete(instruction, choice.reason);
+    }
     if (choice.kind === "none") {
       return this.refuse(instruction);
     }
@@ -128,6 +136,28 @@ export class Planner {
     this.log.logMiss(instruction);
     this.shell.showResult(REFUSAL);
     return { status: "no_tool", tool: null, result: REFUSAL };
+  }
+
+  // The model ran out of tokens before answering. Nothing was decided, so nothing runs —
+  // but the user is told what actually happened rather than being handed the closed-world
+  // refusal, which would send them looking for a capability that isn't the problem.
+  //
+  // Logged with status "no_tool" (the same row shape logMiss writes) but NOT via logMiss()
+  // itself: spec §8 defines the miss list as a ranked backlog of tools worth building, and
+  // a token-budget failure is not a missing tool. Same status, same table, reason recorded,
+  // backlog uncorrupted.
+  private refuseIncomplete(instruction: string, reason: string): PlannerOutcome {
+    const shown = `${TRUNCATED} (${reason})`;
+    this.log.logAction({
+      ts: new Date().toISOString(),
+      instruction,
+      tool: null,
+      arguments: null,
+      result: shown,
+      status: "no_tool",
+    });
+    this.shell.showResult(shown);
+    return { status: "no_tool", tool: null, result: shown };
   }
 
   // An unresolved reference: the request was understood, we just don't know the fact yet.

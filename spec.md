@@ -104,6 +104,38 @@ CLAUDE.md
 
 ---
 
+## 3a. Token budget and the truncated-response outcome (M9)
+
+`chooseTool` asks for **4096** tokens on both providers, not 1024. On a reasoning model the
+reasoning tokens are spent from the *same* allowance the tool call must fit inside, so a
+long reasoning pass could consume the whole budget and return no tool call. A cap the model
+does not reach costs nothing, so the headroom is close to free.
+
+Headroom alone is not a guarantee, so truncation is now its own outcome rather than an
+absence. `ToolChoice` has a third variant:
+
+```ts
+| { kind: "incomplete"; reason: string }   // hit the ceiling before deciding anything
+```
+
+- `openai.ts` returns it on `finish_reason === "length"` with no tool call (and names the
+  reasoning-token count when the API reports it).
+- `anthropic.ts` returns it on `stop_reason === "max_tokens"` with no `tool_use` block.
+
+**Why it is not just `{ kind: "none" }`:** "I decline" and "I ran out of room" are different
+facts. Collapsing them told the user *"I don't have a tool for that"* — false, and it sends
+them looking for a missing capability that was never the problem.
+
+The planner's `refuseIncomplete()` shows the honest message and logs the row with
+**`status: "no_tool"`**, but deliberately *not* through `logMiss()`: §8 defines the miss list
+as a ranked backlog of tools worth building, and a token-budget failure is not a missing
+tool. Same status, same table, reason recorded in `result`, backlog uncorrupted.
+
+Note `complete()` (used inside handlers) can still truncate a long summary. That is visible
+to the user as short output rather than silent, so it is left alone for now.
+
+---
+
 ## 4. The OSShell interface (the portability contract)
 
 The core NEVER calls OS APIs directly. It only calls these six methods. Porting to
@@ -411,6 +443,10 @@ Post-v0:
 - [x] **M8 — One hotkey, and a duplicate-run fix.** Collapses M7's two hotkeys into one
       that opens the bar *and* starts listening (§4a), and fixes a listener leak in
       `showInput()` that was firing the planner once per abandoned bar opening.
+- [x] **M9 — Make both fixes hold.** Binds capture cleanup to the window's own events so
+      the leak cannot return silently (§4a), pins it with `tests/WindowsShell.capture.test.ts`,
+      and turns a truncated `chooseTool` response into an explicit outcome instead of a
+      misreported refusal (§3a).
 
 **v0 status: complete.** 87 tests green against `MockShell` (`npm test`) — 63 for v0,
 24 added by M7. The eval
@@ -522,6 +558,23 @@ listener registered in the constructor, and `hide()` — the single funnel for E
 and auto-hide — always ends the in-flight capture. The leak is no longer expressible.
 `hide()` also notifies `onDismissed`, so a dismissed bar abandons its recording instead of
 transcribing something the user walked away from.
+
+**Hardened in M9 so it cannot regress quietly.** The M8 fix bound cleanup to the shell's
+own `hide()` method, which only holds while every future code path politely goes through it
+— and `main.ts` used to call `commandBar.hide()` directly. Cleanup is now bound to the
+**window's own `hide` and `closed` events**, so any route that hides the bar ends the
+capture, including ones nobody has written yet. Two gaps closed at the same time: a window
+*close* used to leave the capture pending forever, and `voiceBusy` counted `stopped` as
+busy, which pinned a post-cap bar on screen with a live capture and no auto-hide (in
+contradiction of the documented "click away discards everything" rule). `voiceBusy` now
+means only *mic live or whisper running*.
+
+`tests/WindowsShell.capture.test.ts` pins the invariant rather than the behaviour: 20
+open/hide cycles rotating through all five hide paths (submit, Escape, blur, a **direct
+`window.hide()`**, auto-hide), asserting the listener count stays flat and every capture
+settles. Verified to actually catch both shapes of the bug — reintroducing per-call
+listeners makes it fail with `expected 4 to be 1`, and removing the window-event binding
+fails the close/dismissal cases.
 
 **Baseline latency, unchanged by any of this and NOT a regression:** `gpt-5` is a reasoning
 model, and it dominates every instruction. Measured per run: `chooseTool` **3.4–8.8 s**,

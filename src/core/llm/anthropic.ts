@@ -13,6 +13,10 @@ import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
 // see factory.ts.
 const PLANNER_MODEL = "claude-sonnet-4-6";
 
+// Headroom for any preamble the model writes before the tool_use block (§3a). A cap the
+// model does not reach costs nothing.
+const CHOOSE_MAX_TOKENS = 4096;
+
 // Real LLM client. The planner and handlers only see the LLMClient interface, so tests
 // swap in a fake with no network/API key.
 export class AnthropicLLMClient implements LLMClient {
@@ -43,7 +47,7 @@ export class AnthropicLLMClient implements LLMClient {
   ): Promise<ToolChoice> {
     const response = await this.getClient().messages.create({
       model: PLANNER_MODEL,
-      max_tokens: 1024,
+      max_tokens: CHOOSE_MAX_TOKENS,
       system: CHOOSE_SYSTEM,
       tools: tools.map((t) => ({
         name: t.name,
@@ -60,6 +64,16 @@ export class AnthropicLLMClient implements LLMClient {
         return { kind: "tool", name: block.name, input: (block.input ?? {}) as ToolInput };
       }
     }
+
+    // Truncated before it got to a tool_use block — a budget failure, not a decision.
+    // Same distinction as the OpenAI client; the planner treats both identically.
+    if (response.stop_reason === "max_tokens") {
+      return {
+        kind: "incomplete",
+        reason: `the model hit its ${CHOOSE_MAX_TOKENS}-token limit before choosing a tool`,
+      };
+    }
+
     return { kind: "none", text: joinText(response.content) };
   }
 

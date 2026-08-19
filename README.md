@@ -139,7 +139,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (92 tests): the planner, each tool, the memory engine, the confirm gate,
+`npm test` runs everything (106 tests): the planner, each tool, the memory engine, the confirm gate,
 the LLM-provider factory, the voice state machine, and both eval suites. All headless against
 `MockShell` — **no API key, no network, no real Slack, no microphone, no whisper model.**
 
@@ -147,7 +147,7 @@ the LLM-provider factory, the voice state machine, and both eval suites. All hea
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (92 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (106 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
@@ -170,6 +170,19 @@ chosen tool.** (Had it routed to `sendMessage`: six confirm dialogs, six Slack p
 now lives on the shell instance behind one persistent listener, and every way of hiding the bar
 ends the capture. Re-measured after the fix: **one run, flat listener count.** Details and the
 before/after table are in [`spec.md`](spec.md).
+
+That fix is now **pinned by a test rather than by care**. Cleanup is bound to the window's own
+`hide`/`closed` events instead of to one method, so a future direct `window.hide()` cannot quietly
+reintroduce it, and `tests/WindowsShell.capture.test.ts` opens and hides the bar 20 times across
+all five hide paths asserting the listener count never moves. Both failure shapes were verified to
+actually turn it red.
+
+**A silent failure that no longer is.** `chooseTool` asked for 1024 tokens, but on a reasoning
+model the reasoning is spent from the same allowance the tool call must fit in — so a long think
+could return no tool call, and the app reported that as *"I don't have a tool for that"* and filed
+it in the miss backlog as a missing capability. Both wrong, and invisible. The budget is now 4096,
+and truncation is its own outcome (`{ kind: "incomplete" }`) that surfaces the real reason and
+stays out of the build-next backlog.
 
 **Baseline latency is the model, not the app.** Measured end-to-end: `chooseTool` 3.4–8.8 s,
 `complete` 2.5–6.1 s, whole instruction 6.5–12.7 s — while hotkey → bar visible is 5–40 ms. `gpt-5`

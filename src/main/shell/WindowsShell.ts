@@ -42,6 +42,23 @@ export class WindowsShell implements OSShell, VoiceShell {
     ipcMain.on("commandbar:submit", (_event, text: unknown) => {
       this.resolveInput(typeof text === "string" ? text : "");
     });
+
+    // The capture is tied to the WINDOW being hidden, not to our own hide() having been the
+    // thing that hid it. That distinction is the whole point: cleanup bound to one method
+    // only holds while every path politely goes through that method, and main.ts used to
+    // call window.hide() directly. Bound to the window's own events, the invariant survives
+    // a direct hide(), a close, and any path nobody has written yet.
+    this.window.on("hide", () => this.endCapture());
+    this.window.on("closed", () => this.endCapture());
+  }
+
+  // Ends an in-flight capture as a DISMISSAL — no text, and voice throws its recording away.
+  // Idempotent, so hide() and the window event can both call it.
+  private endCapture(): void {
+    if (this.pendingInput === null) return;
+    // Dismiss before resolving, so the awaiting caller already sees an abandoned session.
+    this.onDismiss?.();
+    this.resolveInput("");
   }
 
   registerHotkey(combo: string, onTrigger: () => void): boolean {
@@ -136,7 +153,13 @@ export class WindowsShell implements OSShell, VoiceShell {
   }
 
   showVoiceState(state: VoiceState, detail?: string): void {
-    this.voiceBusy = state !== "idle";
+    // "Busy" means the microphone is genuinely live, or whisper is running — the two cases
+    // where hiding the bar would destroy something in flight. NOT "stopped": there the mic
+    // is already released and the audio is just sitting there waiting for a decision, so
+    // clicking away should dismiss it like any other bar. Treating stopped as busy pinned
+    // the bar on screen with a live capture and no auto-hide, which contradicted the
+    // documented rule that clicking away discards everything.
+    this.voiceBusy = state === "recording" || state === "transcribing";
     this.window.webContents.send("voice:state", state, detail);
     if (state === "idle") {
       // Voice is done, but a planner result is usually seconds away — keep the bar up long
@@ -193,10 +216,9 @@ export class WindowsShell implements OSShell, VoiceShell {
 
   private hide(): void {
     this.cancelAutoHide();
-    // Dismissing is not submitting: tell voice to throw its recording away BEFORE the
-    // capture resolves, so the awaiting caller already sees an abandoned session.
-    if (this.pendingInput !== null) this.onDismiss?.();
-    this.resolveInput("");
+    // Explicit, so the ordering is deterministic rather than dependent on when Electron
+    // emits "hide". The window event below is the backstop, not the primary path.
+    this.endCapture();
     this.window.webContents.send("commandbar:reset");
     this.window.hide();
   }
