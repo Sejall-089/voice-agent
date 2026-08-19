@@ -17,13 +17,36 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // vi.mock factories are hoisted and run during WindowsShell's own import, before this
 // file's body executes, so the doubles have to be built inside vi.hoisted().
-const { ipcMain, makeWindow } = await vi.hoisted(async () => {
+const { ipcMain, makeWindow, globalShortcut, dialogShowMessageBox } = await vi.hoisted(async () => {
   const { EventEmitter } = await import("node:events");
 
   // A real EventEmitter, so listenerCount() means exactly what it means in production.
   const emitter = new EventEmitter();
 
-  // Minimal stand-in for BrowserWindow: emits "hide" when hidden, like the real one.
+  // A real registry, not a stub that always returns true — the Escape tests need to see
+  // which combos are actually held right now, so they can fire the SAME callback the OS
+  // would invoke and confirm registration is released when the bar is not visible.
+  const handlers = new Map<string, () => void>();
+  const globalShortcut = {
+    register: (combo: string, handler: () => void): boolean => {
+      handlers.set(combo, handler);
+      return true;
+    },
+    unregister: (combo: string): void => {
+      handlers.delete(combo);
+    },
+    unregisterAll: (): void => {
+      handlers.clear();
+    },
+    _handlers: handlers, // test-only: not part of the real electron API
+  };
+
+  // A vi.fn so individual tests can control the dialog's timing (the confirm-suspension
+  // test needs to hold it open) without needing electron's real dialog module at all.
+  const dialogShowMessageBox = vi.fn(() => Promise.resolve({ response: 1 }));
+
+  // Minimal stand-in for BrowserWindow: emits "show"/"hide" like the real one, which is
+  // what WindowsShell's Escape (un)registration and capture cleanup are bound to.
   const makeWindow = () => {
     const win = Object.assign(new EventEmitter(), {
       visible: false,
@@ -32,9 +55,11 @@ const { ipcMain, makeWindow } = await vi.hoisted(async () => {
       show(): void {
         win.visible = true;
         win.focused = true;
+        win.emit("show");
       },
       showInactive(): void {
         win.visible = true;
+        win.emit("show"); // real Electron fires "show" for showInactive() too
       },
       focus(): void {
         win.focused = true;
@@ -55,19 +80,34 @@ const { ipcMain, makeWindow } = await vi.hoisted(async () => {
     return win;
   };
 
-  return { ipcMain: emitter, makeWindow };
+  return { ipcMain: emitter, makeWindow, globalShortcut, dialogShowMessageBox };
 });
 
 vi.mock("electron", () => ({
   ipcMain,
   BrowserWindow: class {},
-  globalShortcut: { register: () => true, unregisterAll: () => undefined },
+  globalShortcut,
   clipboard: { readText: () => "", writeText: () => undefined },
-  dialog: { showMessageBox: () => Promise.resolve({ response: 1 }) },
+  dialog: { showMessageBox: dialogShowMessageBox },
   shell: { openExternal: () => Promise.resolve() },
 }));
 
 const { WindowsShell } = await import("../src/main/shell/WindowsShell.ts");
+
+// The global Escape handler currently held, if the bar is visible.
+function escapeHandler(): (() => void) | undefined {
+  return globalShortcut._handlers.get("Escape");
+}
+// What the OS delivers when Escape is pressed: a callback invoked directly, with no
+// dependency on any window's focus — that independence is the entire point of the fix.
+function fireEscape(): void {
+  escapeHandler()?.();
+}
+// What the renderer sends back once its microphone is live — startRecording() awaits this
+// exact reply, so any test that calls it for real has to supply one or it hangs.
+function ackVoiceStarted(): void {
+  ipcMain.emit("voice:started", {}, undefined);
+}
 
 type FakeWindow = ReturnType<typeof makeWindow>;
 
@@ -81,6 +121,9 @@ let shell: InstanceType<typeof WindowsShell>;
 
 beforeEach(() => {
   ipcMain.removeAllListeners();
+  globalShortcut._handlers.clear();
+  dialogShowMessageBox.mockReset();
+  dialogShowMessageBox.mockImplementation(() => Promise.resolve({ response: 1 }));
   window = makeWindow();
   shell = new WindowsShell(window as unknown as Electron.BrowserWindow);
 });
@@ -244,5 +287,171 @@ describe("WindowsShell.showInput cleanup (M8 regression guard)", () => {
     shell.handleBlur();
     await expect(recording).resolves.toBe("");
     expect(window.isVisible()).toBe(false);
+  });
+});
+
+// A renderer keydown listener on the bar's <input> only fires when that element has DOM
+// focus, which requires the WINDOW to have OS focus first. That is routinely false: voice
+// shows the bar via showInactive() ON PURPOSE, so the entire time the "Esc to discard" hint
+// is on screen, no keyboard event can reach the renderer at all. Escape is registered as a
+// GLOBAL shortcut instead, scoped to exactly the window's visible lifetime.
+describe("WindowsShell Escape — works whenever the bar is visible, not only when focused", () => {
+  it("is not registered before the bar has ever been shown", () => {
+    expect(escapeHandler()).toBeUndefined();
+  });
+
+  it("registers Escape when the bar becomes visible and releases it once hidden", async () => {
+    // Submitting alone does NOT hide the bar (it stays open for showResult), so the thing
+    // that actually releases Escape here is the hide Escape itself causes.
+    const capture = shell.showInput();
+    expect(escapeHandler()).toBeDefined();
+
+    fireEscape();
+
+    await expect(capture).resolves.toBe("");
+    expect(window.isVisible()).toBe(false);
+    // Not held permanently — the whole point is it's scoped to "while visible".
+    expect(escapeHandler()).toBeUndefined();
+  });
+
+  it("closes the bar via the global shortcut even when focus is elsewhere", async () => {
+    // The literal bug report: the bar is visible, but something else currently has focus
+    // (the user briefly clicked away without triggering a full blur/hide — or, as below,
+    // never focused the bar to begin with). A renderer keydown handler cannot see this
+    // keypress at all; the global registration is what makes it work regardless.
+    const capture = shell.showInput();
+    window.focused = false; // focus is elsewhere; the bar is still on screen
+
+    fireEscape();
+
+    await expect(capture).resolves.toBe("");
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("cancels a dictated recording via Escape, even though the bar was never focused", async () => {
+    // The primary production case: startRecording() shows the bar with showInactive() so
+    // dictating never steals focus from whatever app you're speaking into. The renderer's
+    // own Escape handler is therefore DEAD CODE for the entire recording — this is the path
+    // that has to carry "Esc to discard" for real.
+    let dismissed = 0;
+    shell.onDismissed(() => (dismissed += 1));
+
+    const capture = shell.showInput();
+    const recording = shell.startRecording();
+    ackVoiceStarted(); // what the renderer sends back once its mic is live
+    await recording;
+
+    // Whatever the exact moment OS focus left the bar, dictating into another app only
+    // works if the bar does not need to keep it — simulate focus having moved on, which is
+    // the case Escape has to survive since it is not a DOM keydown listener.
+    window.focused = false;
+    expect(escapeHandler()).toBeDefined();
+
+    fireEscape();
+
+    await expect(capture).resolves.toBe("");
+    expect(dismissed).toBe(1);
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("does not collide with the main hotkey — independent registrations, one key each", async () => {
+    const hotkeyOk = shell.registerHotkey("CommandOrControl+Shift+Space", () => undefined);
+    expect(hotkeyOk).toBe(true);
+
+    const capture = shell.showInput(); // also registers Escape
+    expect(globalShortcut._handlers.has("CommandOrControl+Shift+Space")).toBe(true);
+    expect(globalShortcut._handlers.has("Escape")).toBe(true);
+
+    fireEscape(); // firing one must not touch the other
+    await capture;
+    expect(globalShortcut._handlers.has("CommandOrControl+Shift+Space")).toBe(true);
+  });
+
+  it("steps aside for the native confirm dialog, which already relies on Escape as Cancel", async () => {
+    // confirm() runs while the bar is still open (nothing hides it between submit and the
+    // confirm gate), so without this the global hook and the dialog's own cancelId would be
+    // fighting over the same keypress.
+    const capture = shell.showInput();
+    ipcMain.emit("commandbar:submit", {}, "send this");
+    await capture;
+    expect(escapeHandler()).toBeDefined();
+
+    let resolveDialog!: (value: { response: number }) => void;
+    dialogShowMessageBox.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveDialog = resolve)),
+    );
+
+    const confirming = shell.confirm("Send to #design-team?");
+    await Promise.resolve(); // let confirm() reach the awaited dialog call
+
+    expect(escapeHandler()).toBeUndefined(); // ours is suspended; the dialog owns Escape now
+
+    resolveDialog({ response: 1 }); // as if the user pressed the dialog's own Escape (Cancel)
+    await expect(confirming).resolves.toBe(false);
+
+    // Re-armed afterward, since the bar is still on screen.
+    expect(escapeHandler()).toBeDefined();
+  });
+
+  it("does not re-arm after the dialog if the bar was hidden in the meantime", async () => {
+    const capture = shell.showInput();
+    ipcMain.emit("commandbar:submit", {}, "send this");
+    await capture;
+
+    let resolveDialog!: (value: { response: number }) => void;
+    dialogShowMessageBox.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveDialog = resolve)),
+    );
+    const confirming = shell.confirm("Send to #design-team?");
+    await Promise.resolve();
+
+    window.hide(); // something else hid the bar while the dialog was open
+    resolveDialog({ response: 0 });
+    await confirming;
+
+    expect(escapeHandler()).toBeUndefined(); // nothing to arm Escape for anymore
+  });
+});
+
+describe("WindowsShell — a result surfaces even if the bar was blurred away mid-run", () => {
+  it("re-shows the bar and delivers the result after a blur during Thinking", async () => {
+    // Thinking alone does not pin the bar against a blur (only a live recording does), so
+    // clicking away while the planner is still working hides it — showResult's own
+    // re-show-if-hidden logic is what has to bring it back for the result to be seen at all.
+    const capture = shell.showInput();
+    ipcMain.emit("commandbar:submit", {}, "summarize this");
+    await capture;
+
+    shell.showThinking(true);
+    shell.handleBlur(); // the user clicked away while the planner was still running
+    expect(window.isVisible()).toBe(false);
+
+    shell.showResult("SUMMARY");
+    shell.showThinking(false); // the finally in createRunInstruction, after showResult
+
+    expect(window.isVisible()).toBe(true);
+    const echo = window.sent.filter((m) => m.channel === "commandbar:echo").at(-1);
+    expect(echo?.args[0]).toBe("SUMMARY");
+  });
+
+  it("does the same when the run was a dictated instruction", async () => {
+    // Voice's own showInactive() means the bar may never have had focus to begin with, but
+    // the mechanism is identical: showResult brings it back regardless of how it went away.
+    const capture = shell.showInput();
+    const recording = shell.startRecording();
+    ackVoiceStarted();
+    await recording;
+    shell.showVoiceState("idle", "summarize this"); // finish() landing back at idle
+    shell.showThinking(true);
+
+    window.hide(); // stands in for however the bar ended up hidden mid-run
+    await expect(capture).resolves.toBe(""); // the hide's own cleanup ends this capture
+
+    shell.showResult("SUMMARY");
+    shell.showThinking(false);
+
+    expect(window.isVisible()).toBe(true);
+    const echo = window.sent.filter((m) => m.channel === "commandbar:echo").at(-1);
+    expect(echo?.args[0]).toBe("SUMMARY");
   });
 });

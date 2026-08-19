@@ -608,6 +608,30 @@ open) and **151–173 ms warm** (mean ≈162 ms). Everything else in `start()` i
 This is the number the mic-indicator decision turns on: every hotkey press pays ~162 ms and
 blinks the OS mic indicator, including the presses where you meant to type.
 
+**Escape is a global shortcut while the bar is visible, not a keydown listener (fixed
+after M9).** A renderer keydown handler on the `<input>` only fires when that element has
+DOM focus, which requires the WINDOW to have OS focus first. That's routinely false: voice
+shows the bar via `showInactive()` on purpose (dictation is about the app you're already
+in), so for the entire time the "Esc to discard" hint is on screen, no keyboard event can
+reach the renderer at all. Escape is registered with `globalShortcut` instead, bound to the
+window's own `show`/`hide` events — the same reason `endCapture` is bound there rather than
+called only from `hide()` — so it holds for every path that shows or hides the window, not
+just the ones that go through `WindowsShell`'s own methods. Scoped tightly: Escape is only
+held system-wide while the bar itself is on screen, not permanently.
+
+One real conflict this surfaced: `confirm()`'s native dialog already relies on Escape as
+Cancel (`cancelId: 1`), and the bar stays visible (and its Escape registration live)
+straight through the confirm gate — nothing hides it between submit and `confirm()`. So the
+global hook is suspended for the duration of `dialog.showMessageBox()` and re-armed after,
+only if the bar is still on screen. The renderer's own keydown handler for Escape remains as
+a fallback for the rare case where the global registration itself fails (something else
+already owns it).
+
+`tests/WindowsShell.capture.test.ts` pins this with a dedicated Escape suite, including the
+production case directly (`startRecording()` → `showInactive()` → Escape still cancels) and
+the confirm-dialog suspension. Verified to actually catch the regression: removing the
+`show`/`hide` bindings fails five of the new tests.
+
 **Baseline latency, unchanged by any of this and NOT a regression:** `gpt-5` is a reasoning
 model, and it dominates every instruction. Measured per run: `chooseTool` **3.4–8.8 s**,
 `complete` **2.5–6.1 s**, end-to-end **6.5–12.7 s**. By contrast the UI is not the problem

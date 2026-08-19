@@ -67,7 +67,7 @@ decide whether to speak or type after the bar is up.
 | **Speak**, then **Enter** | Stops, transcribes, runs it |
 | **Start typing** | Silently cancels the recording — no stray transcript |
 | Type, then **Enter** | Runs the typed text |
-| **Esc**, or click away | Discards everything. Nothing runs |
+| **Esc** (works even while unfocused — e.g. mid-dictation), or click away | Discards everything. Nothing runs |
 | Wait **90 s** | Mic released, audio kept — **Enter** still runs it, however long you leave it |
 
 **Workflow:** select text → **Ctrl+C** → **Ctrl+Shift+Space** → speak or type.
@@ -139,7 +139,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (113 tests): the planner, each tool, the memory engine, the confirm gate,
+`npm test` runs everything (122 tests): the planner, each tool, the memory engine, the confirm gate,
 the LLM-provider factory, the voice state machine, and both eval suites. All headless against
 `MockShell` — **no API key, no network, no real Slack, no microphone, no whisper model.**
 
@@ -147,7 +147,7 @@ the LLM-provider factory, the voice state machine, and both eval suites. All hea
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (113 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (122 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.

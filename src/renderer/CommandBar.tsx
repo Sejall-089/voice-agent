@@ -106,6 +106,10 @@ export function CommandBar(): JSX.Element {
         window.api.submit(value);
       }
     } else if (e.key === "Escape") {
+      // A FALLBACK, not the primary path: main.ts registers Escape as a global shortcut
+      // while the bar is visible, so it works even when the bar never had OS focus (the
+      // normal case while dictating). This only fires if that registration somehow failed
+      // and the bar happens to have focus anyway.
       window.api.close();
     }
   };

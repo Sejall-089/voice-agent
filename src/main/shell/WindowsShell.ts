@@ -36,6 +36,9 @@ export class WindowsShell implements OSShell, VoiceShell {
   // Fired when the bar goes away without a submit (Escape, blur, auto-hide) so voice can
   // discard its recording instead of transcribing something the user walked away from.
   private onDismiss: (() => void) | null = null;
+  // Whether the global Escape shortcut is currently ours. Scoped to exactly the window's
+  // visible lifetime (below) — Escape is not stolen system-wide the rest of the time.
+  private escapeRegistered = false;
 
   constructor(private readonly window: BrowserWindow) {
     // Both listeners are registered ONCE, for the app's lifetime.
@@ -51,6 +54,39 @@ export class WindowsShell implements OSShell, VoiceShell {
     // a direct hide(), a close, and any path nobody has written yet.
     this.window.on("hide", () => this.endCapture());
     this.window.on("closed", () => this.endCapture());
+
+    // A renderer keydown listener for Escape only fires when the bar's own <input> has DOM
+    // focus, which requires the WINDOW to have OS focus first. That's routinely false: voice
+    // shows the bar via showInactive() ON PURPOSE (dictation is about the app you're already
+    // in, so stealing focus would defeat the point), so during the entire time the "Esc to
+    // discard" hint is on screen, no keyboard event can ever reach the renderer. Escape is
+    // registered as a GLOBAL shortcut instead, bound to "show"/"hide" (not called explicitly
+    // at each show()/showInactive() call site) for the same reason endCapture is bound to
+    // the window's own events: it holds for every path that shows or hides the window, not
+    // just the ones that happen to go through our own methods. No ordering dependency here
+    // the way there is for endCapture, so the event binding alone is enough.
+    this.window.on("show", () => this.registerEscape());
+    this.window.on("hide", () => this.unregisterEscape());
+    this.window.on("closed", () => this.unregisterEscape());
+  }
+
+  private registerEscape(): void {
+    if (this.escapeRegistered) return;
+    this.escapeRegistered = globalShortcut.register("Escape", () => this.hide());
+    if (!this.escapeRegistered) {
+      // Rare (something else already owns global Escape) — the renderer's own keydown
+      // listener remains as a fallback whenever the bar happens to have focus.
+      console.error(
+        "[WindowsShell] Failed to register Escape (already in use) — Esc will only " +
+          "close the bar while it has focus.",
+      );
+    }
+  }
+
+  private unregisterEscape(): void {
+    if (!this.escapeRegistered) return;
+    globalShortcut.unregister("Escape");
+    this.escapeRegistered = false;
   }
 
   // Ends an in-flight capture as a DISMISSAL — no text, and voice throws its recording away.
@@ -291,16 +327,27 @@ export class WindowsShell implements OSShell, VoiceShell {
   // The gate in front of every irreversible action (spec.md §5 step 6). The message it shows is
   // built by the planner from the RESOLVED arguments, so the user approves the concrete action.
   async confirm(message: string): Promise<boolean> {
-    const { response } = await dialog.showMessageBox({
-      type: "question",
-      buttons: ["Send", "Cancel"],
-      defaultId: 1, // Cancel — a stray Enter must never fire a destructive action
-      cancelId: 1, // Esc / closing the dialog means "no"
-      noLink: true,
-      title: "Confirm action",
-      message,
-    });
-    return response === 0;
+    // The bar is still visible (and its Escape registration still live) at this point —
+    // nothing hides it between submit and the confirm gate. The native dialog already
+    // relies on Escape meaning "no" (cancelId below), so our global hook has to step aside
+    // for as long as the dialog owns the keyboard, or the two would race for the same key.
+    this.unregisterEscape();
+    try {
+      const { response } = await dialog.showMessageBox({
+        type: "question",
+        buttons: ["Send", "Cancel"],
+        defaultId: 1, // Cancel — a stray Enter must never fire a destructive action
+        cancelId: 1, // Esc / closing the dialog means "no"
+        noLink: true,
+        title: "Confirm action",
+        message,
+      });
+      return response === 0;
+    } finally {
+      // Re-arm only if the bar is still on screen — it normally is (confirm always follows
+      // a still-open bar), but don't force it back open if something else already hid it.
+      if (this.window.isVisible()) this.registerEscape();
+    }
   }
 }
 
