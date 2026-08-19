@@ -632,6 +632,22 @@ production case directly (`startRecording()` → `showInactive()` → Escape sti
 the confirm-dialog suspension. Verified to actually catch the regression: removing the
 `show`/`hide` bindings fails five of the new tests.
 
+**Typing during a recording used to close the whole bar (fixed).**
+`VoiceSession.abandon()` is called from TWO different triggers wired in `main.ts` —
+`onTypingStarted` (you started typing) and `onDismissed` (Escape, blur, auto-hide) — and
+both funnel through `shell.cancelRecording()`. Only the dismissal case wants the bar closed,
+and that closing had already happened via whatever produced the dismissal in the first
+place (Escape's own `hide()` call, for instance) — `cancelRecording()` calling `hide()`
+itself was pure redundancy for that path. For the typing path it was the bug: the bar
+vanished (and the character just typed was wiped by the `commandbar:reset` that `hide()`
+sends) the instant you started typing instead of speaking. `cancelRecording()` now only
+silences the microphone; it never touches bar visibility, since deciding whether the bar
+should close belongs to whichever caller triggered the cancellation, not to the cancellation
+itself. `tests/WindowsShell.capture.test.ts` covers both: typing keeps the bar open with the
+original capture still live and submittable, and Escape's own bar-closing is unaffected —
+verified by reverting the fix and confirming the first goes red while the second stays
+green.
+
 **Baseline latency, unchanged by any of this and NOT a regression:** `gpt-5` is a reasoning
 model, and it dominates every instruction. Measured per run: `chooseTool` **3.4–8.8 s**,
 `complete` **2.5–6.1 s**, end-to-end **6.5–12.7 s**. By contrast the UI is not the problem

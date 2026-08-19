@@ -196,10 +196,18 @@ export class WindowsShell implements OSShell, VoiceShell {
     return audio;
   }
 
+  // Silences the microphone. Deliberately does NOT touch bar visibility — this is called
+  // from VoiceSession.abandon() on TWO different triggers that want opposite outcomes:
+  // typing (onTypingStarted) must leave the bar open and focused for the rest of the
+  // instruction, while a dismissal (onDismissed) wants the bar closed, but that closing
+  // already happened in whatever called hide() and produced the dismissal in the first
+  // place — hide() is what triggers endCapture() -> onDismiss() -> abandon() -> here, not
+  // the other way around. A hide() call in here used to run unconditionally on both paths,
+  // which meant typing a single character during a recording closed the whole bar instead
+  // of just cancelling the capture.
   async cancelRecording(): Promise<void> {
     this.window.webContents.send("voice:cancel");
     this.voiceState = "idle";
-    this.hide();
     return Promise.resolve();
   }
 

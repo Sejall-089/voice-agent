@@ -93,6 +93,11 @@ vi.mock("electron", () => ({
 }));
 
 const { WindowsShell } = await import("../src/main/shell/WindowsShell.ts");
+// VoiceSession imports no electron, so it can be wired to the mocked WindowsShell exactly
+// as main.ts wires it — the only faithful way to reproduce a bug that lives in how the two
+// talk to each other, not in either one alone.
+const { VoiceSession } = await import("../src/main/shell/VoiceSession.ts");
+const { FakeTranscriber } = await import("./FakeTranscriber.ts");
 
 // The global Escape handler currently held, if the bar is visible.
 function escapeHandler(): (() => void) | undefined {
@@ -410,6 +415,67 @@ describe("WindowsShell Escape — works whenever the bar is visible, not only wh
     await confirming;
 
     expect(escapeHandler()).toBeUndefined(); // nothing to arm Escape for anymore
+  });
+});
+
+// Reproduces a real bug: typing during a live recording was closing the WHOLE BAR instead
+// of just cancelling the microphone. Root cause: cancelRecording() is the one thing
+// VoiceSession.abandon() calls on BOTH of its triggers (typing AND a dismissal), but only
+// a dismissal should close the bar — a dismissal already closed it via whatever produced
+// the dismissal in the first place (Escape's own hide() call). cancelRecording() used to
+// call hide() unconditionally, so typing inherited a "close everything" behaviour that was
+// only ever correct for the OTHER trigger.
+describe("Typing during a recording cancels the mic only — the bar stays open", () => {
+  it("keeps the bar open, focused, and its capture alive after the first keystroke", async () => {
+    // Wired exactly as main.ts wires it — the bug lives in this wiring, not in VoiceSession
+    // or WindowsShell alone, so testing either in isolation would miss it.
+    const voice = new VoiceSession(shell, new FakeTranscriber("unused"));
+    let abandoning: Promise<void> | null = null;
+    shell.onTypingStarted(() => {
+      abandoning = voice.abandon();
+    });
+
+    // Hotkey press: opens the bar and starts listening (src/main/main.ts's onHotkey).
+    const capture = shell.showInput();
+    const recording = voice.begin();
+    ackVoiceStarted();
+    await recording;
+    expect(voice.getState()).toBe("recording");
+    expect(window.isVisible()).toBe(true);
+
+    // A keystroke: CommandBar.tsx's onChange sends this once, on the first real character.
+    ipcMain.emit("commandbar:typing", {});
+    await abandoning;
+
+    // The bug: the bar used to vanish here.
+    expect(window.isVisible()).toBe(true);
+    expect(voice.getState()).toBe("idle"); // the RECORDING is what cancelled
+    // No reset was sent — a reset is what wipes the renderer's already-typed character back
+    // to empty, which is the concrete way "the bar vanishes" actually manifested.
+    expect(window.sent.some((m) => m.channel === "commandbar:reset")).toBe(false);
+
+    // The ORIGINAL showInput() capture is still the live one — the user keeps typing into
+    // the same bar and Enter submits normally, exactly as if voice had never been involved.
+    ipcMain.emit("commandbar:submit", {}, "summarize this");
+    await expect(capture).resolves.toBe("summarize this");
+  });
+
+  it("still closes the bar when the trigger really is a dismissal (Escape)", async () => {
+    // The control: removing cancelRecording()'s own hide() must not silently break the
+    // case that DOES need the bar to close. Escape already closes it via its own hide()
+    // call before onDismiss ever fires, so this should hold either way — proving that.
+    const voice = new VoiceSession(shell, new FakeTranscriber("unused"));
+    shell.onDismissed(() => void voice.abandon());
+
+    const capture = shell.showInput();
+    const recording = voice.begin();
+    ackVoiceStarted();
+    await recording;
+
+    fireEscape();
+
+    await expect(capture).resolves.toBe("");
+    expect(window.isVisible()).toBe(false);
   });
 });
 
