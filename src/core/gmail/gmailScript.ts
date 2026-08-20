@@ -65,13 +65,17 @@ export interface ScriptSelection {
 export interface ScriptDocument extends ScriptNode {
   getSelection?: () => ScriptSelection | null;
   createRange?: () => ScriptRange;
+  execCommand?: (command: string, showUI: boolean, value: string) => boolean;
 }
 
-export type ScriptResult<T> = { ok: true; value: T } | { ok: false; reason: string };
+export type ScriptResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: string };
 
 export interface ScriptEmail {
   subject: string | null;
   from: string | null;
+  fromName: string | null;
   to: string | null;
   body: string;
 }
@@ -86,7 +90,11 @@ export type GmailOp =
   | "focusComposeBox" // CAUTION — focuses and selects all, so insertText REPLACES
   | "clickSend"; // DANGEROUS — only ever reached past the planner's confirm gate
 
-export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unknown> {
+export function gmailAgent(
+  doc: ScriptDocument,
+  op: GmailOp,
+  text?: string,
+): ScriptResult<unknown> {
   // --- helpers (must stay inside: this function is stringified into the page) ---
 
   // Gmail wraps button labels in invisible bidi control characters (U+202A..U+202E around
@@ -120,7 +128,10 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
       if (node.getAttribute("aria-hidden") === "true") return false;
       if (node.hasAttribute("hidden")) return false;
       const style = node.style;
-      if (style !== undefined && (style.display === "none" || style.visibility === "hidden")) {
+      if (
+        style !== undefined &&
+        (style.display === "none" || style.visibility === "hidden")
+      ) {
         return false;
       }
       node = node.parentElement;
@@ -128,7 +139,11 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
     return true;
   };
 
-  const matching = (root: ScriptNode, role: string, name: RegExp): ScriptElement[] => {
+  const matching = (
+    root: ScriptNode,
+    role: string,
+    name: RegExp,
+  ): ScriptElement[] => {
     const out: ScriptElement[] = [];
     const candidates = root.querySelectorAll('[role="' + role + '"]');
     for (let i = 0; i < candidates.length; i += 1) {
@@ -150,12 +165,16 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
   ): ScriptResult<ScriptElement> => {
     const found = matching(root, role, name);
     const first = found[0];
-    if (first === undefined) return { ok: false, reason: "Could not find the " + what + " in Gmail." };
+    if (first === undefined)
+      return { ok: false, reason: "Could not find the " + what + " in Gmail." };
     if (found.length > 1) {
       return {
         ok: false,
         reason:
-          "Found " + String(found.length) + " things that look like the " + what +
+          "Found " +
+          String(found.length) +
+          " things that look like the " +
+          what +
           " — refusing to guess which one to use.",
       };
     }
@@ -166,7 +185,10 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
   // actually activate is a failure to report, not a click to pretend happened.
   const press = (el: ScriptElement, what: string): ScriptResult<string> => {
     if (typeof el.click !== "function") {
-      return { ok: false, reason: "The " + what + " in Gmail can't be clicked." };
+      return {
+        ok: false,
+        reason: "The " + what + " in Gmail can't be clicked.",
+      };
     }
     el.click();
     return { ok: true, value: "clicked" };
@@ -182,7 +204,8 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
   const composeScope = (box: ScriptElement): ScriptNode => {
     let node: ScriptElement | null = box;
     while (node !== null) {
-      if (node.getAttribute("role") === "dialog" || node.tagName === "FORM") return node;
+      if (node.getAttribute("role") === "dialog" || node.tagName === "FORM")
+        return node;
       node = node.parentElement;
     }
     return doc;
@@ -200,7 +223,8 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
     return last === undefined ? null : last;
   };
 
-  const textOf = (el: ScriptElement | null): string => clean(el === null ? "" : (el.textContent ?? ""));
+  const textOf = (el: ScriptElement | null): string =>
+    clean(el === null ? "" : (el.textContent ?? ""));
 
   // --- operations ---
 
@@ -215,19 +239,36 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
   if (op === "readOpenEmail") {
     const message = openMessage();
     if (message === null) {
-      return { ok: false, reason: "No email is open in Gmail — open one and try again." };
+      return {
+        ok: false,
+        reason: "No email is open in Gmail — open one and try again.",
+      };
     }
-    const body = message.querySelector(".a3s") ?? message.querySelector('[dir="ltr"]');
+    const body =
+      message.querySelector(".a3s") ?? message.querySelector('[dir="ltr"]');
     const bodyText = textOf(body ?? message);
     if (bodyText.length === 0) {
-      return { ok: false, reason: "The open email appears to be empty — there is nothing to reply to." };
+      return {
+        ok: false,
+        reason:
+          "The open email appears to be empty — there is nothing to reply to.",
+      };
     }
     const sender = message.querySelector("span[email]");
     const heading =
-      doc.querySelector("h2[data-thread-perm-id]") ?? doc.querySelector('[role="heading"]');
+      doc.querySelector("h2[data-thread-perm-id]") ??
+      doc.querySelector('[role="heading"]');
+    // Gmail puts the display name in a `name` attribute on this same span; fall back to its
+    // text content for layouts that don't set one. Empty string collapses to null, same as
+    // every other "nothing there" case in this file.
+    const senderName =
+      sender === null
+        ? null
+        : (sender.getAttribute("name") ?? textOf(sender)) || null;
     const email: ScriptEmail = {
       subject: heading === null ? null : textOf(heading) || null,
       from: sender === null ? null : sender.getAttribute("email"),
+      fromName: senderName,
       to: null, // the reply's recipient comes from the compose box, not from here
       body: bodyText,
     };
@@ -241,7 +282,7 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
     if (composeBox().ok) return { ok: true, value: "already-open" };
     // `^reply$` and not `^reply` on purpose: "Reply all" is a different action with different
     // consequences, and choosing it silently would email people the user never meant to include.
-    const button = findOne(doc, "button", /^reply$/i, "Reply button");
+    const button = findOne(doc, "link", /^reply$/i, "Reply button");
     if (!button.ok) return button;
     return press(button.value, "Reply button");
   }
@@ -255,15 +296,22 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
   if (op === "readComposeRecipients") {
     const box = composeBox();
     if (!box.ok) return box;
-    const chips = composeScope(box.value).querySelectorAll("span[email], [data-hovercard-id]");
+    const chips = composeScope(box.value).querySelectorAll(
+      "span[email], [data-hovercard-id]",
+    );
     const addresses: string[] = [];
     for (let i = 0; i < chips.length; i += 1) {
       const el = chips[i] as ScriptElement;
       if (!visible(el)) continue;
-      const address = el.getAttribute("email") ?? el.getAttribute("data-hovercard-id") ?? "";
-      if (address.indexOf("@") > 0 && addresses.indexOf(address) === -1) addresses.push(address);
+      const address =
+        el.getAttribute("email") ?? el.getAttribute("data-hovercard-id") ?? "";
+      if (address.indexOf("@") > 0 && addresses.indexOf(address) === -1)
+        addresses.push(address);
     }
-    return { ok: true, value: addresses.length > 0 ? addresses.join(", ") : null };
+    return {
+      ok: true,
+      value: addresses.length > 0 ? addresses.join(", ") : null,
+    };
   }
 
   if (op === "focusComposeBox") {
@@ -276,12 +324,28 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
     // Select everything so the CDP insertText that follows REPLACES the draft instead of
     // appending to it. Doing it here rather than in the client keeps "replace" atomic with
     // "focus" — there is no window in which the box is focused but the old text is unselected.
-    const selection = doc.getSelection === undefined ? null : doc.getSelection();
+    const selection =
+      doc.getSelection === undefined ? null : doc.getSelection();
     if (selection !== null && doc.createRange !== undefined) {
       const range = doc.createRange();
       range.selectNodeContents(box.value);
       selection.removeAllRanges();
       selection.addRange(range);
+    }
+    if (text !== undefined) {
+      if (doc.execCommand === undefined) {
+        return {
+          ok: false,
+          reason: "Can't replace the Gmail reply text in this browser.",
+        };
+      }
+      const inserted = doc.execCommand("insertText", false, text);
+      if (!inserted)
+        return {
+          ok: false,
+          reason: "Gmail didn't accept the replacement text.",
+        };
+      return { ok: true, value: "replaced" };
     }
     return { ok: true, value: "focused" };
   }
@@ -289,7 +353,12 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
   if (op === "clickSend") {
     const box = composeBox();
     if (!box.ok) return box;
-    const button = findOne(composeScope(box.value), "button", /^send\b/i, "Send button");
+    const button = findOne(
+      composeScope(box.value),
+      "button",
+      /^send\b/i,
+      "Send button",
+    );
     if (!button.ok) return button;
     // Belt and braces past the confirm gate: re-read the label off the element we are ABOUT to
     // click, and refuse if it is not Send. Between the user approving and this line the page
@@ -297,7 +366,8 @@ export function gmailAgent(doc: ScriptDocument, op: GmailOp): ScriptResult<unkno
     if (!/^send\b/i.test(accessibleName(button.value))) {
       return {
         ok: false,
-        reason: "The control that was Send is no longer Send — nothing was sent.",
+        reason:
+          "The control that was Send is no longer Send — nothing was sent.",
       };
     }
     const pressed = press(button.value, "Send button");

@@ -65,7 +65,7 @@ export class Planner {
       return this.refuseIncomplete(instruction, choice.reason);
     }
     if (choice.kind === "none") {
-      return this.refuse(instruction);
+      return this.refuse(instruction, choice.text);
     }
     const tool = this.registry.find((t) => t.name === choice.name);
     if (!tool) {
@@ -111,7 +111,10 @@ export class Planner {
     //     protection. It goes out through the `notify` action the OSShell contract has always
     //     had, which is why narration needed no change to that contract.
     if (needsNarration(tool.risk) && tool.narrate) {
-      await this.shell.executeAction({ kind: "notify", payload: tool.narrate(args) });
+      await this.shell.executeAction({
+        kind: "notify",
+        payload: tool.narrate(args),
+      });
     }
 
     // 6b. Confirm gate — `dangerous` tools must pass shell.confirm() before running.
@@ -122,7 +125,9 @@ export class Planner {
     if (needsConfirm(tool.risk)) {
       let summary: string;
       try {
-        summary = tool.confirmSummary ? await tool.confirmSummary(args, deps) : `Run ${tool.name}?`;
+        summary = tool.confirmSummary
+          ? await tool.confirmSummary(args, deps)
+          : `Run ${tool.name}?`;
       } catch (error) {
         // If we cannot even describe what would happen, we certainly do not do it.
         const message = error instanceof Error ? error.message : String(error);
@@ -169,10 +174,15 @@ export class Planner {
     }
   }
 
-  private refuse(instruction: string): PlannerOutcome {
+  private refuse(
+    instruction: string,
+    modelText?: string | null,
+  ): PlannerOutcome {
+    const shown =
+      modelText && modelText.trim().length > 0 ? modelText.trim() : REFUSAL;
     this.log.logMiss(instruction);
-    this.shell.showResult(REFUSAL);
-    return { status: "no_tool", tool: null, result: REFUSAL };
+    this.shell.showResult(shown);
+    return { status: "no_tool", tool: null, result: shown };
   }
 
   // The model ran out of tokens before answering. Nothing was decided, so nothing runs —
@@ -183,7 +193,10 @@ export class Planner {
   // itself: spec §8 defines the miss list as a ranked backlog of tools worth building, and
   // a token-budget failure is not a missing tool. Same status, same table, reason recorded,
   // backlog uncorrupted.
-  private refuseIncomplete(instruction: string, reason: string): PlannerOutcome {
+  private refuseIncomplete(
+    instruction: string,
+    reason: string,
+  ): PlannerOutcome {
     const shown = `${TRUNCATED} (${reason})`;
     this.log.logAction({
       ts: new Date().toISOString(),
@@ -239,5 +252,7 @@ export class Planner {
 // Generic required-argument check driven by each tool's own inputSchema.
 function missingRequired(tool: Tool, args: ToolInput): string[] {
   const required = tool.inputSchema.required ?? [];
-  return required.filter((key) => args[key] === undefined || args[key] === null);
+  return required.filter(
+    (key) => args[key] === undefined || args[key] === null,
+  );
 }

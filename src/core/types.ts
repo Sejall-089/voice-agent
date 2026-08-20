@@ -3,7 +3,11 @@
 //
 // /core is OS-agnostic: it imports the OSShell contract TYPE-ONLY (OSShell.ts has no
 // electron import), which keeps /core free of electron per spec.md §10.
-import type { CapturedContext, LocalAction, OSShell } from "../main/shell/OSShell.ts";
+import type {
+  CapturedContext,
+  LocalAction,
+  OSShell,
+} from "../main/shell/OSShell.ts";
 import type { DraftStore } from "./draft.ts";
 import type { Risk } from "./risk.ts";
 
@@ -87,6 +91,7 @@ export interface Transcriber {
 export interface EmailMessage {
   subject: string | null;
   from: string | null;
+  fromName: string | null;
   to: string | null;
   body: string;
 }
@@ -185,7 +190,10 @@ export interface Tool extends ToolSchema {
   // model guessed. Read-only (SAFE, core/risk.ts) work only: this runs BEFORE the user has
   // agreed to anything, so it must never change the world it is describing. If it throws, the
   // planner treats that as "we can't say what would happen" and nothing runs.
-  confirmSummary?: (args: ToolInput, deps: ToolDeps) => string | Promise<string>;
+  confirmSummary?: (
+    args: ToolInput,
+    deps: ToolDeps,
+  ) => string | Promise<string>;
   // What to tell the user BEFORE a `caution` tool acts. Same shape and same reasoning as
   // confirmSummary — built from the resolved args — but it announces rather than asks, because
   // a caution action runs on its own. Narration is what stands in for the undo that doesn't exist.

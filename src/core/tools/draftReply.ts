@@ -1,5 +1,5 @@
 import { composeReply } from "../compose.ts";
-import { requiredInstruction, storedTone } from "./replySupport.ts";
+import { requiredInstruction, storedName, storedTone } from "./replySupport.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
 // M10, task 8: reply to the email open in Gmail, following a spoken instruction, in the user's
@@ -18,10 +18,14 @@ export const draftReplyTool: Tool = {
   name: "draftReply",
   description:
     "Draft a reply to the email currently open in Gmail and put it in the reply box. Use this " +
-    "when the user asks to reply, respond, answer, or write back to an email they are looking " +
-    "at — for example 'reply and say I can't make Tuesday, propose Thursday'. Pass everything " +
-    "they said about what the reply should say as `instruction`, in their own words. This only " +
-    "writes the draft into the reply box; it never sends anything.",
+    "when the user asks to reply, respond, answer, generate, or write back to an email they " +
+    "are looking at — for example 'reply and say I can't make Tuesday, propose Thursday', or " +
+    "'generate a reply' with no specifics at all. ALWAYS call this tool for a reply request, " +
+    "even a vague one — never ask the user what it should say first; pass their words as-is " +
+    "and a reasonable draft will be generated from the email's own content. Pass everything " +
+    "they said about what the reply should say as `instruction`, in their own words — if they " +
+    "gave no specifics, pass their instruction verbatim anyway. This only writes the draft " +
+    "into the reply box; it never sends anything.",
   inputSchema: {
     type: "object",
     properties: {
@@ -49,6 +53,8 @@ export const draftReplyTool: Tool = {
       instruction,
       tone: storedTone(deps.memory),
       source,
+      recipientName: source.fromName,
+      userName: storedName(deps.memory),
     });
 
     await deps.gmail.openReplyBox();

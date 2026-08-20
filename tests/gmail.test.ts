@@ -120,6 +120,24 @@ describe("draftReply (M10)", () => {
     expect(gmail.calls).toEqual(["readOpenEmail"]);
   });
 
+  it("drafts a reply for a vague instruction with no specifics, never refusing for missing details alone", async () => {
+    // draftReply's description tells the model to ALWAYS call it, even on a fully vague
+    // request — it must never ask a clarifying question itself. This proves the handler
+    // itself honors that: a non-empty but content-free instruction still produces a draft.
+    const gmail = new FakeGmail();
+    const { planner } = harness({
+      choice: { kind: "tool", name: "draftReply", input: { instruction: "generate a reply" } },
+      completion: "NEUTRAL ACKNOWLEDGMENT DRAFT",
+      gmail,
+    });
+
+    const outcome = await planner.run("generate a reply");
+
+    expect(outcome.status).toBe("ok");
+    expect(gmail.composeText).toBe("NEUTRAL ACKNOWLEDGMENT DRAFT");
+    expect(gmail.replyBoxOpened).toBe(1);
+  });
+
   it("refuses without an instruction rather than inventing a reply", async () => {
     const gmail = new FakeGmail();
     const { planner } = harness({

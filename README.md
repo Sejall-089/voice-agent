@@ -174,7 +174,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (163 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (165 tests): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the Gmail reply flow, and both eval suites. All
 headless against `MockShell`, a fake Gmail tab, and a jsdom fixture — **no API key, no network, no
 real Slack, no microphone, no whisper model, no browser, and no inbox.**
@@ -183,7 +183,7 @@ real Slack, no microphone, no whisper model, no browser, and no inbox.**
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (163 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (165 tests):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.

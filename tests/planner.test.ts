@@ -31,7 +31,9 @@ describe("Planner (M1: general path with summarize on the menu)", () => {
     expect(llm.lastToolsOffered.map((t) => t.name)).toContain("summarize");
   });
 
-  it("refuses gracefully and logs a miss when the LLM declines", async () => {
+  it("shows the model's own declined text when it has something to say", async () => {
+    // refuse() passes choice.text through verbatim rather than a canned "no tool" message,
+    // so a genuine clarifying question from the model reaches the user as-is.
     const shell = new MockShell({ context: contextWith("some text") });
     const llm = new FakeLLM({ kind: "none", text: "I don't think I can help with that." });
     const log = new InMemoryActionLog();
@@ -40,9 +42,22 @@ describe("Planner (M1: general path with summarize on the menu)", () => {
     const outcome = await planner.run("book me a flight to Tokyo");
 
     expect(outcome.status).toBe("no_tool");
-    expect(shell.results[0]).toMatch(/can't do that yet/i);
+    expect(shell.results[0]).toBe("I don't think I can help with that.");
     expect(log.misses).toContain("book me a flight to Tokyo");
     expect(shell.actions).toHaveLength(0);
+  });
+
+  it("falls back to the canned refusal when the model declines with no text", async () => {
+    const shell = new MockShell({ context: contextWith("some text") });
+    const llm = new FakeLLM({ kind: "none", text: null });
+    const log = new InMemoryActionLog();
+    const planner = new Planner(llm, shell, registry, new NoopMemoryResolver(), log);
+
+    const outcome = await planner.run("book me a flight to Tokyo");
+
+    expect(outcome.status).toBe("no_tool");
+    expect(shell.results[0]).toMatch(/can't do that yet/i);
+    expect(log.misses).toContain("book me a flight to Tokyo");
   });
 
   it("refuses a hallucinated tool the registry check rejects", async () => {

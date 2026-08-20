@@ -1,6 +1,6 @@
 import { composeReply } from "../compose.ts";
 import { UnresolvedReferenceError } from "../errors.ts";
-import { requiredInstruction, storedTone } from "./replySupport.ts";
+import { requiredInstruction, storedName, storedTone } from "./replySupport.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
 // M10, task 9: change the reply that is already in the box — "make it shorter", "warmer",
@@ -22,7 +22,8 @@ export const reviseDraftTool: Tool = {
     properties: {
       instruction: {
         type: "string",
-        description: "The change to make, in the user's own words — e.g. 'make it shorter'.",
+        description:
+          "The change to make, in the user's own words — e.g. 'make it shorter'.",
       },
     },
     required: ["instruction"],
@@ -44,7 +45,15 @@ export const reviseDraftTool: Tool = {
 
     // The box is the truth, not our copy of it. If the user hand-edited the draft and then said
     // "make it shorter", shortening our stale copy would silently throw their edit away.
-    const live = await deps.gmail.readComposeText();
+    let live: string | null;
+    try {
+      live = await deps.gmail.readComposeText();
+    } catch {
+      deps.draft.clear();
+      throw new UnresolvedReferenceError(
+        "There's no reply draft open anymore. Ask me to draft a reply first.",
+      );
+    }
     const base = live !== null && live.trim().length > 0 ? live : previous.text;
 
     const text = await composeReply(deps.llm, {
@@ -52,6 +61,8 @@ export const reviseDraftTool: Tool = {
       tone: storedTone(deps.memory),
       source: previous.source, // a revision still needs the email it is answering
       previousDraft: base,
+      recipientName: previous.source.fromName,
+      userName: storedName(deps.memory),
     });
 
     // No openReplyBox() here on purpose: the box is already open, and asking for it again is

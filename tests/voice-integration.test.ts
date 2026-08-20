@@ -96,7 +96,8 @@ describe("Voice → planner (dictation is just another way to produce the string
     await openBar("");
 
     expect(log.misses).toContain("book me a flight to Tokyo");
-    expect(shell.results.at(-1)).toMatch(/can't do that yet/i);
+    // The model's own declined text is shown verbatim, not the canned refusal.
+    expect(shell.results.at(-1)).toBe("I can't help with that.");
     expect(shell.actions).toHaveLength(0); // closed world holds for voice too
   });
 

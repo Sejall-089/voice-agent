@@ -20,17 +20,39 @@ export interface ComposeRequest {
   // Set on a revision. When present the instruction edits THIS text rather than starting over
   // from the email — which is what makes "make it shorter" mean shorter *than the last draft*.
   previousDraft?: string;
+  // Real names, when available, so the greeting/sign-off can use them instead of falling back
+  // to BASE_RULES's neutral wording. Never required — absent means "stay neutral," not "guess".
+  recipientName?: string | null;
+  userName?: string | null;
 }
 
 const BASE_RULES = [
-  "Output only the reply body — no subject line, no 'Dear', no signature block, no quoted",
-  "original, no commentary about what you did. Do not invent facts, names, dates, times, or",
-  "commitments that are not in the email or the instruction: if a detail is missing, write",
-  "around it rather than guessing.",
+  "Output only the reply body — no subject line, no quoted original, no commentary about",
+  "what you did. Include a brief, natural greeting at the start and a brief sign-off at the",
+  "end, the way a person would open and close a real email — but never invent a name for",
+  "either one (not the recipient's, not the user's own) unless it is explicitly given in the",
+  "email or the instruction. Use a neutral greeting like 'Hi,' or 'Hello,' and a neutral",
+  "sign-off like 'Thanks,' or 'Best regards,' when no real name is available. Do not invent",
+  "facts, names, dates, times, or commitments that are not in the email or the instruction:",
+  "if a detail is missing, write around it rather than guessing. Do not invent the user's",
+  "opinions, feedback, requests, or stance either — if the instruction gives no specific",
+  "content AND the email is a one-way notification, newsletter, digest, or automated message",
+  "with no direct question or request aimed at the user, write a brief, neutral acknowledgment",
+  "only. Save substantive, specific content for emails that actually ask the user something,",
+  "or instructions that actually say what to write.",
 ].join(" ");
+
+function namesFor(request: ComposeRequest): string {
+  const parts: string[] = [];
+  if (request.recipientName)
+    parts.push(`Address the recipient as ${request.recipientName}.`);
+  if (request.userName) parts.push(`Sign off as ${request.userName}.`);
+  return parts.join(" ");
+}
 
 function systemFor(request: ComposeRequest): string {
   const voice = `Write in this person's own voice: ${request.tone}.`;
+  const names = namesFor(request);
   if (request.previousDraft !== undefined) {
     // Revision framing. The model is told plainly that a draft already exists and that the new
     // instruction is an EDIT — without this it tends to answer the original email again, which
@@ -40,14 +62,20 @@ function systemFor(request: ComposeRequest): string {
       "Apply their change to the existing draft. Keep everything they did not ask you to change,",
       "including any wording they edited themselves.",
       voice,
+      names,
       BASE_RULES,
-    ].join(" ");
+    ]
+      .filter((part) => part.length > 0)
+      .join(" ");
   }
   return [
     "You write a reply to an email on the user's behalf, following their instruction exactly.",
     voice,
+    names,
     BASE_RULES,
-  ].join(" ");
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
 }
 
 function describe(email: EmailMessage): string {
@@ -61,19 +89,27 @@ function describe(email: EmailMessage): string {
   return header.length > 0 ? `${header}\n\n${email.body}` : email.body;
 }
 
-export async function composeReply(llm: LLMClient, request: ComposeRequest): Promise<string> {
+export async function composeReply(
+  llm: LLMClient,
+  request: ComposeRequest,
+): Promise<string> {
   const sections = [`THE EMAIL BEING REPLIED TO:\n${describe(request.source)}`];
   if (request.previousDraft !== undefined) {
     sections.push(`THE CURRENT DRAFT REPLY:\n${request.previousDraft}`);
   }
   sections.push(`THE USER'S INSTRUCTION:\n${request.instruction}`);
 
-  const text = await llm.complete(systemFor(request), sections.join("\n\n---\n\n"));
+  const text = await llm.complete(
+    systemFor(request),
+    sections.join("\n\n---\n\n"),
+  );
   const trimmed = text.trim();
   if (trimmed.length === 0) {
     // Never write emptiness into someone's compose box — that would silently erase whatever
     // was there. Fail loudly and leave the box exactly as it was.
-    throw new Error("The model returned an empty reply — nothing was written to the reply box.");
+    throw new Error(
+      "The model returned an empty reply — nothing was written to the reply box.",
+    );
   }
   return trimmed;
 }

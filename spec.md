@@ -566,8 +566,8 @@ Post-v0:
       and turns a truncated `chooseTool` response into an explicit outcome instead of a
       misreported refusal (§3a).
 
-**v0 status: complete.** 163 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
-M8/M9, and 39 by M10 (against `MockShell`, a fake Gmail tab, and a jsdom fixture; no browser
+**v0 status: complete.** 165 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
+M8/M9, and 41 by M10 (against `MockShell`, a fake Gmail tab, and a jsdom fixture; no browser
 and no inbox is ever touched). The eval
 harness (`npm run eval`, `tests/eval/`) runs the memory story as one continuous
 scenario — cold memory refuses → teaching fixes it → a correction versions it →
@@ -616,7 +616,7 @@ case above) is unverified until someone runs it live.
 
 ### M10 — proven vs. live-only
 
-**Proven deterministically (39 new tests, no browser and no inbox):** drafting reads the email,
+**Proven deterministically (41 new tests, no browser and no inbox):** drafting reads the email,
 opens exactly one reply box and puts the draft in it; the narration goes out *before* anything
 touches Gmail (asserted as an ordering fact across a shared timeline, not inferred); the draft
 is composed *before* the reply box is opened, so a model failure leaves Gmail untouched; a
@@ -626,9 +626,19 @@ than starting fresh; `sendReply` sends nothing on a declined confirm, exactly on
 accepted one, shows the real recipient and the whole draft, and never even opens the dialog when
 there is nothing to send; the draft is cleared after sending; the Gmail tools are absent from the
 menu entirely when Chrome is not configured. The injected script is tested under jsdom against a
-Gmail-shaped fixture: it clicks Reply and not Reply all, refuses on zero matches, refuses on
-ambiguity, ignores hidden controls, never matches on class or position, finds Send through
-Gmail's bidi label characters, and scopes Send to the reply's own dialog.
+Gmail-shaped fixture: it clicks Reply (found by `role="link"`, matching Gmail's real markup, not
+`role="button"`) and not Reply all, refuses on zero matches, refuses on ambiguity, ignores hidden
+controls, never matches on class or position, finds Send through Gmail's bidi label characters,
+scopes Send to the reply's own dialog, and reads the sender's display name (`fromName`) off the
+`name` attribute, falling back to text content.
+
+**Also proven, from tonight's live-Gmail fixes:** `draftReply` drafts and writes a reply for a
+vague, content-free instruction ("generate a reply") rather than refusing or asking a
+clarifying question; `composeReply`'s system prompt always instructs the model not to invent
+the user's opinions, requests, or stance, and to write a brief neutral acknowledgment when the
+instruction is vague and the source email makes no direct ask; a genuine declined-text answer
+from the model (a clarifying question, say) reaches the user verbatim through `refuse()` rather
+than a canned "no tool for that" message, which still applies when the model gives no text.
 
 **NOT proven, and only a live run can prove it:** that `gmailScript.ts`'s selectors match the
 real Gmail DOM. The fixture is something this repo wrote. Every selector is in that one file for

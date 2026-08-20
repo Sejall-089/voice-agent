@@ -1,5 +1,10 @@
 import { CdpSession, listPages, type PageTarget } from "./CdpClient.ts";
-import { gmailAgent, type GmailOp, type ScriptEmail, type ScriptResult } from "./gmailScript.ts";
+import {
+  gmailAgent,
+  type GmailOp,
+  type ScriptEmail,
+  type ScriptResult,
+} from "./gmailScript.ts";
 import type { EmailMessage, GmailSurface } from "../types.ts";
 
 // The real `GmailSurface` (M10): Gmail in a Chrome the user launched with remote debugging on.
@@ -31,7 +36,13 @@ export class ChromeGmail implements GmailSurface {
   async readOpenEmail(): Promise<EmailMessage> {
     return this.withTab("hasOpenMessage", async (session) => {
       const email = await this.run<ScriptEmail>(session, "readOpenEmail");
-      return { subject: email.subject, from: email.from, to: email.to, body: email.body };
+      return {
+        subject: email.subject,
+        from: email.from,
+        fromName: email.fromName,
+        to: email.to,
+        body: email.body,
+      };
     });
   }
 
@@ -63,11 +74,7 @@ export class ChromeGmail implements GmailSurface {
 
   async setComposeText(text: string): Promise<void> {
     await this.withTab("hasComposeBox", async (session) => {
-      // focus + select-all happen inside the page in ONE call, so insertText replaces the draft
-      // rather than appending to it. Splitting them would leave a window where the box is
-      // focused but the old text is unselected, and a slow frame there would duplicate the draft.
-      await this.run<string>(session, "focusComposeBox");
-      await session.insertText(text);
+      await this.run<string>(session, "focusComposeBox", text);
     });
   }
 
@@ -90,8 +97,8 @@ export class ChromeGmail implements GmailSurface {
     predicate: Extract<GmailOp, "hasOpenMessage" | "hasComposeBox">,
     work: (session: CdpSession) => Promise<T>,
   ): Promise<T> {
-    const pages = (await listPages(this.baseUrl, this.timeoutMs)).filter((page) =>
-      page.url.includes(GMAIL_URL),
+    const pages = (await listPages(this.baseUrl, this.timeoutMs)).filter(
+      (page) => page.url.includes(GMAIL_URL),
     );
     if (pages.length === 0) {
       throw new Error(
@@ -140,11 +147,21 @@ export class ChromeGmail implements GmailSurface {
   // Ship gmailAgent into the page and unwrap its result. `toString()` is why that function may
   // not import or close over anything (see gmailScript.ts), and JSON.stringify on the op keeps
   // the injected source free of any string we did not build ourselves.
-  private async run<T>(session: CdpSession, op: GmailOp): Promise<T> {
-    const expression = `(${gmailAgent.toString()})(document, ${JSON.stringify(op)})`;
-    const result = await session.evaluate<ScriptResult<T> | undefined>(expression);
+  private async run<T>(
+    session: CdpSession,
+    op: GmailOp,
+    text?: string,
+  ): Promise<T> {
+    const expression = `(${gmailAgent.toString()})(document, ${JSON.stringify(op)}, ${
+      text === undefined ? "undefined" : JSON.stringify(text)
+    })`;
+    const result = await session.evaluate<ScriptResult<T> | undefined>(
+      expression,
+    );
     if (result === undefined) {
-      throw new Error(`Gmail returned nothing for "${op}" — the page may still be loading.`);
+      throw new Error(
+        `Gmail returned nothing for "${op}" — the page may still be loading.`,
+      );
     }
     if (!result.ok) {
       // The script's own wording, verbatim: it knows exactly what it could not find, and

@@ -94,6 +94,7 @@ export function sampleEmail(): EmailMessage {
   return {
     subject: "Tuesday sync",
     from: "alex@example.com",
+    fromName: "Alex",
     to: null,
     body: "Can you make the sync on Tuesday at 3pm?",
   };

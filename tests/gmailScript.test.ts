@@ -47,8 +47,8 @@ const OPEN_EMAIL = `
     <span email="alex@example.com">Alex</span>
     <div class="a3s">Can you make the sync on Tuesday at 3pm?</div>
   </div>
-  <div role="button" aria-label="Reply">Reply</div>
-  <div role="button" aria-label="Reply all">Reply all</div>
+  <div role="link" aria-label="Reply">Reply</div>
+  <div role="link" aria-label="Reply all">Reply all</div>
 `;
 
 const REPLY_OPEN = `
@@ -67,7 +67,23 @@ describe("reading (SAFE)", () => {
     const email = (result as { ok: true; value: ScriptEmail }).value;
     expect(email.subject).toBe("Tuesday sync");
     expect(email.from).toBe("alex@example.com");
+    // No `name` attribute on the sender span in this fixture — falls back to text content.
+    expect(email.fromName).toBe("Alex");
     expect(email.body).toContain("Tuesday at 3pm");
+  });
+
+  it("prefers the sender's `name` attribute over the span's text content", () => {
+    const page = render(`
+      <h2 data-thread-perm-id="t1">Tuesday sync</h2>
+      <div data-message-id="m1">
+        <span email="alex@example.com" name="Alexandra Chen">Alex</span>
+        <div class="a3s">Can you make the sync on Tuesday at 3pm?</div>
+      </div>
+      <div role="link" aria-label="Reply">Reply</div>
+    `);
+    const result = gmailAgent(page, "readOpenEmail");
+    const email = (result as { ok: true; value: ScriptEmail }).value;
+    expect(email.fromName).toBe("Alexandra Chen");
   });
 
   it("reports no open message rather than returning an empty one", () => {
@@ -110,7 +126,7 @@ describe("finding controls (the default-deny rule)", () => {
   it("clicks Reply — and not Reply all, which would email people the user didn't choose", () => {
     const page = render(OPEN_EMAIL);
     const clicked: string[] = [];
-    for (const button of Array.from(doc.querySelectorAll('[role="button"]'))) {
+    for (const button of Array.from(doc.querySelectorAll('[role="button"], [role="link"]'))) {
       button.addEventListener("click", () =>
         clicked.push(button.getAttribute("aria-label") ?? ""),
       );
@@ -129,7 +145,7 @@ describe("finding controls (the default-deny rule)", () => {
   it("refuses when SEVERAL controls match — it will not pick one", () => {
     const page = render(`
       ${OPEN_EMAIL}
-      <div role="button" aria-label="Reply">Reply</div>
+      <div role="link" aria-label="Reply">Reply</div>
     `);
     const result = gmailAgent(page, "openReplyBox");
     expect(result).toMatchObject({ ok: false });
@@ -139,7 +155,7 @@ describe("finding controls (the default-deny rule)", () => {
   it("matches on role and accessible name, never on class or position", () => {
     // Looks like Gmail's Reply button in every way except the two that count.
     const page = render(`
-      ${OPEN_EMAIL.replace('<div role="button" aria-label="Reply">Reply</div>', "")}
+      ${OPEN_EMAIL.replace('<div role="link" aria-label="Reply">Reply</div>', "")}
       <div class="T-I J-J5-Ji" tabindex="0">Reply</div>
     `);
     expect(gmailAgent(page, "openReplyBox")).toMatchObject({ ok: false });
@@ -148,7 +164,7 @@ describe("finding controls (the default-deny rule)", () => {
   it("does not treat a hidden Reply in a collapsed menu as a candidate", () => {
     const page = render(`
       ${OPEN_EMAIL}
-      <div aria-hidden="true"><div role="button" aria-label="Reply">Reply</div></div>
+      <div aria-hidden="true"><div role="link" aria-label="Reply">Reply</div></div>
     `);
     // Exactly one VISIBLE match remains, so this succeeds rather than failing as ambiguous.
     expect(gmailAgent(page, "openReplyBox")).toMatchObject({ ok: true });
