@@ -20,7 +20,11 @@ let memory: SqliteMemory;
 let shell: MockShell;
 let sender: FakeSender;
 
-function run(instruction: string, choice: ToolChoice, completion = "LLM-OUTPUT") {
+function run(
+  instruction: string,
+  choice: ToolChoice,
+  completion = "LLM-OUTPUT",
+) {
   const planner = new Planner(
     new FakeLLM(choice, completion),
     shell,
@@ -42,7 +46,9 @@ beforeEach(() => {
   // The user's known facts.
   memory.write("tone", "concise and warm", { confidence: 0.9 });
   memory.write("team", "#design-team", { confidence: 0.9 });
-  memory.write("target:dashboard", "https://dash.example.com", { confidence: 0.9 });
+  memory.write("target:dashboard", "https://dash.example.com", {
+    confidence: 0.9,
+  });
 });
 
 describe("✅ The seven demo tasks (spec §6)", () => {
@@ -64,7 +70,10 @@ describe("✅ The seven demo tasks (spec §6)", () => {
     );
     expect(outcome.status).toBe("ok");
     expect(outcome.result).toContain("concise and warm"); // resolved from memory
-    expect(shell.actions).toContainEqual({ kind: "copyToClipboard", payload: "REWRITTEN" });
+    expect(shell.actions).toContainEqual({
+      kind: "copyToClipboard",
+      payload: "REWRITTEN",
+    });
   });
 
   it("3. Open a named target (resolved from memory)", async () => {
@@ -98,7 +107,9 @@ describe("✅ The seven demo tasks (spec §6)", () => {
     );
     expect(outcome.status).toBe("ok");
     expect(shell.confirmMessages[0]).toContain("#design-team"); // confirmed the RESOLVED action
-    expect(sender.calls).toEqual([{ channel: "#design-team", text: "FORMATTED" }]);
+    expect(sender.calls).toEqual([
+      { channel: "#design-team", text: "FORMATTED" },
+    ]);
   });
 
   it("6. A correction sticks (versions the old fact, changes future behavior)", async () => {
@@ -134,7 +145,10 @@ describe("✅ The seven demo tasks (spec §6)", () => {
 
 describe("🚫 The closed world holds", () => {
   it("an unregistered request is refused and logged as a miss — never faked", async () => {
-    const outcome = await run("book me a flight to Tokyo", { kind: "none", text: "I can't." });
+    const outcome = await run("book me a flight to Tokyo", {
+      kind: "none",
+      text: null,
+    });
 
     expect(outcome.status).toBe("no_tool");
     expect(shell.results[0]).toMatch(/can't do that yet/i);

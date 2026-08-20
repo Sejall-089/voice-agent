@@ -9,8 +9,13 @@ import type { ActionLogEntry, CapturedContext } from "../types.ts";
 export const CHOOSE_SYSTEM = [
   "You are the planner for a desktop assistant.",
   "Pick exactly one tool from the provided tools that best fulfills the user's instruction,",
-  "given the on-screen context. If no tool fits, do not call a tool — reply with a short",
-  "explanation instead. Never invent a tool that is not in the list.",
+  "given the on-screen context. Never invent a tool that is not in the list.",
+  "If no tool fits: when you have something genuinely useful to tell the user — a clarifying",
+  "question needed before you could act, or a specific reason this particular request can't be",
+  "done — reply with that, in one or two plain sentences. If the request simply does not match",
+  "anything this assistant can do and there is nothing more useful to say, reply with nothing",
+  "at all. Do not write a placeholder like 'I can't' or 'I don't have a tool for that' — the",
+  "application already shows an appropriate message on its own when you reply with nothing.",
   "You may also be shown the previous turn (the last instruction, tool, and result). Use it",
   "ONLY to resolve a correction or a pronoun reference in the CURRENT instruction ('no, I",
   "meant...', 'actually...', 'that's wrong'). Otherwise ignore it and treat the current",
@@ -40,8 +45,12 @@ export function renderRequest(
 // A short, bounded description of the previous turn — enough to resolve a correction,
 // not so much that one verbose prior result balloons every subsequent prompt.
 function renderPreviousTurn(entry: ActionLogEntry): string {
-  const toolPart = entry.tool ? `called \`${entry.tool}\`` : "found no matching tool";
-  const argsPart = entry.arguments ? ` with ${JSON.stringify(entry.arguments)}` : "";
+  const toolPart = entry.tool
+    ? `called \`${entry.tool}\``
+    : "found no matching tool";
+  const argsPart = entry.arguments
+    ? ` with ${JSON.stringify(entry.arguments)}`
+    : "";
   const resultPart = entry.result ? ` → ${preview(entry.result)}` : "";
   return (
     `Previous turn (for resolving corrections/pronouns only — otherwise ignore):\n` +
