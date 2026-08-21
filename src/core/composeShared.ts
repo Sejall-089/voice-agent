@@ -26,6 +26,10 @@ export function noInventionClause(sourceLabel: string): string {
     "Do not invent facts, names, dates, times, or commitments that are not in the",
     `${sourceLabel} or the instruction: if a detail is missing, write around it rather than`,
     "guessing. Do not invent the user's opinions, feedback, requests, or stance either.",
+    "Write only what the instruction and the source material actually asked for or stated —",
+    "do not add extra suggestions, ideas, elaboration, or advice beyond that, even if it",
+    "seems genuinely helpful. If the instruction gives real content, your job is to express",
+    "that content well, not to expand on it.",
   ].join(" ");
 }
 
