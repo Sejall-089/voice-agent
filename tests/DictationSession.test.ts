@@ -6,15 +6,18 @@ import type { AudioClip, Transcriber } from "../src/core/types.ts";
 import type { ForegroundWindow } from "../src/main/shell/InputInjector.ts";
 import { FakeTranscriber } from "./FakeTranscriber.ts";
 
-// M12: system-wide dictation, tested the same way VoiceSession is (see VoiceSession.test.ts) —
-// no audio, no model, no microphone, no electron, and here also no PowerShell/SendInput. The
-// real WindowsInputInjector is live-only (same split as WhisperCppTranscriber/ChromeGmail: no
-// test spawns a real binary or drives a real OS), so MockInputInjector stands in for it.
+// M12/M12.1: system-wide dictation, tested the same way VoiceSession is (see
+// VoiceSession.test.ts) — no audio, no model, no microphone, no electron, and here also no
+// PowerShell/SendInput. The real WindowsInputInjector is live-only (same split as
+// WhisperCppTranscriber/ChromeGmail: no test spawns a real binary or drives a real OS), so
+// MockInputInjector stands in for it.
 //
-// Shape mirrors VoiceSession's toggle-era design deliberately (§ the M12 plan): tap to start,
-// tap again to stop-and-type. The one thing VoiceSession never had to do is check whether
-// focus moved between "started speaking" and "about to type" — that check is this file's
-// most important coverage.
+// begin()/finish() now mirrors VoiceSession's own shape exactly (M12.1 replaced the original
+// same-hotkey toggle with Enter-to-finish, once Enter could be armed as a global shortcut).
+// `shell.pressStopKey()` stands in for the real global Enter press, the same way
+// `ackVoiceStarted()` elsewhere stands in for the renderer's IPC ack. The one thing
+// VoiceSession never had to do is check whether focus moved between "started speaking" and
+// "about to type" — that check is still this file's most important coverage.
 
 function clip(durationMs: number): AudioClip {
   return { wav: new Uint8Array([1, 2, 3, 4]), durationMs };
@@ -54,29 +57,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("DictationSession (M12: tap to start, tap again to type)", () => {
+describe("DictationSession (M12.1: hotkey starts, Enter finishes)", () => {
   it("starts idle", () => {
     const { session } = setup({ transcriber: new FakeTranscriber("hi") });
     expect(session.getState()).toBe("idle");
   });
 
-  it("toggle() from idle captures the foreground window, narrates it, and starts recording", async () => {
+  it("begin() captures the foreground window, arms Enter, and narrates before recording", async () => {
     const { shell, session } = setup({ transcriber: new FakeTranscriber("hi") });
 
-    await session.toggle();
+    await session.begin();
 
     expect(session.getState()).toBe("recording");
     expect(shell.recordingsStarted).toBe(1);
+    expect(shell.armStopKeyCalls).toBe(1);
     expect(shell.narrations.at(-1)).toMatch(/Untitled - Notepad/);
+    expect(shell.narrations.at(-1)).toMatch(/press Enter when done/);
   });
 
-  it("toggle() again stops, transcribes, verifies focus, and types the transcript", async () => {
+  it("pressing the stop key stops, transcribes, verifies focus, types, and disarms Enter", async () => {
     const { shell, injector, session } = setup({
       transcriber: new FakeTranscriber("summarize this for the team"),
     });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     expect(injector.typed).toEqual(["summarize this for the team"]);
     expect(session.getState()).toBe("idle");
@@ -85,13 +90,14 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       state: "idle",
       detail: "summarize this for the team",
     });
+    expect(shell.disarmStopKeyCalls).toBe(1);
   });
 
   it("passes through recording -> transcribing -> inserting in order", async () => {
     const { shell, session } = setup({ transcriber: new FakeTranscriber("hello") });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     const seen = shell.voiceStates.map((v) => v.state);
     expect(seen).toEqual(["recording", "transcribing", "inserting", "idle"]);
@@ -104,8 +110,8 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       foreground: [NOTEPAD, OTHER],
     });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     expect(injector.typed).toHaveLength(0);
     expect(session.getState()).toBe("idle");
@@ -120,8 +126,8 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       foreground: [null, NOTEPAD],
     });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     expect(injector.typed).toHaveLength(0);
     expect(shell.results.at(-1)).toMatch(/Focus moved/);
@@ -133,60 +139,73 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       failTypeWith: "Typing was blocked partway through (4/38 keystrokes delivered)",
     });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     expect(injector.typed).toHaveLength(0); // MockInputInjector never records a failed call
     expect(session.getState()).toBe("idle");
     expect(shell.results.at(-1)).toMatch(/blocked partway through/);
     expect(shell.results.at(-1)).toMatch(/open the file menu/);
 
-    // Not stuck: the next tap starts a fresh recording.
-    await session.toggle();
+    // Not stuck: the hotkey starts a fresh recording.
+    await session.begin();
     expect(session.getState()).toBe("recording");
   });
 
-  it("abandon() discards the take SILENTLY while recording", async () => {
+  it("abandon() discards the take SILENTLY while recording, and disarms Enter", async () => {
     const { shell, injector, session } = setup({
       transcriber: new FakeTranscriber("this should never run"),
     });
 
-    await session.toggle();
+    await session.begin();
     await session.abandon();
 
     expect(session.getState()).toBe("idle");
     expect(shell.recordingsCancelled).toBe(1);
     expect(injector.typed).toHaveLength(0);
+    expect(shell.disarmStopKeyCalls).toBe(1);
     // No "didn't catch that", no message of any kind — same rule as VoiceSession.abandon().
     expect(shell.results).toEqual([]);
   });
 
-  it("the 30s cap releases the microphone WITHOUT transcribing or typing", async () => {
+  it("a stray Enter press once idle is a harmless no-op", async () => {
+    const { shell, injector, session } = setup({ transcriber: new FakeTranscriber("unused") });
+
+    // Never armed in the first place — pressStopKey() before any begin() has nothing to call.
+    await shell.pressStopKey();
+
+    expect(session.getState()).toBe("idle");
+    expect(injector.typed).toHaveLength(0);
+  });
+
+  it("the 30s cap releases the microphone WITHOUT transcribing or typing (Enter stays armed)", async () => {
     vi.useFakeTimers();
     const { shell, injector, session } = setup({
       transcriber: new FakeTranscriber("a very long ramble"),
       maxRecordingMs: 30_000,
     });
 
-    await session.toggle();
+    await session.begin();
     await vi.advanceTimersByTimeAsync(30_000);
 
     expect(session.getState()).toBe("stopped");
     expect(shell.recordingsStopped).toBe(1);
     expect(injector.typed).toHaveLength(0);
     expect(shell.narrations.at(-1)).toMatch(/30s/);
+    expect(shell.narrations.at(-1)).toMatch(/press Enter/);
+    expect(shell.disarmStopKeyCalls).toBe(0); // still armed — Enter still finishes it from here
   });
 
-  it("a tap after the cap still transcribes and types what was said", async () => {
+  it("Enter after the cap still transcribes and types what was said", async () => {
     vi.useFakeTimers();
-    const { injector, session } = setup({
+    const { injector, session, shell } = setup({
       transcriber: new FakeTranscriber("a very long ramble"),
       maxRecordingMs: 30_000,
     });
 
-    await session.toggle();
+    await session.begin();
     await vi.advanceTimersByTimeAsync(30_000);
-    await session.toggle();
+    await shell.pressStopKey();
 
     expect(injector.typed).toEqual(["a very long ramble"]);
     expect(session.getState()).toBe("idle");
@@ -199,7 +218,7 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       maxRecordingMs: 30_000,
     });
 
-    await session.toggle();
+    await session.begin();
     await vi.advanceTimersByTimeAsync(30_000);
     expect(session.getState()).toBe("stopped");
 
@@ -217,44 +236,53 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       maxRecordingMs: 30_000,
     });
 
-    await session.toggle();
+    await session.begin();
     await vi.advanceTimersByTimeAsync(30_000);
     await session.abandon();
-    await session.toggle(); // fresh recording, not a resumption
+    await session.begin(); // fresh recording, not a resumption
 
     expect(session.getState()).toBe("recording");
     expect(injector.typed).toHaveLength(0);
   });
 
-  it("does not fire the cap after a normal stop-and-type", async () => {
+  it("does not fire the cap after a normal finish", async () => {
     vi.useFakeTimers();
     const { shell, session } = setup({
       transcriber: new FakeTranscriber("summarize this"),
       maxRecordingMs: 30_000,
     });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(shell.recordingsStopped).toBe(1); // not 2
   });
 
-  it("cycles start -> stop-and-type -> start again with no state left stuck", async () => {
-    // Unlike VoiceSession's begin()/finish() split, toggle() dispatches on the CURRENT
-    // state — recording means "stop and type", not "ignored". This pins that a full cycle
-    // (tap, tap, tap) really does start a second, independent recording afterward.
+  it("ignores begin() while already listening", async () => {
+    // Mirrors VoiceSession's own "ignores begin() while already listening" test exactly — the
+    // dictate hotkey is now start-only, so a repeat press mid-recording must no-op, not stop it.
     const { shell, session } = setup({ transcriber: new FakeTranscriber("hi") });
 
-    await session.toggle(); // start
-    await session.toggle(); // stop, transcribe, type (resolves synchronously with FakeTranscriber)
-    await session.toggle(); // start again
+    await session.begin();
+    await session.begin();
+
+    expect(shell.recordingsStarted).toBe(1);
+    expect(session.getState()).toBe("recording");
+  });
+
+  it("cycles start -> Enter-finish -> start again with no state left stuck", async () => {
+    const { shell, session } = setup({ transcriber: new FakeTranscriber("hi") });
+
+    await session.begin();
+    await shell.pressStopKey(); // stop, transcribe, type (resolves synchronously with FakeTranscriber)
+    await session.begin(); // start again
 
     expect(shell.recordingsStarted).toBe(2);
     expect(session.getState()).toBe("recording");
   });
 
-  it("ignores a stray toggle() while a transcription is already running", async () => {
+  it("ignores a stray Enter press while a transcription is already running", async () => {
     let release!: (text: string) => void;
     const transcriber: Transcriber = {
       transcribe: () =>
@@ -264,24 +292,24 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
     };
     const { shell, injector, session } = setup({ transcriber });
 
-    await session.toggle();
-    const stopping = session.toggle();
+    await session.begin();
+    const finishing = shell.pressStopKey();
     await flush();
     expect(session.getState()).toBe("transcribing");
 
-    await session.toggle(); // the stray second tap
+    await shell.pressStopKey(); // the stray second Enter
     expect(shell.recordingsStopped).toBe(1); // no second stop
 
     release("open my dashboard");
-    await stopping;
+    await finishing;
     expect(injector.typed).toEqual(["open my dashboard"]); // the real one still lands
   });
 
   it("returns to idle, typing nothing, when the transcript is blank", async () => {
     const { shell, injector, session } = setup({ transcriber: new FakeTranscriber("   \n  ") });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     expect(injector.typed).toHaveLength(0);
     expect(session.getState()).toBe("idle");
@@ -292,8 +320,8 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
     const transcriber = new FakeTranscriber("ghost text");
     const { shell, injector, session } = setup({ transcriber, clips: [clip(80)] });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     expect(injector.typed).toHaveLength(0);
     expect(shell.results.at(-1)).toMatch(/didn't catch that/i);
@@ -304,13 +332,13 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       transcriber: new FakeTranscriber("", "whisper exited with code 1"),
     });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
     expect(session.getState()).toBe("idle");
     expect(shell.results.at(-1)).toMatch(/whisper exited with code 1/);
 
-    await session.toggle();
+    await session.begin();
     expect(session.getState()).toBe("recording");
   });
 
@@ -320,22 +348,23 @@ describe("DictationSession (M12: tap to start, tap again to type)", () => {
       failRecording: "microphone access was denied",
     });
 
-    await session.toggle();
+    await session.begin();
 
     expect(session.getState()).toBe("idle");
     expect(shell.results.at(-1)).toMatch(/microphone access was denied/);
   });
 
-  it("never presses Enter or adds a newline — the transcript is typed exactly as given", async () => {
-    const { injector, session } = setup({
+  it("types the raw transcript verbatim — Enter stops the session but never lands in the text", async () => {
+    const { injector, session, shell } = setup({
       transcriber: new FakeTranscriber("first line\nsecond line"),
     });
 
-    await session.toggle();
-    await session.toggle();
+    await session.begin();
+    await shell.pressStopKey();
 
-    // Exactly one typeText() call with the raw transcript — no Enter is ever synthesized
-    // around it, and no cleanup/rewrite pass runs over it (v1 is raw transcript only).
+    // Exactly one typeText() call with the raw transcript — no cleanup/rewrite pass runs
+    // over it (v1 is raw transcript only), and the Enter that stopped the session is not
+    // itself part of what got typed.
     expect(injector.typed).toEqual(["first line\nsecond line"]);
   });
 });

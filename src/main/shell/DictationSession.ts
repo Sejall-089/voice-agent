@@ -2,18 +2,28 @@ import type { AudioClip, Transcriber } from "../../core/types.ts";
 import type { ForegroundWindow, InputInjector } from "./InputInjector.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
 
-// System-wide dictation (M12): hold nothing, tap a SEPARATE hotkey to start, tap it again to
-// stop-and-type into whatever OS window currently has focus — in ANY app, not just this one.
+// System-wide dictation (M12): hold nothing, tap a SEPARATE hotkey to start, then press
+// ENTER to stop and type the transcript into whatever OS window currently has focus — in ANY
+// app, not just this one. Escape cancels, same as everywhere else in this app.
 //
-// Deliberately NOT the instruction bar's model. That one hotkey (M8) works because Enter is
-// already there once the bar is open and focused (spec.md §4a) — but the bar stealing focus
-// is exactly what dictation must never do (it is about the app you are ALREADY in), so
-// there is nothing for an "Enter" gesture to land on. This is M7's original toggle shape
-// instead, one tap to start and one to finish, reused for a different target.
-//
-//   idle ──toggle()──► recording ──toggle()──► transcribing ──► inserting ──► idle
-//            │              └──cap (30s)──► stopped ──toggle()──►┘
+//   idle ──begin()──► recording ──finish()──► transcribing ──► inserting ──► idle
+//            │              └──cap (30s)──► stopped ──finish()──►┘
 //            └──abandon()──► idle (silent, mirrors VoiceSession)
+//
+// This is now the SAME shape as VoiceSession's begin()/finish()/abandon() (M12 originally
+// shipped a same-hotkey TOGGLE instead, rejecting this shape for one reason: the dictation
+// window is shown via showInactive() and never takes OS focus, so a renderer <input> keydown
+// listener for Enter would never fire — there was nothing to hook it to. That objection
+// dissolves once Enter is registered as a GLOBAL shortcut instead (WindowsShell.armStopKey/
+// disarmStopKey), exactly the precedent WindowsShell already set for Escape, which has the
+// identical focus problem. M12.1 switched to this shape after live use showed the same-hotkey
+// toggle was the wrong mental model — people reflexively reach for Enter, the way the
+// instruction bar's own M8 flow already works.
+//
+// THE tradeoff this brings: for as long as a recording is live ("recording" or "stopped"),
+// Enter is captured GLOBALLY — it stops dictation and types the transcript instead of
+// reaching whatever app has focus for its normal purpose (submitting a form, a newline).
+// That is inherent to "Enter finishes it, no matter what has focus" and is the whole point.
 //
 // Shares WindowsShell's existing voiceState field and showVoiceState/hasUnsubmittedAudio/
 // pinnedAgainstBlur plumbing with VoiceSession rather than adding a parallel "busy" concept
@@ -23,8 +33,8 @@ import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
 //
 // No electron import — same discipline as VoiceSession — so this runs headless under vitest.
 
-const DEFAULT_MAX_RECORDING_MS = 30_000; // a SAFETY CEILING for a forgotten stop-tap, not a
-// typical session length: dictation's normal ending is the second tap, and 30s is short
+const DEFAULT_MAX_RECORDING_MS = 30_000; // a SAFETY CEILING for a forgotten Enter, not a
+// typical session length: dictation's normal ending is pressing Enter, and 30s is short
 // enough on purpose — unlike the instruction bar's 90s cap, a dictation take runs silently
 // in the background with no bar to look at, so a stray hotkey press that is never followed
 // up should not hold someone's microphone open for a minute and a half. Flagged in the M12
@@ -42,9 +52,12 @@ export interface DictationSessionOptions {
 // The shell surface dictation needs: the same microphone primitives VoiceShell already
 // defines, plus `narrate` (WindowsShell.narrate — the same commandbar:status channel M10
 // wired for `caution`-tool narration) to name the window it is about to type into before it
-// types into it.
+// types into it, plus arm/disarmStopKey (WindowsShell's global Enter registration, scoped to
+// exactly one recording's lifetime).
 export interface DictationShell extends VoiceShell {
   narrate(text: string): void;
+  armStopKey(onStop: () => void | Promise<void>): void;
+  disarmStopKey(): void;
 }
 
 export class DictationSession {
@@ -77,22 +90,11 @@ export class DictationSession {
     return this.state === s;
   }
 
-  // The dictation hotkey. idle -> start listening; recording/stopped -> stop and type;
-  // transcribing/inserting -> already running, ignored (nothing safe to interrupt mid-flight).
-  async toggle(): Promise<void> {
-    if (this.is("idle")) {
-      await this.begin();
-      return;
-    }
-    if (this.is("recording") || this.is("stopped")) {
-      await this.stopAndType();
-    }
-    // transcribing / inserting: a repeat tap while already committed to acting is ignored,
-    // not queued — there is nothing safe to do with a second tap once typing may already be
-    // under way.
-  }
+  // The dictation hotkey. A no-op unless idle — once a recording has started, the ONLY way to
+  // stop it is Enter (armStopKey below), not a repeat press of this hotkey.
+  async begin(): Promise<void> {
+    if (!this.is("idle")) return;
 
-  private async begin(): Promise<void> {
     // Captured BEFORE the microphone opens (which takes a moment), and BEFORE anything is
     // narrated — the whole point is knowing where text will land before you speak, not after.
     try {
@@ -102,7 +104,10 @@ export class DictationSession {
     }
 
     this.enter("recording");
-    this.shell.narrate(`Dictating into — ${this.target?.title ?? "the focused window"}`);
+    this.shell.armStopKey(() => this.finish());
+    this.shell.narrate(
+      `Dictating into — ${this.target?.title ?? "the focused window"} — press Enter when done, Esc to cancel.`,
+    );
     this.capTimer = setTimeout(() => void this.stopAtCap(), this.maxRecordingMs);
 
     try {
@@ -115,7 +120,12 @@ export class DictationSession {
     }
   }
 
-  private async stopAndType(): Promise<void> {
+  // Fires on the global Enter press (armed only while recording/stopped). A no-op unless
+  // there is something to stop — a stray Enter during transcribing/inserting/idle is silently
+  // ignored, mirroring VoiceSession.finish()'s own guard.
+  async finish(): Promise<void> {
+    if (!this.is("recording") && !this.is("stopped")) return;
+
     const clip = this.is("stopped") ? this.heldClip : await this.stopRecording();
     this.heldClip = null;
     if (!clip) return;
@@ -200,7 +210,7 @@ export class DictationSession {
     if (!clip) return;
     this.heldClip = clip;
     this.enter("stopped");
-    this.shell.narrate("Recording paused at 30s — tap again to type it, or Esc to discard.");
+    this.shell.narrate("Recording paused at 30s — press Enter to type it, or Esc to discard.");
   }
 
   private async stopRecording(): Promise<AudioClip | null> {
@@ -224,6 +234,14 @@ export class DictationSession {
     }
     this.state = state;
     this.shell.showVoiceState(state, detail);
+    // The single centralized disarm point: every exit path (a successful finish(), every
+    // giveUp() failure branch, and abandon()) already funnels through enter("idle", …), so
+    // this one line covers all of them — no per-call-site disarming needed. armStopKey()
+    // itself is idempotent, so there's no matching "arm on entering recording" needed here;
+    // begin() arms it once, directly, at the one place a fresh recording actually starts.
+    if (state === "idle") {
+      this.shell.disarmStopKey();
+    }
   }
 }
 

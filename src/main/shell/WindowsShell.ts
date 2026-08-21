@@ -39,6 +39,12 @@ export class WindowsShell implements OSShell, VoiceShell {
   // Whether the global Escape shortcut is currently ours. Scoped to exactly the window's
   // visible lifetime (below) — Escape is not stolen system-wide the rest of the time.
   private escapeRegistered = false;
+  // Whether the global Enter ("Return") shortcut is currently ours — DictationSession's stop
+  // key (M12.1). Scoped to exactly one dictation session's recording, via armStopKey/
+  // disarmStopKey below, NOT to window visibility like Escape: the window can be visible for
+  // other reasons (the instruction bar, caution-tool narration) where Enter must behave
+  // completely normally for whatever app has real OS focus.
+  private stopKeyRegistered = false;
 
   constructor(private readonly window: BrowserWindow) {
     // Both listeners are registered ONCE, for the app's lifetime.
@@ -87,6 +93,46 @@ export class WindowsShell implements OSShell, VoiceShell {
     if (!this.escapeRegistered) return;
     globalShortcut.unregister("Escape");
     this.escapeRegistered = false;
+  }
+
+  // DictationSession's stop key (M12.1): "press Enter to finish" only means anything while a
+  // dictation recording is actually live, so this is armed in DictationSession.begin() and
+  // disarmed the moment it returns to idle — never left registered the rest of the time,
+  // where Enter must reach whatever app has real OS focus like any other keypress.
+  //
+  // `() => void | Promise<void>` mirrors Tool.narrate/confirmSummary's own widening (M11) —
+  // the same "let a nominally-sync slot carry async work" shape, which is what lets
+  // MockShell's test double hand back an awaitable promise instead of being unawaitable.
+  armStopKey(onStop: () => void | Promise<void>): void {
+    if (this.stopKeyRegistered) return;
+    this.stopKeyRegistered = globalShortcut.register("Return", () => {
+      void onStop();
+    });
+    if (!this.stopKeyRegistered) {
+      // Rare — Enter/Return is not a common global-shortcut target — and there is no in-app
+      // fallback: the dictate hotkey itself only ever starts a recording now, so a failed
+      // registration here means the ONLY way out of this recording is Escape (cancel) or the
+      // 30s cap (releases the mic, still requires Enter to ever type it — so effectively
+      // stuck until Enter frees up). Logged loudly for exactly that reason.
+      console.error(
+        "[WindowsShell] Failed to register Enter for dictation (already in use) — this " +
+          "recording can only be cancelled with Esc, not finished.",
+      );
+    }
+  }
+
+  disarmStopKey(): void {
+    if (!this.stopKeyRegistered) return;
+    globalShortcut.unregister("Return");
+    this.stopKeyRegistered = false;
+  }
+
+  // Whether a typed-text capture (showInput()) is currently pending — used to widen the
+  // dictation hotkey's mutual-exclusion guard (dictate.ts's combineInstructionBusy) beyond
+  // "is voice recording" to "is the bar open at all", now that Enter is a trigger both flows
+  // can reach for.
+  isInputCapturing(): boolean {
+    return this.pendingInput !== null;
   }
 
   // Ends an in-flight capture as a DISMISSAL — no text, and voice throws its recording away.

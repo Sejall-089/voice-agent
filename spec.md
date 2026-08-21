@@ -313,8 +313,8 @@ where the string came from.
 ## 4c. System-wide dictation (M12) — never reaches the planner
 
 Everything in §4a exists to produce an *instruction string* for the planner. M12 is a
-different, simpler primitive: hold nothing, tap the dictation hotkey to start listening, tap
-it again to stop and type the raw transcript at the OS caret of whatever window currently has
+different, simpler primitive: hold nothing, tap the dictation hotkey to start listening, press
+**Enter** to stop and type the raw transcript at the OS caret of whatever window currently has
 focus — in ANY app, not just this one. There is no tool selection, no risk tier, no confirm
 gate, because there is no planner call at all. It is the "insert text at cursor" primitive the
 Gmail/Notion CDP work always implied but never generalized past one browser tab.
@@ -340,21 +340,40 @@ common bindings in exactly the apps dictation is most likely used in. `Ctrl+Alt+
 third candidate: no default binding in Word/Excel, and unused in Chrome/VS Code (Chrome's own
 download/console shortcuts are `Ctrl+J`/`Ctrl+Shift+J`, one modifier short of this).
 
-**The gesture is a toggle, not the instruction bar's Enter-driven shape.** M8 collapsed
-voice's original toggle into begin()/finish() because Enter is already there once the bar is
-open and focused — that reason doesn't transfer here, because during dictation `Enter`
-belongs to whatever app is being dictated into, not to this app. So `DictationSession`
-(`src/main/shell/DictationSession.ts`) is deliberately M7's original toggle shape, reused for
-a different target:
+**The gesture is `begin()`/`finish()`, matching `VoiceSession` exactly — Enter stops it, not
+the same hotkey.** M12 originally shipped a same-hotkey TOGGLE, rejecting the instruction
+bar's Enter-driven shape for one reason: the dictation window is shown via `showInactive()`
+and never takes OS focus, so a renderer `<input>` keydown listener for Enter would never fire
+— there was nothing to hook it to. **M12.1 revised this** after live use showed people
+reflexively reach for Enter, the way the instruction bar's own M8 flow already works — the
+objection dissolves once Enter is registered as a **global** shortcut instead
+(`WindowsShell.armStopKey`/`disarmStopKey`), exactly the precedent `WindowsShell` already set
+for Escape, which has the identical focus problem. So `DictationSession`
+(`src/main/shell/DictationSession.ts`) is now the SAME shape as `VoiceSession`:
 
 ```
-idle ──toggle()──► recording ──toggle()──► transcribing ──► inserting ──► idle
-         │              └──cap (DEFAULT_MAX_RECORDING_MS = 30s)──► stopped ──toggle()──►┘
+idle ──begin()──► recording ──finish()──► transcribing ──► inserting ──► idle
+         │              └──cap (DEFAULT_MAX_RECORDING_MS = 30s)──► stopped ──finish()──►┘
          └──abandon()──► idle (silent, mirrors VoiceSession)
 ```
 
-The 30s cap is a SAFETY CEILING for a forgotten stop-tap, not a typical session length —
-dictation's normal ending is the second tap, and unlike the instruction bar's 90s cap (which
+`begin()` is a no-op unless idle — once a recording has started, the ONLY way to stop it is
+Enter, not a repeat press of the dictate hotkey. `finish()` fires on the global Enter press
+(armed in `begin()`, disarmed the moment the session returns to `idle` — a single centralized
+disarm inside the private `enter()` transition helper, since every exit path funnels through
+`enter("idle", …)` regardless of whether it was success, failure, or `abandon()`).
+
+**The tradeoff this brings, stated plainly: for as long as a recording is live ("recording" or
+"stopped"), Enter is captured GLOBALLY** — it stops dictation and types the transcript
+instead of reaching whatever app has focus for its normal purpose (submitting a form, a
+newline). That is inherent to "Enter finishes it, no matter what has focus" and is the whole
+point; it ends the moment the session returns to idle. If the global registration itself
+fails (rare — Enter/Return is not a common global-shortcut target), it is logged loudly and
+there is no in-app fallback: that recording can only be cancelled with Escape, not finished,
+until whatever is holding the key releases it.
+
+The 30s cap is a SAFETY CEILING for a forgotten Enter, not a typical session length —
+dictation's normal ending is pressing Enter, and unlike the instruction bar's 90s cap (which
 sits behind a visible, focused bar the whole time), a dictation take runs silently in the
 background with nothing on screen to prompt you back to it. It is a named, tunable constant
 (`DEFAULT_MAX_RECORDING_MS`, same convention as `ChromeNotion`'s `FOCUS_SETTLE_MS`/
@@ -366,13 +385,25 @@ concept — the two machines are mutually exclusive at runtime (they share the o
 in the renderer), so one field safely serves both. `"inserting"` was added to `VoiceState` for
 this reason.
 
-**Mutual exclusion (`src/main/dictate.ts`).** Dictation and the instruction bar's own voice
-capture share one microphone and, while dictation runs, the same `BrowserWindow` (shown via
-`showInactive()` so it never steals focus). If the instruction hotkey fired mid-dictation,
-`shell.showInput()`'s `window.focus()` would yank focus away from whatever the user is
-dictating into — exactly the failure this feature exists to avoid. Each hotkey's handler
-checks the other session's state before doing anything; both sessions' `abandon()` are no-ops
-when already idle, so `shell.onDismissed()` can call both unconditionally.
+**Mutual exclusion (`src/main/dictate.ts`), widened in M12.1.** Dictation and the instruction
+bar's own voice capture share one microphone and, while dictation runs, the same
+`BrowserWindow` (shown via `showInactive()` so it never steals focus). If the instruction
+hotkey fired mid-dictation, `shell.showInput()`'s `window.focus()` would yank focus away from
+whatever the user is dictating into — exactly the failure this feature exists to avoid. Each
+hotkey's handler checks the other session's state before doing anything; both sessions'
+`abandon()` are no-ops when already idle, so `shell.onDismissed()` can call both
+unconditionally.
+
+Originally the dictation hotkey was blocked only while the instruction bar's *voice*
+sub-capture was recording (`voice.getState() !== "idle"`). Under the same-hotkey-stops design
+this was harmless — dictation never touched Enter, so it never collided with the bar's own
+Enter-to-submit. Once Enter became a shared global trigger (M12.1), this became a real gap: the
+bar can be open and being typed into (`showInput()` pending) with voice already abandoned via
+`commandbar:typing`, and in that state the old guard would have let the dictation hotkey start
+a recording anyway — one later Enter press could then both submit the bar's typed text *and*
+finish dictation. `combineInstructionBusy(voice, shell)` closes it: the dictation hotkey is
+blocked for the bar's *entire* open lifetime (`WindowsShell.isInputCapturing()`, a trivial
+`pendingInput !== null` read), not just the portion where voice happens to still be recording.
 
 **Insertion mechanism: `SendInput` + `KEYEVENTF_UNICODE`, not UI Automation, not clipboard,
 not `SendKeys`.** See the tech-stack table (§3) for the full reasoning; the short version is
@@ -780,18 +811,27 @@ Post-v0:
       input, not `execCommand` — see §6b for why); and one tool, `addToPage` (§6b).
 - [x] **M12 — System-wide dictation.** Adds `InputInjector`/`WindowsInputInjector` (§4c,
       `SendInput`+`KEYEVENTF_UNICODE` over a persistent PowerShell host — the first thing in
-      this app to act on the OS outside a browser or the app's own bar); `DictationSession`
-      (M7's original toggle shape, reused for a different target — see §4c for why begin()/
-      finish() doesn't transfer); a SEPARATE, negotiated dictation hotkey; and `dictate.ts`'s
-      mutual-exclusion guard against the instruction bar's own voice capture. Never reaches
-      the planner — no registry entry, no risk tier, no confirm gate (§4c explains why that
-      is a deliberate omission, not a gap). `/core` is untouched.
+      this app to act on the OS outside a browser or the app's own bar); `DictationSession`;
+      a SEPARATE, negotiated dictation hotkey; and `dictate.ts`'s mutual-exclusion guard
+      against the instruction bar's own voice capture. Never reaches the planner — no
+      registry entry, no risk tier, no confirm gate (§4c explains why that is a deliberate
+      omission, not a gap). `/core` is untouched.
+- [x] **M12.1 — Enter replaces the same-hotkey stop.** `DictationSession` originally shipped
+      M7's toggle shape (tap the hotkey again to stop); live use showed people reflexively
+      reach for Enter instead. Replaced with `begin()`/`finish()` — the same shape as
+      `VoiceSession` — with `finish()` now firing on a global Enter press
+      (`WindowsShell.armStopKey`/`disarmStopKey`, the same focus-independent-registration
+      precedent Escape already set). Widens `dictate.ts`'s mutual-exclusion guard
+      (`combineInstructionBusy`) to cover the instruction bar's whole open lifetime, not just
+      while its voice sub-capture is recording — necessary now that Enter is a trigger both
+      flows can reach for. See §4c and §9's M12.1 for the tradeoff this brings.
 
-**v0 status: complete.** 231 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
-M8/M9, 41 by M10, 36 by M11, and 30 by M12 (against `MockShell`, fake Gmail/Notion tabs, jsdom
-fixtures, and a `MockInputInjector` standing in for real `SendInput`; no browser, inbox,
-Notion account, or OS keystroke is ever touched by the test suite). The eval harness (`npm run
-eval`, `tests/eval/`) runs the memory story as one continuous scenario — cold memory refuses →
+**v0 status: complete.** 242 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
+M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by M12.1 (against `MockShell`, fake Gmail/Notion
+tabs, jsdom fixtures, and a `MockInputInjector` standing in for real `SendInput`; no browser,
+inbox, Notion account, or OS keystroke is ever touched by the test suite). The eval harness
+(`npm run eval`, `tests/eval/`) runs the memory story as one continuous scenario — cold memory
+refuses →
 teaching fixes it → a correction versions it → recall reveals it — plus the seven demo tasks
 and the closed-world refusal.
 
@@ -965,6 +1005,44 @@ fires the way the design assumes rather than failing some other way; whether `CH
 /`CHUNK_DELAY_MS` hold up against an editor with heavier per-keystroke processing than anything
 tested; and whether the 30s cap is the right length in practice — flagged in code and here as a
 value real live use may need to adjust, not a settled constant.
+
+### M12.1 — Enter replaces the same-hotkey stop
+
+The first live test of M12 surfaced the toggle gesture as the wrong mental model: reflexively,
+people reach for Enter to stop dictation, the way the instruction bar's own M8 flow already
+works. `DictationSession.toggle()` was replaced with `begin()`/`finish()` — the SAME shape as
+`VoiceSession` — with `finish()` now firing on a global Enter press
+(`WindowsShell.armStopKey`/`disarmStopKey`) armed only between `begin()` and the session
+returning to idle. See §4c above for the revised gesture and the tradeoff it brings (Enter is
+captured system-wide for the duration of a recording).
+
+**Proven deterministically (11 new/changed tests, no PowerShell process and no OS keystroke):**
+`DictationSession.test.ts` was rewritten around `begin()`/`shell.pressStopKey()` (a `MockShell`
+test helper standing in for the real global Enter press, the same "simulate the OS/IPC
+boundary" idea `ackVoiceStarted()` already used) — the same invariants M12 proved (ordering,
+focus re-check, short-write refusal, cap behavior, abandon) still hold under the new gesture,
+plus new coverage: `begin()` arms the stop key exactly once and a full cycle disarms it exactly
+once, whatever path got it back to idle (success, cap, or `abandon()`); a stray Enter before
+any `begin()` is a harmless no-op; `begin()` itself now guards idle-only (the dictate hotkey is
+start-only — a repeat press mid-recording no-ops, matching `VoiceSession`'s own "ignores
+begin() while already listening"). Against the REAL `WindowsShell` (mocked electron, not
+`MockShell` — the only faithful way to prove the global registration itself, not just the
+session's own logic), `tests/WindowsShell.capture.test.ts` proves: firing the real "Return"
+accelerator while a session is recording runs `finish()` end to end (stop → transcribe → focus
+recheck → type); the accelerator is unregistered the moment the session returns to idle, so
+Enter is free again for every other app; Escape still cancels independently of Enter;
+`WindowsShell.isInputCapturing()` reflects `pendingInput` truthfully. `dictate.test.ts` proves
+`combineInstructionBusy` generically: busy while voice is recording (unchanged from M12), busy
+while the bar is merely open even with voice already idle (the gap this milestone closes), idle
+when neither is busy.
+
+**NOT proven, and only a live run can prove it:** whether registering "Return" as a global
+shortcut ever collides with another already-running app that owns it (the logged-error path
+exists but nobody has hit it); whether capturing Enter globally for an entire recording feels
+right in practice, versus being surprising the first few times a normal Enter press elsewhere
+gets swallowed while dictation happens to be running; and everything M12's own "not yet
+proven" list already named that this change doesn't touch (real keystroke delivery, the
+elevated-window refusal, chunk timing, the 30s cap's length).
 
 ### M7 voice — what is proved, and what still needs a microphone
 

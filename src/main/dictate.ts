@@ -9,27 +9,35 @@
 // instruction hotkey fired mid-dictation, `shell.showInput()` would call `window.focus()` and
 // yank focus away from the app being dictated into — exactly the failure this feature exists
 // to avoid. So each hotkey's handler checks the OTHER session's state before doing anything.
+//
+// M12.1 (Enter replaces the same-hotkey stop, see DictationSession.ts) widened the dictation
+// side of this: since Enter is now a shared trigger both flows can reach for, the dictation
+// hotkey must also be blocked while the instruction bar is simply OPEN (a pending
+// showInput(), even with no voice activity — e.g. mid-typing, after commandbar:typing already
+// abandoned voice) — not just while voice itself is recording. Otherwise the bar's own
+// Enter-to-submit and dictation's Enter-to-finish could both fire from one keypress.
 
 export interface StateHolder {
   getState(): string;
 }
 
-export interface Toggleable {
-  toggle(): Promise<void>;
+export interface Startable {
+  begin(): Promise<void>;
 }
 
-// The dictation hotkey handler. Blocked (and logged, never silently) whenever the
-// instruction bar's own voice capture is mid-flight — they cannot both hold the microphone.
+// The dictation hotkey handler. Blocked (and logged, never silently) whenever the instruction
+// bar is busy in the sense `busyState` reports — see combineInstructionBusy below for what
+// "busy" means once Enter is a shared trigger.
 export function createOnDictateHotkey(
-  dictation: Toggleable,
-  instructionVoice: StateHolder | null,
+  dictation: Startable,
+  busyState: StateHolder | null,
 ): () => void {
   return (): void => {
-    if (instructionVoice && instructionVoice.getState() !== "idle") {
+    if (busyState && busyState.getState() !== "idle") {
       console.log("[dictate] hotkey ignored - an instruction is already being captured");
       return;
     }
-    void dictation.toggle();
+    void dictation.begin();
   };
 }
 
@@ -38,4 +46,25 @@ export function createOnDictateHotkey(
 // wiring this module has no reason to know about).
 export function dictationIsBusy(dictation: StateHolder | null): boolean {
   return dictation !== null && dictation.getState() !== "idle";
+}
+
+export interface InputCapturing {
+  isInputCapturing(): boolean;
+}
+
+// Combines "is voice mid-capture" with "is the instruction bar open at all" into the single
+// StateHolder createOnDictateHotkey expects. Necessary now that Enter is a shared global
+// trigger (M12.1): the bar's own Enter-to-submit and dictation's Enter-to-finish must never
+// both be live at once, so the dictation hotkey has to stay blocked for the bar's ENTIRE open
+// lifetime, not just the portion where voice happens to still be recording.
+export function combineInstructionBusy(
+  voice: StateHolder | null,
+  shell: InputCapturing,
+): StateHolder {
+  return {
+    getState: () => {
+      if (shell.isInputCapturing()) return "capturing";
+      return voice ? voice.getState() : "idle";
+    },
+  };
 }

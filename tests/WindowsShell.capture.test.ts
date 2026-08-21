@@ -115,6 +115,21 @@ function fireEscape(): void {
 function ackVoiceStarted(): void {
   ipcMain.emit("voice:started", {}, undefined);
 }
+// What the renderer sends back once it has stopped recording — stopRecording() awaits this
+// exact reply the same way startRecording() awaits "voice:started" above.
+function ackVoiceAudio(durationMs = 1500): void {
+  ipcMain.emit("voice:audio", {}, { wav: new Uint8Array([1, 2, 3, 4]), durationMs });
+}
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+// The global Enter ("Return") handler, armed only while a DictationSession is recording/
+// stopped (M12.1's stop key) — mirrors escapeHandler()/fireEscape() above exactly.
+function enterHandler(): (() => void) | undefined {
+  return globalShortcut._handlers.get("Return");
+}
+function fireEnter(): void {
+  enterHandler()?.();
+}
 
 type FakeWindow = ReturnType<typeof makeWindow>;
 
@@ -540,7 +555,7 @@ describe("WindowsShell — dictation is heard by every dismissal path, with no s
       new FakeTranscriber("unused"),
       new MockInputInjector(),
     );
-    const beginning = dictation.toggle();
+    const beginning = dictation.begin();
     // begin() awaits the injector's getForegroundWindow() BEFORE it ever reaches
     // shell.startRecording(), so the IPC listener startRecording() registers is not live
     // yet on this same tick — unlike calling shell.startRecording() directly (as the
@@ -573,7 +588,7 @@ describe("WindowsShell — dictation is heard by every dismissal path, with no s
         new FakeTranscriber("unused"),
         new MockInputInjector(),
       );
-      const beginning = dictation.toggle();
+      const beginning = dictation.begin();
       await Promise.resolve(); // let getForegroundWindow() resolve before the IPC ack
       ackVoiceStarted();
       await beginning;
@@ -609,5 +624,88 @@ describe("WindowsShell — dictation is heard by every dismissal path, with no s
     expect(window.isFocused()).toBe(false); // showInactive, not show — never steals focus
     const status = window.sent.filter((m) => m.channel === "commandbar:status").at(-1);
     expect(status?.args[0]).toBe("Dictating into — Untitled - Notepad");
+  });
+});
+
+// M12.1: Enter replaces the same-hotkey stop. Wired through the REAL WindowsShell
+// (mocked electron), which is the only faithful way to prove the global registration itself
+// works — a unit test against MockShell (DictationSession.test.ts) proves the session's own
+// logic, but not that WindowsShell.armStopKey actually arms the real "Return" accelerator.
+describe("WindowsShell.armStopKey — Enter finishes a live dictation, globally", () => {
+  it("is not registered before any dictation session has begun", () => {
+    expect(enterHandler()).toBeUndefined();
+  });
+
+  it("arms Enter once recording starts, and firing it types the transcript", async () => {
+    const injector = new MockInputInjector();
+    const dictation = new DictationSession(shell, new FakeTranscriber("summarize this"), injector);
+
+    const beginning = dictation.begin();
+    await Promise.resolve(); // let getForegroundWindow() resolve before the IPC ack
+    ackVoiceStarted();
+    await beginning;
+    expect(enterHandler()).toBeDefined();
+
+    // fireEnter() runs synchronously into finish() -> shell.stopRecording(), which registers
+    // its "voice:audio" listener synchronously too (inside the Promise executor) — so the ack
+    // can follow immediately, exactly like ackVoiceStarted() does for startRecording() above.
+    fireEnter();
+    ackVoiceAudio();
+    await flush(); // drain the remaining microtasks: transcribe, focus recheck, typeText
+
+    expect(injector.typed).toEqual(["summarize this"]);
+    expect(dictation.getState()).toBe("idle");
+  });
+
+  it("disarms Enter once the session returns to idle — it does not leak into normal typing", async () => {
+    const dictation = new DictationSession(
+      shell,
+      new FakeTranscriber("hi"),
+      new MockInputInjector(),
+    );
+
+    const beginning = dictation.begin();
+    await Promise.resolve();
+    ackVoiceStarted();
+    await beginning;
+    expect(enterHandler()).toBeDefined();
+
+    fireEnter();
+    ackVoiceAudio();
+    await flush();
+
+    expect(dictation.getState()).toBe("idle");
+    expect(enterHandler()).toBeUndefined(); // Enter is free again for every other app
+  });
+
+  it("Escape still cancels a live recording — Enter and Escape are independent", async () => {
+    const injector = new MockInputInjector();
+    const dictation = new DictationSession(shell, new FakeTranscriber("never runs"), injector);
+    shell.onDismissed(() => void dictation.abandon());
+
+    const beginning = dictation.begin();
+    await Promise.resolve();
+    ackVoiceStarted();
+    await beginning;
+
+    fireEscape();
+    await Promise.resolve();
+
+    expect(dictation.getState()).toBe("idle");
+    expect(injector.typed).toHaveLength(0);
+    expect(enterHandler()).toBeUndefined(); // abandon() -> enter("idle") disarmed it too
+  });
+});
+
+describe("WindowsShell.isInputCapturing (M12.1's tightened mutual-exclusion check)", () => {
+  it("is true while a showInput() capture is pending, and false once it resolves", async () => {
+    expect(shell.isInputCapturing()).toBe(false);
+
+    const capture = shell.showInput();
+    expect(shell.isInputCapturing()).toBe(true);
+
+    ipcMain.emit("commandbar:submit", {}, "typed text");
+    await capture;
+    expect(shell.isInputCapturing()).toBe(false);
   });
 });

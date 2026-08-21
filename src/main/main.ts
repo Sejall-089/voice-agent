@@ -5,7 +5,7 @@ import { WindowsShell } from "./shell/WindowsShell.ts";
 import { VoiceSession } from "./shell/VoiceSession.ts";
 import { DictationSession } from "./shell/DictationSession.ts";
 import { WindowsInputInjector } from "./shell/WindowsInputInjector.ts";
-import { createOnDictateHotkey, dictationIsBusy } from "./dictate.ts";
+import { combineInstructionBusy, createOnDictateHotkey, dictationIsBusy } from "./dictate.ts";
 import { createRunInstruction } from "./runInstruction.ts";
 import { Planner } from "../core/planner.ts";
 import { buildRegistry } from "../core/registry.ts";
@@ -187,8 +187,13 @@ app.whenReady().then(() => {
 
   // The dictation hotkey: only registered when dictation can actually work (transcriber +
   // injector both present), mirroring the instruction hotkey's own construction above.
+  //
+  // combineInstructionBusy (M12.1), not `voice` directly: since Enter now stops dictation
+  // globally, the dictation hotkey must stay blocked for the bar's whole open lifetime — not
+  // just while voice happens to still be recording — or the bar's own Enter-to-submit and
+  // dictation's Enter-to-finish could both fire from one keypress.
   const dictateHotkey = dictation
-    ? registerDictateHotkey(shell, createOnDictateHotkey(dictation, voice))
+    ? registerDictateHotkey(shell, createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell)))
     : null;
 
   // Typing, or dismissing the bar, silently discards the recording. Both are "I did not

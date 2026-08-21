@@ -74,21 +74,29 @@ It never guesses.
 
 ---
 
-## System-wide dictation (M12)
+## System-wide dictation (M12, M12.1)
 
 Not one of the tasks above — it never touches the planner, the registry, or memory. Hold
 nothing: tap the **dictation hotkey** (separate from the instruction hotkey) to start
-listening, tap it again to stop and **type the raw transcript at the cursor of whatever
-window currently has focus, in any app** — a terminal, Notepad, a browser text field, Word.
-No tool selection, no confirm gate, because there's no plan to confirm: it's the literal
-"type what I said" primitive.
+listening, then **press Enter** to stop and **type the raw transcript at the cursor of
+whatever window currently has focus, in any app** — a terminal, Notepad, a browser text
+field, Word. No tool selection, no confirm gate, because there's no plan to confirm: it's the
+literal "type what I said" primitive.
 
 It narrates *before* it types (naming the window it captured focus on, so you know where
-text is about to land before you speak), and it refuses rather than guesses: if focus moved
-between speaking and typing, or the OS reports fewer keystrokes accepted than sent (most
-often an unelevated app trying to type into an elevated one), nothing is typed and the
-transcript you spoke is shown back to you instead. See [Setting up dictation](#setting-up-dictation-optional)
-below and `spec.md` §4c for the full design.
+text is about to land before you speak — and it tells you Enter is what finishes it), and it
+refuses rather than guesses: if focus moved between speaking and typing, or the OS reports
+fewer keystrokes accepted than sent (most often an unelevated app trying to type into an
+elevated one), nothing is typed and the transcript you spoke is shown back to you instead.
+
+**Enter is captured system-wide for as long as a recording is live.** That's the whole point
+of "Enter finishes it, no matter what has focus" — but it does mean that while you're
+dictating, Enter won't reach whatever app you're in for its normal purpose (submitting a
+form, a newline) until the recording ends, one way or another. It's released the instant the
+session returns to idle.
+
+See [Setting up dictation](#setting-up-dictation-optional) below and `spec.md` §4c for the
+full design.
 
 ---
 
@@ -207,10 +215,15 @@ No extra setup beyond voice above — dictation shares the exact same `WHISPER_E
 
 | You do | It does |
 |---|---|
-| Tap the dictation hotkey | Starts listening — narrates which window it will type into |
-| Tap it again | Stops, transcribes, and types the transcript at that window's cursor |
+| Tap the dictation hotkey | Starts listening — narrates which window it will type into, and that Enter finishes it |
+| **Enter** | Stops, transcribes, and types the transcript at that window's cursor |
 | **Esc**, or click away | Discards the recording. Nothing is typed |
-| Wait **30 s** | Mic released, audio kept — the next tap still types it. (A safety ceiling for a forgotten stop-tap, not a normal session — the usual way to finish is the second tap.) |
+| Wait **30 s** | Mic released, audio kept — **Enter** still types it. (A safety ceiling for a forgotten Enter, not a normal session — the usual way to finish is pressing Enter.) |
+
+**While a recording is live, Enter is captured system-wide** — it stops dictation instead of
+reaching whatever app has focus for its normal purpose (submitting a form, a newline), until
+the recording ends one way or another. That's inherent to "Enter finishes it, no matter what
+has focus," not a bug.
 
 The app claims the first free combo from `Ctrl+Shift+Alt+D` → `Ctrl+Alt+D` → `Ctrl+Alt+J` and
 logs which one won — pin your own with `DICTATE_HOTKEY` in `.env`. `Ctrl+Alt+V` (Excel's Paste
@@ -219,8 +232,11 @@ Special) and `Alt+Shift+D` (Word's insert-date field) are deliberately not on th
 It's a **separate** hotkey rather than reusing the instruction bar's one (M8), because the two
 want opposite focus behaviour: the instruction bar steals focus on purpose (you're talking to
 the agent); dictation must never steal focus (you're talking to whatever app you're already
-in). They can't run at the same time either — both need the one microphone — so triggering one
-while the other is mid-capture is a logged no-op, not a silent failure.
+in). They can't run at the same time either — both need the one microphone, and while dictation
+is armed, Enter belongs to it — so triggering one while the other is busy is a logged no-op,
+not a silent failure. That guard now covers the bar's whole open time, not just while its own
+voice capture happens to be recording, so the bar's Enter-to-submit and dictation's
+Enter-to-finish can never collide (M12.1).
 
 If focus moves to a different window between when you finish speaking and when it's about to
 type, or Windows blocks the keystrokes outright (typically an unelevated app trying to type
@@ -254,7 +270,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (231 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (242 tests): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, and jsdom
@@ -364,6 +380,24 @@ real targets (a terminal, an IDE with its own autocomplete, Word/Excel specifica
 hotkey list was chosen around avoiding exactly those apps' own shortcuts), that the
 elevated-window refusal fires the way the design assumes, and whether the 30 s cap is the
 right length in practice.
+
+**M12.1 — the gesture changed after the first live test, same proof structure as M12.** Live
+use surfaced the original same-hotkey toggle as the wrong mental model — people reflexively
+reach for Enter, the way the instruction bar already works. `DictationSession` now matches
+`VoiceSession`'s own `begin()`/`finish()` shape, with `finish()` firing on a **global** Enter
+press (`WindowsShell.armStopKey`/`disarmStopKey`) armed only between `begin()` and the session
+returning to idle. Proven deterministically (11 tests): the arm/disarm lifecycle fires exactly
+once per session regardless of which path got it back to idle; a stray Enter before any
+recording has started is a harmless no-op; firing the REAL "Return" accelerator (against the
+actual `WindowsShell`, not just a mock) runs the whole stop → transcribe → type sequence and
+then frees Enter for every other app; Escape still cancels independently. The mutual-exclusion
+guard was also widened and re-proven: the dictation hotkey now stays blocked for the
+instruction bar's whole open lifetime, not just while its own voice capture happens to be
+recording — closing a gap that was harmless under the old toggle (which never touched Enter)
+but became a real one once Enter became a trigger both flows reach for. **Not yet proven:**
+whether capturing Enter system-wide for a recording's duration feels right in daily use, and
+whether the global "Return" registration itself ever collides with something else that already
+owns it (logged, but never hit).
 
 ---
 
