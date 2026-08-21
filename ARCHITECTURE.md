@@ -39,7 +39,7 @@ flowchart TB
     end
 
     Whisper["whisper.cpp (local)<br/>speech → text · nothing leaves the machine"]
-    Chrome["Chrome (Gmail tab)<br/>DevTools Protocol · find by role + name<br/>never by pixel"]
+    Chrome["Chrome (Gmail + Notion tabs)<br/>DevTools Protocol · one debug Chrome,<br/>two app surfaces in it"]
     LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
     OS["OS &amp; target apps<br/>browser, clipboard"]
@@ -70,10 +70,20 @@ knows it's on Windows.
   one validated tool call.
 - **Memory engine** — makes it *yours*. Resolves vague references before acting
   ("the team" → `#design-team`) and records facts after. This is the differentiator.
-- **Gmail surface (M10)** — the one app the brain can act *inside*. Behind the `GmailSurface`
+- **Gmail surface (M10)** — the first app the brain can act *inside*. Behind the `GmailSurface`
   interface like everything else external, so tests run against a fake tab. It finds controls by
   their real role and accessible name over the DevTools Protocol; it never clicks a coordinate,
   and it refuses outright when a control is missing or ambiguous.
+- **Notion surface (M11)** — a second app in the same debug Chrome, behind `NotionSurface`
+  (two methods, deliberately narrow — read the page, append to it). Notion's body content
+  carries no ARIA roles at all, so it identifies the append target structurally by
+  `data-block-id` and document order instead of role + name. It also can't act through the
+  same JS-level DOM calls Gmail uses — see §4b for why real CDP-level mouse/keyboard input was
+  required instead.
+- **`core/browser/`** — the generic transport BOTH surfaces sit on: a hand-rolled CDP client
+  (`CdpClient.ts`) and tab-selection logic (`tabs.ts`'s `pickTab`), pulled out of the
+  Gmail-only code that first proved it in M10 once a second app (M11) needed the identical
+  "don't guess which tab" rule.
 - **LLM / Slack / Chrome / OS** — rented reasoning, the external actions, and the things
   the shell's hands touch.
 
@@ -273,6 +283,56 @@ show up as a refusal rather than a wrong click.
 
 ---
 
+## 4c. The Notion page-writing flow (M11)
+
+Read the open page, write a note in your tone, add it to the end. One `caution` step,
+not three — Notion has no staging area and no send button to build the other two around.
+
+The mechanism differs from Gmail in one load-bearing way: Gmail's compose box is an ordinary
+browser-native `contenteditable`, so `gmailScript.ts` acts on it with plain JS
+(`el.focus()`, `document.execCommand()`) run inside the page. Notion's editor was found, live,
+to ignore those calls — they report success but save nothing. So `notionScript.ts` only
+**finds** the append target (jsdom-testable, like Gmail's script); `ChromeNotion.ts` does the
+**acting**, through real CDP-level mouse and keyboard input — the same signal a physical
+device produces, issued from the outer session rather than from inside the page.
+
+```mermaid
+sequenceDiagram
+    actor You
+    participant Shell
+    participant Planner
+    participant Tool as addToPage
+    participant Script as notionScript (finds)
+    participant CDP as ChromeNotion (acts, via real input)
+
+    You->>Shell: hotkey + "note that the launch moved to Friday"
+    Shell->>Planner: instruction + context
+    Planner->>Planner: tool = addToPage, risk = caution
+    Planner->>CDP: readOpenPage (SAFE, to name the page)
+    Planner->>Shell: notify("Adding a note to \"Launch plan\"…")
+    Planner->>Tool: run
+    Tool->>CDP: readOpenPage (SAFE)
+    Tool->>Tool: composeNote(instruction + page + stored tone)
+    Note over Tool,CDP: composed BEFORE anything is touched —<br/>a model failure leaves the page untouched
+    Tool->>CDP: appendToPage(text)
+    CDP->>Script: locateAppendTarget (SAFE — last data-block-id, never the page's own wrapper)
+    CDP->>CDP: real click, real "End" keypress<br/>(never select-all — append-only invariant)
+    loop each line of the note
+        CDP->>CDP: real Enter keypress, then Input.insertText
+    end
+    Note over CDP: a single insertText with an embedded \n<br/>silently dropped everything after the first line — proven live
+    CDP->>Script: readOpenPage again — VERIFY the text actually landed
+    Note over CDP: Notion can report success on an operation<br/>that saved nothing, so success is confirmed, not trusted
+```
+
+**Where the refusals are.** No Notion tab open, more than one qualifying tab (narrowed to the
+foreground one first — nearly every open Notion tab "has an editable page", unlike Gmail's
+narrower "a message is open"), no real content block to anchor an append after, and — the one
+new failure mode — a successful-looking write that the read-back can't confirm actually
+happened.
+
+---
+
 ## 5. Memory data model
 
 Two tables. `facts` carries the epistemic metadata (confidence, version, active) so
@@ -312,8 +372,9 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 
 ## 6. What makes this reliable (design invariants)
 
-- **Closed world.** The app can only do the six registered tools. "Not on the menu"
-  → honest refusal, never a wrong action. This is what makes it demoable.
+- **Closed world.** The app can only do the registered tools — six always on, plus Gmail's
+  three and Notion's one when a debug Chrome is configured. "Not on the menu" → honest
+  refusal, never a wrong action. This is what makes it demoable.
 - **Thin shell.** All OS-specific code sits behind `OSShell` (and `VoiceShell` for
   microphone capture). The core imports no `electron`. Porting = reimplementing those
   interfaces, nothing else.
@@ -337,10 +398,16 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 - ~~Voice / speech-to-text on the front of the loop (whisper.cpp, local).~~ **Built in
   M7** — see §4a.
 - Generalize the single Slack action into MCP connectors (Teams, mail, calendar).
-- A clipboard-only `compose` tool: `core/compose.ts` is already app-agnostic, so an
-  instruction-driven draft that works in any app is a tool file, not a new subsystem.
-- More apps behind `GmailSurface`'s pattern (Outlook web, Slack) — each needs its own live
-  verification, but the finding-by-role-and-name approach transfers.
+- ~~A clipboard-only `compose` tool built on `core/compose.ts` being app-agnostic.~~
+  **Refined by M11:** `compose.ts` itself stayed reply-shaped (a greeting and sign-off are
+  wrong for most other targets); what's actually app-agnostic moved to
+  `composeShared.ts`. A future clipboard-only tool builds a third `composeXxx.ts` on that
+  shared base, the way `composeNote.ts` did — not by calling `compose.ts` directly.
+- More apps behind `GmailSurface`/`NotionSurface`'s pattern (Outlook web, Slack, Linear) —
+  each needs its own live verification, and M11 found the *identification strategy* doesn't
+  automatically transfer even though the *safety rule* does: Gmail resolves controls by role
+  + accessible name, Notion (no roles on body content, confirmed live) by `data-block-id` and
+  document order. Expect each new app to need its own recon pass, not a copy-paste.
 - Mac and Linux shells behind the same `OSShell` + `VoiceShell` interfaces.
 - Multi-step plans and a real agent loop (the closed→open world jump).
 - Point the memory engine at the Postgres/Neon personal OS instead of local SQLite.

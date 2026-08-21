@@ -45,6 +45,12 @@ Fuzzy human sentence  →  exact function call.
   open message, draft a reply in the stored tone, put it in the reply box, tweak it by
   voice, and send only through an explicit confirm. See §6a and §9's M10.
 
+**Added after v0 (M11):**
+- Instruction-driven page writing, scoped to **Notion in Chrome, one open page, append
+  only**: read the page, write new content in the stored tone, add it to the end. No
+  search, no navigation, no editing or removing existing content, no revision tool. See
+  §6b and §9's M11.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
   live-verified. It was out of v0 deliberately — voice is a second way to produce the
@@ -52,11 +58,14 @@ Fuzzy human sentence  →  exact function call.
   the right action. It changes nothing downstream: the planner, registry, tools, and
   memory are untouched by M7.
 - ~~GUI computer-use / screenshot-driven automation.~~ **Narrowly, and only half of this,
-  moved into scope in M10.** The half that moved in is DOM/accessibility-based control of
-  ONE app (Gmail in Chrome), where every control is resolved by its real role and accessible
-  name. The half that did NOT move in — and is still explicitly out — is screenshot/vision
-  driven clicking anywhere on screen. The distinction is the whole point: reading a page's
-  real structure is checkable and refusable; guessing from pixels is not. See §6a.
+  moved into scope in M10, then M11.** The half that moved in is DOM/accessibility-based
+  control of specific apps in Chrome (Gmail, then Notion), where every control is resolved
+  structurally — by role and accessible name for Gmail, by `data-block-id` and document
+  order for Notion, whichever identity the app's own DOM actually exposes (M11 found Notion
+  exposes no roles at all on body content — see §6b). The half that did NOT move in — and is
+  still explicitly out — is screenshot/vision-driven clicking anywhere on screen. The
+  distinction is the whole point: reading a page's real structure is checkable and
+  refusable; guessing from pixels is not. See §6a, §6b.
 - macOS or Linux shells (architect for them via the interface, implement Windows only).
 - More than one external connector.
 - Multi-step / autonomous agent loops.
@@ -79,8 +88,8 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | External action    | **Slack Incoming Webhook** (via `fetch`) | The only connector in v0. |
 | Active window      | `active-win` (optional)                  | If it complicates the build, skip; context still works from clipboard. |
 | Speech to text (M7)| **whisper.cpp**, local, via a spawned `whisper-cli.exe` | No cloud STT, no API key, no new npm dependency. Audio is captured in the renderer (Web Audio → 16 kHz mono WAV); `src/core/transcribers/`. |
-| Browser control (M10)| **Chrome DevTools Protocol** over `ws`, hand-rolled (~150 lines) | Attaches to a Chrome the user starts with `--remote-debugging-port` + a dedicated `--user-data-dir` (Chrome 136+ refuses the port on the default profile). `ws` is pure JS — no second native rebuild. Not puppeteer: the element-resolution logic is the safety-critical part and stays in our own tested code. |
-| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10, optional) `CHROME_DEBUG_URL`. |
+| Browser control (M10, extended M11)| **Chrome DevTools Protocol** over `ws`, hand-rolled (`core/browser/`) | One `CdpClient` (app-agnostic) attaches to a Chrome the user starts with `--remote-debugging-port` + a dedicated `--user-data-dir` (Chrome 136+ refuses the port on the default profile); `ChromeGmail` and `ChromeNotion` are the per-app layers on top. `ws` is pure JS — no second native rebuild. Not puppeteer: the element-resolution logic is the safety-critical part and stays in our own tested code. M11 added real CDP-level input (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`) alongside the `Input.insertText` M10 already used — Notion's editor ignores JS-dispatched `.click()`/`.focus()`/`execCommand()` (they report success but save nothing); only genuine device-level input registers. |
+| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10/M11, optional) `CHROME_DEBUG_URL` — one debug Chrome, both Gmail and Notion tools gate on it. |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
 interface (§4) so a Mac/Linux shell can be added later without touching the core.
@@ -332,7 +341,7 @@ important design decision in the app.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -348,9 +357,13 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft |
 | `reviseDraft` | 9. Tweak that reply                   | yes (tone)    | caution      | re-compose from the LIVE box text → replace it |
 | `sendReply`   | 10. Send it                           | no            | **dangerous**| confirm (recipient + whole draft) → click Gmail's Send |
+| `addToPage`   | 11. Add a note to the open Notion page | yes (tone)   | caution      | read open page → compose → real-CDP click + type at the end |
 
 The `Irreversible` column above is the M10 `risk` tier — see the `risk` subsection below. The first six tools kept
 their exact behaviour through that migration: only `sendMessage` and `sendReply` confirm.
+
+`addToPage` is ONE tool, not three like Gmail's reply flow — Notion has no staging area and no
+irreversible send, so there is nothing to split a draft/revise/send cycle across. See §6b.
 
 Task 6 ("correction sticks") is not a separate tool — it's the `remember` tool
 updating an existing fact, which must (a) mark the old fact version inactive,
@@ -387,7 +400,11 @@ Two things make this more than a rename:
 - **Narration stands in for the undo that doesn't exist.** A `caution` tool announces itself
   through the `notify` action (§4) *before* the handler runs. That action kind had sat in the
   `OSShell` contract unimplemented since M0; M10 is the first tool with something to say, so
-  narration needed no change to the portability contract.
+  narration needed no change to the portability contract. M11 widened `narrate` from
+  `(args) => string` to `(args, deps) => string | Promise<string>` — the same evolution
+  `confirmSummary` underwent in M10, and for the identical reason: naming the actual page a
+  note is about to land in means reading the world first. Same rule as `confirmSummary`: SAFE
+  work only, and if it throws, the planner refuses and nothing runs.
 - **Default-deny on unidentified targets.** clacky's sharpest idea: a click whose target cannot
   be identified is treated as dangerous. Here that lives one level down, in `gmailScript.ts` —
   a control that matches zero elements *or more than one* is never clicked at all. If we cannot
@@ -439,6 +456,76 @@ screenshot/vision-based clicking; composing a new email with none open; auto-sel
 content; the Gmail API; multi-step autonomous loops. **Known limits:** Gmail's English UI only
 (the labels are matched literally, and a localised UI refuses rather than misfires), and one
 reply at a time.
+
+---
+
+## 6b. The Notion page-writing flow (M11)
+
+Scoped to **Notion in Chrome, one open page, append only**. Built to answer a question M10
+left open: was the compose.ts/gmail split a real architectural seam, or just a description of
+Gmail? A second, structurally different app (a block editor with no send action, no staging
+area, autosave) was the test.
+
+**What generalized, and what did not.**
+
+- `core/composeShared.ts` — genuinely app-neutral: sounding like the user, the standing rule
+  against inventing content, the guard against writing emptiness. Both `compose.ts` (replies)
+  and `composeNote.ts` (notes) import it.
+- The reply/note SHAPE did **not** generalize. `compose.ts`'s rules mandate a greeting and
+  sign-off and forbid a subject line — a note has none of that furniture, because it was never
+  addressed to anyone. Broadening one function to cover both would have meant one prompt
+  branching on which app it's for, exactly the coupling the M10 split existed to avoid.
+- `core/draft.ts` did **not** generalize, and stays Gmail-only. It exists because Gmail owns a
+  staging area with a lifetime (a compose box that sits open between turns). Notion has no
+  staging area, so there is nothing to stage. A parallel `NoteStore` would have one writer, no
+  reader, and nothing to hold.
+- The **tool shape** did not generalize either: one tool (`addToPage`, `caution`), not three.
+  Gmail has three world-states (nothing → private draft → sent); Notion has two (nothing →
+  written and autosaved). There is no revision tool: editing what was just written means
+  deleting real content from a live document with no staging area, a materially higher-risk
+  operation this milestone deliberately did not add. A follow-up like "make that note shorter"
+  correctly logs as a miss.
+- **The safety RULE generalized; its instantiation did not.** M10's rule was never literally
+  "role + accessible name" — that was Gmail's instantiation of "resolve the target
+  structurally, refuse on zero or ambiguous matches." Live inspection found Notion's body
+  content carries **no ARIA roles at all** (only the page title does), so `notionScript.ts`
+  identifies the append target by `data-block-id` and document order instead — "the last block
+  on the page" is not a guess among several candidates the way picking one of several
+  role-matched elements would be; it is the one unambiguous meaning of "the end of the page."
+
+**How it reaches the page — and the one genuine mechanism difference from Gmail.** Gmail's
+compose box is an ordinary browser-native `contenteditable`, and JS-dispatched calls
+(`el.focus()`, `document.execCommand()`) work on it correctly — that is `gmailScript.ts`'s
+entire mechanism. Live testing found Notion's editor does **not** respond to those calls: they
+report success but save nothing, repeated across several distinct approaches (direct click,
+focus + Selection/Range + `execCommand`, focusing the shared editor root). What does work,
+confirmed live and now the shipped mechanism, is real CDP-level input — `Input.dispatchMouseEvent`
+and `Input.dispatchKeyEvent` (both added to `core/browser/CdpClient.ts` in M11, alongside the
+`Input.insertText` M10 already used) — the same signal a physical mouse and keyboard produce.
+Consequently `notionScript.ts` only **finds and reads** (jsdom-testable, like `gmailScript.ts`);
+`ChromeNotion.ts` does the clicking, keying, and typing, informed by what the script locates.
+A single multi-line `insertText` blob also turned out to silently drop everything after the
+first `\n` — Notion needs one real Enter keypress between lines, not an embedded newline.
+
+- **How it picks a tab.** Lifted into `core/browser/tabs.ts`'s generic `pickTab()` — the same
+  zero/many refusal rule Gmail uses, reused rather than duplicated. One refinement: nearly
+  every open Notion tab satisfies "has an editable page" (unlike Gmail, where "a message is
+  open" is a much narrower condition), so the flat rule alone would refuse constantly with two
+  Notion tabs open. `pickTab`'s `narrow` step breaks the tie by `document.visibilityState`,
+  preferring the foreground tab, and only falls through to a real refusal if that still leaves
+  zero or several.
+- **Verification, not trust.** Because Notion can report a successful DOM operation that saved
+  nothing, `appendToPage` re-reads the page after typing and refuses to claim success unless
+  the appended text is actually present in the read-back body.
+
+**Out of scope for M11, and not scaffolded:** page search or navigation; multi-page operations;
+sharing or publishing; databases and database rows; editing or removing existing content; the
+Notion API; any vision-based fallback; the Notion desktop app (Chrome tab only — the debug
+Chrome setup Gmail already uses is what M11 was built against; the desktop app is a different,
+unverified transport). **Known limits:** one page at a time, and the CDP-level input path
+appears to require the tab be the genuine foreground tab in its Chrome window (unverified
+*why* — plausibly Chrome deprioritizing hit-testing for a backgrounded tab's compositor), so
+`ChromeNotion` calls `Page.bringToFront` before acting, unlike Gmail's tools.
 
 ---
 
@@ -565,10 +652,17 @@ Post-v0:
       the leak cannot return silently (§4a), pins it with `tests/WindowsShell.capture.test.ts`,
       and turns a truncated `chooseTool` response into an explicit outcome instead of a
       misreported refusal (§3a).
+- [x] **M11 — Instruction-driven page writing (Notion in Chrome).** Extracts the app-agnostic
+      `CdpClient`/`pickTab` layer into `core/browser/` (M10 built it Gmail-only; M11 is the
+      first thing to reuse it); splits `core/compose.ts` into `composeShared.ts` (genuinely
+      shared) + `composeNote.ts` (Notion's own rules); widens `narrate` to
+      `(args, deps) => string | Promise<string>`, mirroring `confirmSummary`'s M10 widening;
+      adds the `NotionSurface` interface with a CDP-backed `ChromeNotion` (real device-level
+      input, not `execCommand` — see §6b for why); and one tool, `addToPage` (§6b).
 
-**v0 status: complete.** 165 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
-M8/M9, and 41 by M10 (against `MockShell`, a fake Gmail tab, and a jsdom fixture; no browser
-and no inbox is ever touched). The eval
+**v0 status: complete.** 201 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
+M8/M9, 41 by M10, and 36 by M11 (against `MockShell`, fake Gmail/Notion tabs, and jsdom
+fixtures; no browser, inbox, or Notion account is ever touched by the test suite). The eval
 harness (`npm run eval`, `tests/eval/`) runs the memory story as one continuous
 scenario — cold memory refuses → teaching fixes it → a correction versions it →
 recall reveals it — plus the seven demo tasks and the closed-world refusal.
@@ -647,6 +741,55 @@ Gmail redesign is a refusal, not a wrong click. Also unproven until run live: th
 against a real Chrome, and whether the model reliably routes a follow-up tweak to `reviseDraft`
 rather than `draftReply` (the same class of model-judgment risk as the correction-routing case
 above; if it mis-routes, the fix is the tool **descriptions**, not the planner).
+
+### M11 — proven vs. live-only
+
+**Proven deterministically (36 new tests, no browser and no Notion account):** the
+`browser/` extraction changed nothing about Gmail's behavior (`tests/gmail.test.ts` and
+`tests/compose.test.ts` pass **byte-for-byte unedited** — the acceptance bar M11 set for both
+refactors); `pickTab`'s zero/many refusal rule, generic and Gmail-proven, applies unchanged
+when `narrow` is absent; `addToPage` reads the page and composes *before* touching Notion, so
+a compose failure leaves the page untouched; narration names the real page title and goes out
+*before* `appendToPage` runs (an ordering fact across a shared timeline, same technique as
+M10's Gmail tests); a throwing `narrate` now fails the whole action before the handler runs,
+proven generically against a synthetic tool (not tied to any one real tool); an existing
+synchronous, zero-argument `narrate` still works unmodified; the tool is absent from the menu
+when Chrome isn't configured; there is no revision tool, so a follow-up tweak instruction
+correctly falls through to a miss. `notionScript.ts` is tested under jsdom against a fixture
+**transcribed from a live recon dump** (`scripts/notion-recon.mjs`), not hand-authored: it
+finds the page title (the one place body content carries a role), scopes page-body reads to
+`.notion-page-content` specifically (a broader guess, `.notion-scroller`, matched the
+*sidebar's* scroller first in the real DOM), targets the last real `data-block-id` block and
+never the page's own wrapper block, and refuses when there is no real content block to anchor
+an append after.
+
+**Proven live, against the real app.notion.com page used for M11 planning (not just fakes):**
+the actual mechanism this milestone's design rests on — JS-dispatched `.click()`, `.focus()`,
+and `document.execCommand()` calls report success on Notion's editor but silently save
+nothing, confirmed across several independent attempts (direct click, focus + Selection/Range,
+focusing the shared editor root); real CDP-level input (`Input.dispatchMouseEvent` +
+`Input.dispatchKeyEvent` + the existing `Input.insertText`) does work; a single
+`Input.insertText` call containing an embedded `\n` silently drops everything after the first
+newline, while a real Enter keypress between separately-typed lines correctly creates a
+genuine new block each time; the CDP tab needs to be the genuine foreground tab for real input
+to register (`ChromeNotion` calls `Page.bringToFront` for this reason — unverified *why*).
+The **shipped** `ChromeNotion` class (not a throwaway probe) was then run against the same
+live page end to end: `readOpenPage` returned the real title/URL/body, and `appendToPage`
+appended real, multi-line, marker-tagged text that was independently confirmed present on
+re-read. A live Gmail regression (`ChromeGmail.readOpenEmail`, SAFE/read-only, against a real
+inbox) confirmed the `browser/` extraction broke nothing in production, not just in tests.
+
+**NOT proven, and only further live use can prove it:** whether `notionScript.ts`'s selectors
+and `ChromeNotion`'s CDP sequence hold up against Notion's markup on pages with materially
+different content (long pages, non-text block types adjacent to the target, a genuinely
+locked/read-only page — no such page was available to test against, so `appendToPage` has no
+dedicated "is this locked" pre-check and instead verifies success by reading the page back
+after acting, refusing to claim success it cannot confirm); whether `Page.bringToFront`'s
+visible tab-switch is an acceptable UX cost in regular use, since — unlike every Gmail tool —
+using `addToPage` will visibly bring Chrome to the foreground; and whether the model reliably
+avoids routing a revision-style follow-up ("make that note shorter") to `addToPage` instead of
+producing an honest miss, the same class of model-judgment risk M10 flagged for
+`reviseDraft` vs. `draftReply`.
 
 ### M7 voice — what is proved, and what still needs a microphone
 

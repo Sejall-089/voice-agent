@@ -13,8 +13,10 @@ import { SlackSender } from "../core/senders/SlackSender.ts";
 import { WhisperCppTranscriber } from "../core/transcribers/WhisperCppTranscriber.ts";
 import { ChromeGmail } from "../core/gmail/ChromeGmail.ts";
 import { UnavailableGmail } from "../core/gmail/UnavailableGmail.ts";
+import { ChromeNotion } from "../core/notion/ChromeNotion.ts";
+import { UnavailableNotion } from "../core/notion/UnavailableNotion.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
-import type { GmailSurface, Transcriber } from "../core/types.ts";
+import type { GmailSurface, NotionSurface, Transcriber } from "../core/types.ts";
 
 // ONE hotkey (M8). It opens the command bar AND starts listening, so you decide whether
 // to speak or type *after* the bar is up rather than before. Enter submits either way.
@@ -99,10 +101,12 @@ app.whenReady().then(() => {
   seedIfEmpty(memory);
   // Secrets are read HERE, in composition — /core never touches process.env. Never log the URL.
   const sender = new SlackSender(process.env["SLACK_WEBHOOK_URL"]);
-  // M10: the Gmail tools are only on the menu when there is a Chrome to drive. A capability the
-  // app cannot exercise is never offered to the model in the first place.
+  // M10/M11: browser-backed tools are only on the menu when there is a Chrome to drive. A
+  // capability the app cannot exercise is never offered to the model in the first place. Both
+  // currently gate on the same CHROME_DEBUG_URL — one debug Chrome, two app surfaces in it.
   const gmail = createGmail();
-  const tools = buildRegistry({ gmail: gmail !== null });
+  const notion = createNotion();
+  const tools = buildRegistry({ gmail: gmail !== null, notion: notion !== null });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
   const draft = new InMemoryDraftStore();
@@ -116,6 +120,7 @@ app.whenReady().then(() => {
     sender,
     gmail ?? new UnavailableGmail(),
     draft,
+    notion ?? new UnavailableNotion(),
   );
 
   // THE planner call site. Typed text and dictated text both funnel through here, so the
@@ -204,6 +209,16 @@ function createGmail(): GmailSurface | null {
     return null;
   }
   return new ChromeGmail({ baseUrl });
+}
+
+// Same CHROME_DEBUG_URL as Gmail (M11): one debug Chrome, a second app surface in it.
+function createNotion(): NotionSurface | null {
+  const baseUrl = process.env["CHROME_DEBUG_URL"];
+  if (!baseUrl) {
+    console.log("[main] Notion tools disabled - CHROME_DEBUG_URL not set");
+    return null;
+  }
+  return new ChromeNotion({ baseUrl });
 }
 
 // A couple of starter facts so a live "open my dashboard" / "rewrite in my tone" can be

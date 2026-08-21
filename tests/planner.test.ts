@@ -4,7 +4,7 @@ import { registry } from "../src/core/registry.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
-import type { CapturedContext } from "../src/core/types.ts";
+import type { CapturedContext, Tool } from "../src/core/types.ts";
 import { FakeLLM } from "./FakeLLM.ts";
 
 function contextWith(selectedText: string | null): CapturedContext {
@@ -131,5 +131,79 @@ describe("Planner (M1: general path with summarize on the menu)", () => {
       tool: "summarize",
       status: "ok",
     });
+  });
+});
+
+describe("Planner — narrate widened to (args, deps) => string | Promise<string> (M11)", () => {
+  // A minimal `caution` tool, standing in for anything real (draftReply, addToPage) that
+  // needs to read the world before it can say what it's about to do.
+  function cautionTool(narrate: Tool["narrate"], ran: { value: boolean }): Tool {
+    return {
+      name: "testCaution",
+      description: "test",
+      inputSchema: { type: "object", properties: {} },
+      risk: "caution",
+      narrate,
+      handler: async () => {
+        ran.value = true;
+        return "done";
+      },
+    };
+  }
+
+  it("awaits an async narrate and shows its result before running the handler", async () => {
+    const shell = new MockShell({ context: contextWith("some text") });
+    const llm = new FakeLLM({ kind: "tool", name: "testCaution", input: {} });
+    const log = new InMemoryActionLog();
+    const ran = { value: false };
+    const tool = cautionTool(
+      async (_args, deps) => {
+        // Proves `deps` is genuinely passed through, not just a wider type signature.
+        await deps.memory.resolveArgs({});
+        return "Reading the world first…";
+      },
+      ran,
+    );
+    const planner = new Planner(llm, shell, [tool], new NoopMemoryResolver(), log);
+
+    const outcome = await planner.run("do the thing");
+
+    expect(outcome.status).toBe("ok");
+    expect(ran.value).toBe(true);
+    const narration = shell.actions.find((action) => action.kind === "notify");
+    expect(narration?.payload).toBe("Reading the world first…");
+  });
+
+  it("runs nothing when narrate throws — the same 'can't say what would happen' rule as confirmSummary", async () => {
+    const shell = new MockShell({ context: contextWith("some text") });
+    const llm = new FakeLLM({ kind: "tool", name: "testCaution", input: {} });
+    const log = new InMemoryActionLog();
+    const ran = { value: false };
+    const tool = cautionTool(async () => {
+      throw new Error("can't read the world right now");
+    }, ran);
+    const planner = new Planner(llm, shell, [tool], new NoopMemoryResolver(), log);
+
+    const outcome = await planner.run("do the thing");
+
+    expect(outcome.status).toBe("error");
+    expect(ran.value).toBe(false); // the handler never ran
+    expect(shell.actions.find((action) => action.kind === "notify")).toBeUndefined();
+    expect(log.entries[0]).toMatchObject({ status: "error", tool: "testCaution" });
+  });
+
+  it("still works with an existing SYNCHRONOUS, zero-argument narrate (no tool needs to change)", async () => {
+    const shell = new MockShell({ context: contextWith("some text") });
+    const llm = new FakeLLM({ kind: "tool", name: "testCaution", input: {} });
+    const log = new InMemoryActionLog();
+    const ran = { value: false };
+    const tool = cautionTool((): string => "Old-style narration…", ran);
+    const planner = new Planner(llm, shell, [tool], new NoopMemoryResolver(), log);
+
+    const outcome = await planner.run("do the thing");
+
+    expect(outcome.status).toBe("ok");
+    const narration = shell.actions.find((action) => action.kind === "notify");
+    expect(narration?.payload).toBe("Old-style narration…");
   });
 });

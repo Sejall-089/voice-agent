@@ -112,6 +112,29 @@ export interface GmailSurface {
   clickSend(): Promise<void>;
 }
 
+// --- The Notion surface (M11), behind an interface like GmailSurface ---
+
+// One Notion page as the app sees it. Deliberately flat, like EmailMessage: nothing here says
+// "Chrome" or "CDP", so the writing side (core/composeNote.ts) never learns which browser
+// layer the page came out of.
+export interface NotionPage {
+  title: string | null;
+  url: string;
+  body: string;
+}
+
+// Acting inside a live Notion tab. Two methods, not six — the narrowness IS M11's finding:
+// Notion has no staging area and no send action, so there is nothing corresponding to
+// GmailSurface's openReplyBox/readComposeText/readComposeRecipients/clickSend. Appending is
+// the only mutation this app gets a safe, honest shape for (core/risk.ts's `caution` tier;
+// core/notion/notionScript.ts's append-only invariant).
+export interface NotionSurface {
+  readOpenPage(): Promise<NotionPage>; // SAFE — read-only
+  // CAUTION. Appends only — MUST NEVER replace, delete, or reorder anything already on the
+  // page. That is the one rule notionScript.ts exists to enforce.
+  appendToPage(text: string): Promise<void>;
+}
+
 // --- Memory resolve seam (M1 no-op; M3 becomes SQLite-backed) ---
 
 export interface MemoryResolver {
@@ -159,9 +182,10 @@ export interface ToolDeps {
   shell: OSShell;
   memory: Memory;
   sender: MessageSender;
-  // M10. Both have "unavailable"/empty defaults at the planner, so a tool can never reach a
-  // browser the app was not configured to drive.
+  // M10 / M11. Both have "unavailable"/empty defaults at the planner, so a tool can never
+  // reach a browser the app was not configured to drive.
   gmail: GmailSurface;
+  notion: NotionSurface;
   draft: DraftStore;
 }
 
@@ -197,7 +221,14 @@ export interface Tool extends ToolSchema {
   // What to tell the user BEFORE a `caution` tool acts. Same shape and same reasoning as
   // confirmSummary — built from the resolved args — but it announces rather than asks, because
   // a caution action runs on its own. Narration is what stands in for the undo that doesn't exist.
-  narrate?: (args: ToolInput) => string;
+  //
+  // Widened in M11, the same way confirmSummary widened in M10 and for the identical reason:
+  // a GUI action's concrete facts — which Notion page this would write to, say — live in the
+  // app being acted on, not in the arguments the model proposed, so narration that could not
+  // read them would be announcing a guess. It may do SAFE work only: it runs before the tool
+  // acts, so it must never change the world it is describing. If it throws, the planner treats
+  // that as "we can't say what we're about to do" and nothing runs — same as confirmSummary.
+  narrate?: (args: ToolInput, deps: ToolDeps) => string | Promise<string>;
 }
 
 // --- Action log seam (M1 in-memory; M3 becomes SQLite action_log) ---

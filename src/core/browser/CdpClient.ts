@@ -8,8 +8,9 @@ import WebSocket from "ws";
 // this repo already rebuilds twice per install), and nothing about *which element gets clicked*
 // hides inside a library — that logic is ours, in gmailScript.ts, where it is tested.
 //
-// This file knows nothing about Gmail. It finds pages, evaluates an expression in one, and
-// types. ChromeGmail is what turns that into "open the reply box".
+// This file knows nothing about Gmail or Notion. It finds pages, evaluates an expression in
+// one, types, and (M11) drives real mouse/keyboard input. ChromeGmail and ChromeNotion are
+// what turn that into "open the reply box" or "add a block".
 
 export interface PageTarget {
   id: string;
@@ -125,16 +126,60 @@ export class CdpSession {
     });
     const exception = response.result?.exceptionDetails?.text;
     if (exception !== undefined) {
-      throw new Error(`The Gmail page rejected the request: ${exception}`);
+      throw new Error(`The page rejected the request: ${exception}`);
     }
     return response.result?.result?.value as T;
   }
 
   // Types into whatever is focused, firing the input events a rich editor listens for. Setting
-  // innerHTML directly would put text on screen that Gmail's own model never saw — it can then
-  // send an empty message, or drop the draft on the next re-render.
+  // innerHTML directly would put text on screen that the page's own model never saw — it can
+  // then send (or save) something the app itself never actually received.
   async insertText(text: string): Promise<void> {
     await this.send("Input.insertText", { text });
+  }
+
+  // Real, OS-level-equivalent input (M11). Gmail's compose box responds fine to ordinary DOM
+  // methods (`el.focus()`, `document.execCommand()`) called from inside the page — that is
+  // what gmailScript.ts uses throughout. Notion's editor does not: it ignores JS-dispatched
+  // `.click()` and `.focus()` calls (confirmed live — they report success but nothing is
+  // saved), and only reacts to genuine CDP-level input, the same signal a real user's mouse
+  // and keyboard produce. These three methods exist for that: they are still fully generic
+  // (CdpClient knows nothing about Notion), they just go one layer lower than `evaluate()`.
+
+  // A real click at a viewport coordinate — move, press, release, matching what a physical
+  // mouse does. Coordinates should come from a real element's `getBoundingClientRect()`
+  // (computed via `evaluate()`), never a guessed screen position.
+  async click(x: number, y: number): Promise<void> {
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await this.send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      x,
+      y,
+      button: "left",
+      clickCount: 1,
+    });
+    await this.send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      x,
+      y,
+      button: "left",
+      clickCount: 1,
+    });
+  }
+
+  // A real keypress — down then up, the pair a physical key produces.
+  async pressKey(key: string, code: string, keyCode: number): Promise<void> {
+    const params = { key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode };
+    await this.send("Input.dispatchKeyEvent", { type: "keyDown", ...params });
+    await this.send("Input.dispatchKeyEvent", { type: "keyUp", ...params });
+  }
+
+  // Bring this tab to the foreground. Real CDP input appears to require it in practice for
+  // Notion (unverified WHY — Chrome may deprioritize hit-testing/hover for a backgrounded
+  // tab's compositor); Gmail's tools never needed this, since they act through JS in the page
+  // rather than through simulated device input.
+  async bringToFront(): Promise<void> {
+    await this.send("Page.bringToFront", {});
   }
 
   close(): void {

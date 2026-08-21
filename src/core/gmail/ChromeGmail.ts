@@ -1,4 +1,5 @@
-import { CdpSession, listPages, type PageTarget } from "./CdpClient.ts";
+import { CdpSession } from "../browser/CdpClient.ts";
+import { pickTab } from "../browser/tabs.ts";
 import {
   gmailAgent,
   type GmailOp,
@@ -90,58 +91,34 @@ export class ChromeGmail implements GmailSurface {
   // open for a read, a compose box being open for a revision — so the choice is made on what
   // the tab actually contains, not on tab order.
   //
-  // Exactly one must qualify. Zero and several are both refusals: with two Gmail tabs mid-reply
-  // there is no honest way to know which draft the user meant, and picking wrong would put
-  // their words in the wrong conversation.
+  // The zero/many refusal logic itself lives in `pickTab` (core/browser/tabs.ts, M11): it was
+  // lifted out of here so a second app surface (Notion) reuses the exact same "don't guess
+  // which tab" safety rule instead of a second, driftable copy of it. Only the Gmail-specific
+  // parts — which host counts, what "qualifies" means, and the wording of each refusal —
+  // stay here.
   private async withTab<T>(
     predicate: Extract<GmailOp, "hasOpenMessage" | "hasComposeBox">,
     work: (session: CdpSession) => Promise<T>,
   ): Promise<T> {
-    const pages = (await listPages(this.baseUrl, this.timeoutMs)).filter(
-      (page) => page.url.includes(GMAIL_URL),
-    );
-    if (pages.length === 0) {
-      throw new Error(
-        "No Gmail tab is open in the Chrome I can see. Open Gmail in the Chrome you started " +
+    return pickTab(
+      {
+        baseUrl: this.baseUrl,
+        timeoutMs: this.timeoutMs,
+        hostMatch: (url) => url.includes(GMAIL_URL),
+        qualifies: (session) => this.run<boolean>(session, predicate),
+        whenNoHost:
+          "No Gmail tab is open in the Chrome I can see. Open Gmail in the Chrome you started " +
           "with remote debugging, then try again.",
-      );
-    }
-
-    const candidates: { target: PageTarget; session: CdpSession }[] = [];
-    try {
-      for (const target of pages) {
-        const session = await CdpSession.connect(target, this.timeoutMs);
-        try {
-          if (await this.run<boolean>(session, predicate)) {
-            candidates.push({ target, session });
-            continue;
-          }
-        } catch {
-          // A Gmail tab that can't answer (still loading, a signed-out screen) is simply not a
-          // candidate. Only the final zero/many verdict is worth telling the user about.
-        }
-        session.close();
-      }
-
-      const chosen = candidates[0];
-      if (chosen === undefined) {
-        throw new Error(
+        whenNoneQualify:
           predicate === "hasOpenMessage"
             ? "No email is open in Gmail — open the one you want to reply to first."
             : "There's no reply box open in Gmail right now.",
-        );
-      }
-      if (candidates.length > 1) {
-        throw new Error(
-          `${String(candidates.length)} Gmail tabs match — I won't guess which one you mean. ` +
-            "Leave one open and try again.",
-        );
-      }
-      return await work(chosen.session);
-    } finally {
-      // Every session, including the one that did the work: nothing outlives the call.
-      for (const candidate of candidates) candidate.session.close();
-    }
+        whenMany: (count) =>
+          `${String(count)} Gmail tabs match — I won't guess which one you mean. ` +
+          "Leave one open and try again.",
+      },
+      work,
+    );
   }
 
   // Ship gmailAgent into the page and unwrap its result. `toString()` is why that function may

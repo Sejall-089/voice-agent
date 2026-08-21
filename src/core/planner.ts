@@ -3,6 +3,7 @@ import { toToolSchemas } from "./registry.ts";
 import { UnresolvedReferenceError } from "./errors.ts";
 import { UnavailableSender } from "./senders/SlackSender.ts";
 import { UnavailableGmail } from "./gmail/UnavailableGmail.ts";
+import { UnavailableNotion } from "./notion/UnavailableNotion.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { needsConfirm, needsNarration } from "./risk.ts";
 import type { DraftStore } from "./draft.ts";
@@ -12,6 +13,7 @@ import type {
   LLMClient,
   Memory,
   MessageSender,
+  NotionSurface,
   PlannerOutcome,
   Tool,
   ToolDeps,
@@ -41,6 +43,8 @@ export class Planner {
     // Scratch state for the reply being iterated on. Owned by the planner (one per app run),
     // handed to handlers through ToolDeps like every other dependency.
     private readonly draft: DraftStore = new InMemoryDraftStore(),
+    // Same idea again for Notion (M11) — the same Chrome, a second app surface in it.
+    private readonly notion: NotionSurface = new UnavailableNotion(),
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -102,6 +106,7 @@ export class Planner {
       memory: this.memory,
       sender: this.sender,
       gmail: this.gmail,
+      notion: this.notion,
       draft: this.draft,
     };
 
@@ -110,11 +115,21 @@ export class Planner {
     //     another app; opening someone's reply box has no undo, so the announcement is the
     //     protection. It goes out through the `notify` action the OSShell contract has always
     //     had, which is why narration needed no change to that contract.
+    //
+    //     M11 widened `narrate` to `(args, deps) => string | Promise<string>` — the same
+    //     evolution `confirmSummary` underwent in M10, and for the identical reason: a GUI
+    //     action's concrete facts (which Notion page this would write to) live in the app
+    //     being acted on, not in the model's arguments. Same failure handling as the confirm
+    //     gate below: if the tool cannot even say what it is about to do, nothing runs.
     if (needsNarration(tool.risk) && tool.narrate) {
-      await this.shell.executeAction({
-        kind: "notify",
-        payload: tool.narrate(args),
-      });
+      let narration: string;
+      try {
+        narration = await tool.narrate(args, deps);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return this.fail(instruction, tool.name, args, message);
+      }
+      await this.shell.executeAction({ kind: "notify", payload: narration });
     }
 
     // 6b. Confirm gate — `dangerous` tools must pass shell.confirm() before running.

@@ -59,6 +59,16 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for diagrams and [`spec.md`](spec.md) f
 | 9 | "make it shorter" | Rewrites **that same draft** — including any edits you made by hand |
 | 10 | "send it" | Shows the real recipient and the **whole** draft, and sends only if you say yes |
 
+…and one more in **M11**, with a Notion page open in the same Chrome:
+
+| # | Say this | It does |
+|---|---|---|
+| 11 | "note that the launch moved to Friday" | Reads the open page, writes a note **in your tone**, adds it to the end |
+
+Task 11 is one-shot, not three like 8-10: Notion has no staging area and no send button, so
+there's nothing to draft-then-send. A follow-up like "make that note shorter" is an honest
+miss, not a silent edit — see [Scope](#scope).
+
 Anything else → an honest refusal, logged as a miss (a ranked backlog of what to build next).
 It never guesses.
 
@@ -103,7 +113,7 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
 | `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice only. Optional — leave them blank and the bar never opens the microphone; typed commands work exactly as before. |
 | `HOTKEY` | Optional. Pins the combo instead of letting the app pick the first free one. |
-| `CHROME_DEBUG_URL` | Tasks 8-10 only (the Gmail reply tools). Optional — leave it blank and those three tools are never offered at all. |
+| `CHROME_DEBUG_URL` | Tasks 8-11 (the Gmail reply tools **and** the Notion tool — one debug Chrome, both). Optional — leave it blank and none of those four tools are ever offered at all. |
 
 ### Setting up the Gmail reply tools (optional)
 
@@ -125,6 +135,29 @@ accessible name, and refuses if it can't identify it. No pixel clicking anywhere
 
 Scoped to **Gmail in Chrome, English UI**, with one message open. Anything else — another app,
 another language, no message open, two matching Gmail tabs — is an honest refusal, never a guess.
+
+### Setting up the Notion tool (optional)
+
+Same debug Chrome as Gmail above — no second setup, just a Notion tab open in it. Set
+`CHROME_DEBUG_URL` once and both work.
+
+Notion's page content carries no ARIA roles at all (unlike Gmail), so the app targets the last
+block on the page by structure (`data-block-id`, document order) instead. It also can't act
+through ordinary JS calls the way Gmail's tools do — Notion's editor was found, live, to
+silently ignore `.click()`/`.focus()`/`execCommand()` (they report success but save nothing),
+so this tool drives real mouse and keyboard input at the CDP level instead. One visible
+consequence: **using it will bring that Chrome window to the foreground**, unlike the Gmail
+tools, which never need to.
+
+Scoped to **one open page, append only** — content lands after everything already there, and
+nothing existing is ever edited, reordered, or removed. There's no revision tool: a follow-up
+("make that note shorter") is a miss, not a silent edit, on purpose — undoing what was just
+written would mean deleting real content from a live document with no staging area. Two or
+more Notion tabs open at once is narrowed to whichever is the foreground tab; still ambiguous
+after that, or no page open at all, is an honest refusal.
+
+**Known limits:** Chrome tab only — the Notion **desktop app** is a different, unverified
+transport and isn't supported.
 
 ### Setting up voice (optional)
 
@@ -174,10 +207,11 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (165 tests): the planner, each tool, the memory engine, the risk gates,
-the LLM-provider factory, the voice state machine, the Gmail reply flow, and both eval suites. All
-headless against `MockShell`, a fake Gmail tab, and a jsdom fixture — **no API key, no network, no
-real Slack, no microphone, no whisper model, no browser, and no inbox.**
+`npm test` runs everything (201 tests): the planner, each tool, the memory engine, the risk gates,
+the LLM-provider factory, the voice state machine, the Gmail reply flow, the Notion page-writing
+flow, and both eval suites. All headless against `MockShell`, fake Gmail/Notion tabs, and jsdom
+fixtures — **no API key, no network, no real Slack, no microphone, no whisper model, no browser,
+no inbox, and no Notion account.**
 
 ---
 
@@ -251,6 +285,19 @@ If correction-routing ever misfires again, the fix belongs in the **`remember` t
 (`src/core/tools/remember.ts`) or the previous-turn framing in `src/core/llm/prompt.ts` — **not**
 in the planner's control flow.
 
+**M11, live-verified against a real Notion page.** The mechanism this milestone rests on was
+tested directly before being shipped: JS-level `.click()`/`.focus()`/`document.execCommand()`
+calls report success on Notion's editor but save nothing — confirmed across several distinct
+approaches — while real CDP-level mouse and keyboard input works. A single multi-line
+`insertText` call also silently dropped everything after its first newline; a real Enter
+keypress between separately-typed lines does not. The **shipped** `ChromeNotion` class (not a
+throwaway script) then appended real, verifiable text to the live page end to end, and a live
+Gmail regression confirmed the `core/browser/` extraction broke nothing. Not yet proven by
+anything short of more live use: behavior on a locked/read-only page (none was available to
+test against — `appendToPage` verifies success by reading the page back rather than
+pre-checking for one), and whether `Page.bringToFront`'s visible tab-switch is an acceptable
+cost in daily use.
+
 ---
 
 ## Scope
@@ -266,7 +313,20 @@ controls by role and accessible name. Deliberately one app: the writing half
 verification per app, and "works everywhere, reliably nowhere" is the failure this project has
 been avoiding since day one.
 
+**M11 added a second app — Notion in Chrome, one page, append only** — specifically to test
+whether that split was real. It mostly was: the generic browser transport
+(`src/core/browser/`) and a genuinely shared writing core (`src/core/composeShared.ts`) both
+came out of it clean and reusable. What did NOT transfer: `compose.ts`'s reply-shaped rules
+(a note needs no greeting or sign-off), the three-tool draft/revise/send shape (Notion has no
+staging area to build the other two around), and — the biggest surprise — the *mechanism*
+itself. Gmail's compose box takes ordinary JS calls; Notion's editor silently ignores them and
+needs real CDP-level input instead. Even the safety RULE ("resolve every target structurally,
+refuse on ambiguity") only partly transferred: Notion exposes no ARIA roles on page content at
+all, so the identification strategy had to become `data-block-id` + document order rather than
+role + accessible name.
+
 **Still not built:** screenshot/vision-driven clicking anywhere on screen, multi-step agent loops,
-more than one external connector, macOS/Linux, any email app but Gmail-in-Chrome. Those are
-architected for (behind `OSShell` / `VoiceShell` / `GmailSurface` and the tool registry) but not
-built.
+more than one external connector, macOS/Linux, any email app but Gmail-in-Chrome, any page editor
+but Notion-in-Chrome (and only the Chrome tab, not the Notion desktop app), search/navigation
+within either app. Those are architected for (behind `OSShell` / `VoiceShell` / `GmailSurface` /
+`NotionSurface` and the tool registry) but not built.
