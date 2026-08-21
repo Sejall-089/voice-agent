@@ -74,6 +74,24 @@ It never guesses.
 
 ---
 
+## System-wide dictation (M12)
+
+Not one of the tasks above — it never touches the planner, the registry, or memory. Hold
+nothing: tap the **dictation hotkey** (separate from the instruction hotkey) to start
+listening, tap it again to stop and **type the raw transcript at the cursor of whatever
+window currently has focus, in any app** — a terminal, Notepad, a browser text field, Word.
+No tool selection, no confirm gate, because there's no plan to confirm: it's the literal
+"type what I said" primitive.
+
+It narrates *before* it types (naming the window it captured focus on, so you know where
+text is about to land before you speak), and it refuses rather than guesses: if focus moved
+between speaking and typing, or the OS reports fewer keystrokes accepted than sent (most
+often an unelevated app trying to type into an elevated one), nothing is typed and the
+transcript you spoke is shown back to you instead. See [Setting up dictation](#setting-up-dictation-optional)
+below and `spec.md` §4c for the full design.
+
+---
+
 ## Running it
 
 ```bash
@@ -111,8 +129,9 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `ANTHROPIC_API_KEY` | Only if `LLM_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` | Only if `LLM_PROVIDER=openai` |
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
-| `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice only. Optional — leave them blank and the bar never opens the microphone; typed commands work exactly as before. |
-| `HOTKEY` | Optional. Pins the combo instead of letting the app pick the first free one. |
+| `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice **and** dictation (M12). Optional — leave them blank and neither the bar's microphone nor the dictation hotkey ever activate; typed commands work exactly as before. |
+| `HOTKEY` | Optional. Pins the instruction-bar combo instead of letting the app pick the first free one. |
+| `DICTATE_HOTKEY` | Optional. Pins the **dictation** combo (M12) — separate from `HOTKEY` above. Needs `WHISPER_*` set too, or there's no transcriber to dictate with. |
 | `CHROME_DEBUG_URL` | Tasks 8-11 (the Gmail reply tools **and** the Notion tool — one debug Chrome, both). Optional — leave it blank and none of those four tools are ever offered at all. |
 
 ### Setting up the Gmail reply tools (optional)
@@ -180,6 +199,34 @@ The provider lives behind the same `LLMClient` interface either way (`src/core/l
 `anthropic.ts` / `openai.ts` / shared `prompt.ts` / `factory.ts`), so switching is a one-line
 `.env` change, not a code change.
 
+### Setting up dictation (optional)
+
+No extra setup beyond voice above — dictation shares the exact same `WHISPER_EXE_PATH` /
+`WHISPER_MODEL_PATH` transcriber, so if voice already works, dictation does too, on its own
+**separate** hotkey.
+
+| You do | It does |
+|---|---|
+| Tap the dictation hotkey | Starts listening — narrates which window it will type into |
+| Tap it again | Stops, transcribes, and types the transcript at that window's cursor |
+| **Esc**, or click away | Discards the recording. Nothing is typed |
+| Wait **30 s** | Mic released, audio kept — the next tap still types it. (A safety ceiling for a forgotten stop-tap, not a normal session — the usual way to finish is the second tap.) |
+
+The app claims the first free combo from `Ctrl+Shift+Alt+D` → `Ctrl+Alt+D` → `Ctrl+Alt+J` and
+logs which one won — pin your own with `DICTATE_HOTKEY` in `.env`. `Ctrl+Alt+V` (Excel's Paste
+Special) and `Alt+Shift+D` (Word's insert-date field) are deliberately not on that list at all.
+
+It's a **separate** hotkey rather than reusing the instruction bar's one (M8), because the two
+want opposite focus behaviour: the instruction bar steals focus on purpose (you're talking to
+the agent); dictation must never steal focus (you're talking to whatever app you're already
+in). They can't run at the same time either — both need the one microphone — so triggering one
+while the other is mid-capture is a logged no-op, not a silent failure.
+
+If focus moves to a different window between when you finish speaking and when it's about to
+type, or Windows blocks the keystrokes outright (typically an unelevated app trying to type
+into an elevated one — an admin terminal, say), nothing gets typed. You'll see the transcript
+you spoke instead of losing it silently.
+
 > **Native-module note.** `better-sqlite3` needs a different binary for Node (tests) than for
 > Electron (the app). The `pretest` / `predev` scripts rebuild it automatically, so switching
 > between `npm test` and `npm run dev` costs one short rebuild. Nothing to do manually — except
@@ -207,11 +254,12 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (201 tests): the planner, each tool, the memory engine, the risk gates,
-the LLM-provider factory, the voice state machine, the Gmail reply flow, the Notion page-writing
-flow, and both eval suites. All headless against `MockShell`, fake Gmail/Notion tabs, and jsdom
+`npm test` runs everything (231 tests): the planner, each tool, the memory engine, the risk gates,
+the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
+flow, the Notion page-writing flow, and both eval suites. All headless against `MockShell`, a
+`MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, and jsdom
 fixtures — **no API key, no network, no real Slack, no microphone, no whisper model, no browser,
-no inbox, and no Notion account.**
+no inbox, no Notion account, and no OS keystroke actually sent.**
 
 ---
 
@@ -298,6 +346,25 @@ test against — `appendToPage` verifies success by reading the page back rather
 pre-checking for one), and whether `Page.bringToFront`'s visible tab-switch is an acceptable
 cost in daily use.
 
+**M12 — mechanism verified once, manually; the full state machine proven, real keystrokes
+not.** `SendInput` + `KEYEVENTF_UNICODE`'s exact P/Invoke shape (the nested-type array
+construction, `Marshal.SizeOf`, the struct layout) was checked by hand outside the test suite
+before being shipped — deliberately via a **zero-length** `SendInput` call plus a read-only
+foreground-window query, so the verification step itself could never inject a keystroke
+anywhere. `DictationSession`'s state machine is pinned the same way `VoiceSession`'s is: the
+begin → recording → transcribing → inserting → idle order; a focus change between speaking
+and typing refusing outright with the transcript preserved, never guessing it's still safe to
+type; a short/blocked write becoming a thrown refusal rather than a silent partial type; the
+30 s cap releasing the mic without acting; and — the specific regression this milestone's own
+`WindowsShell` change was for — Escape, a direct `window.hide()`, and the window closing all
+correctly cancel a dictation session that never called `showInput()` at all, something the
+pre-M12 code had no way to do since its only guard was "is a typed-text capture pending".
+**Not yet proven, and only a live run can prove it:** that real keystrokes land correctly in
+real targets (a terminal, an IDE with its own autocomplete, Word/Excel specifically, since the
+hotkey list was chosen around avoiding exactly those apps' own shortcuts), that the
+elevated-window refusal fires the way the design assumes, and whether the 30 s cap is the
+right length in practice.
+
 ---
 
 ## Scope
@@ -325,8 +392,17 @@ refuse on ambiguity") only partly transferred: Notion exposes no ARIA roles on p
 all, so the identification strategy had to become `data-block-id` + document order rather than
 role + accessible name.
 
+**M12 added acting outside any browser at all — system-wide dictation.** Deliberately the
+narrowest possible slice of "act on the OS": one operation (insert text at the caret),
+triggered by a hotkey the model never sees and never chooses, so none of the tool-choosing
+machinery M10/M11 needed even applies. It's the generalization the Gmail/Notion CDP work
+always implied — real device-level input beats JS calls a target can silently ignore — played
+on the one surface Chrome's DevTools Protocol can't reach: everything that isn't Chrome.
+
 **Still not built:** screenshot/vision-driven clicking anywhere on screen, multi-step agent loops,
 more than one external connector, macOS/Linux, any email app but Gmail-in-Chrome, any page editor
 but Notion-in-Chrome (and only the Chrome tab, not the Notion desktop app), search/navigation
-within either app. Those are architected for (behind `OSShell` / `VoiceShell` / `GmailSurface` /
-`NotionSurface` and the tool registry) but not built.
+within either app, and any dictation cleanup/rewrite pass (raw transcript only — see `spec.md`
+§4c for the seam left for a later milestone). Those are architected for (behind `OSShell` /
+`VoiceShell` / `InputInjector` / `GmailSurface` / `NotionSurface` and the tool registry) but not
+built.

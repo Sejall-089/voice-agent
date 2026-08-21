@@ -20,6 +20,9 @@ export class MockShell implements OSShell, VoiceShell {
   public readonly confirmMessages: string[] = [];
   public readonly voiceStates: { state: VoiceState; detail?: string }[] = [];
   public readonly thinking: boolean[] = [];
+  // narrate() calls (M12: caution-tool narration AND DictationSession's window-title cue
+  // share this one list — same channel in the real WindowsShell, so one recording of it here).
+  public readonly narrations: string[] = [];
   public recordingsStarted = 0;
   public recordingsStopped = 0;
   public recordingsCancelled = 0;
@@ -94,5 +97,11 @@ export class MockShell implements OSShell, VoiceShell {
 
   showVoiceState(state: VoiceState, detail?: string): void {
     this.voiceStates.push(detail === undefined ? { state } : { state, detail });
+  }
+
+  // Satisfies DictationShell (M12) alongside VoiceShell, so DictationSession tests can wire
+  // up a MockShell exactly the way VoiceSession tests already do.
+  narrate(text: string): void {
+    this.narrations.push(text);
   }
 }

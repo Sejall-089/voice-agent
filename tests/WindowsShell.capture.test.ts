@@ -97,7 +97,9 @@ const { WindowsShell } = await import("../src/main/shell/WindowsShell.ts");
 // as main.ts wires it — the only faithful way to reproduce a bug that lives in how the two
 // talk to each other, not in either one alone.
 const { VoiceSession } = await import("../src/main/shell/VoiceSession.ts");
+const { DictationSession } = await import("../src/main/shell/DictationSession.ts");
 const { FakeTranscriber } = await import("./FakeTranscriber.ts");
+const { MockInputInjector } = await import("./MockInputInjector.ts");
 
 // The global Escape handler currently held, if the bar is visible.
 function escapeHandler(): (() => void) | undefined {
@@ -519,5 +521,93 @@ describe("WindowsShell — a result surfaces even if the bar was blurred away mi
     expect(window.isVisible()).toBe(true);
     const echo = window.sent.filter((m) => m.channel === "commandbar:echo").at(-1);
     expect(echo?.args[0]).toBe("SUMMARY");
+  });
+});
+
+// M12: DictationSession never calls showInput() — there is no typed-text capture to resolve,
+// only a mic and a target window. Before this milestone, endCapture()'s guard was
+// `pendingInput === null`, which meant it did NOTHING for a session that only ever set
+// voiceState. Escape, a blur, or the window closing would have hidden the bar and left
+// DictationSession's recording live and unaware, with the microphone still open and no way
+// left to reach it — the opposite of "Esc discards it".
+describe("WindowsShell — dictation is heard by every dismissal path, with no showInput() in flight", () => {
+  it("cancels a dictated recording via Escape even though showInput() was never called", async () => {
+    let dismissed = 0;
+    shell.onDismissed(() => (dismissed += 1));
+
+    const dictation = new DictationSession(
+      shell,
+      new FakeTranscriber("unused"),
+      new MockInputInjector(),
+    );
+    const beginning = dictation.toggle();
+    // begin() awaits the injector's getForegroundWindow() BEFORE it ever reaches
+    // shell.startRecording(), so the IPC listener startRecording() registers is not live
+    // yet on this same tick — unlike calling shell.startRecording() directly (as the
+    // VoiceSession tests above do). Let that resolve first, or ackVoiceStarted() fires
+    // into an empty room and the recording hangs forever.
+    await Promise.resolve();
+    ackVoiceStarted();
+    await beginning;
+    expect(dictation.getState()).toBe("recording");
+    expect(window.isVisible()).toBe(true); // narrate() showed it via showInactive
+
+    fireEscape();
+    await Promise.resolve();
+
+    expect(dismissed).toBe(1);
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("cancels via a direct window.hide() and via the window closing, same as blur/escape", async () => {
+    for (const trigger of ["hide", "closed"] as const) {
+      ipcMain.removeAllListeners();
+      globalShortcut._handlers.clear();
+      window = makeWindow();
+      shell = new WindowsShell(window as unknown as Electron.BrowserWindow);
+
+      let dismissed = 0;
+      shell.onDismissed(() => (dismissed += 1));
+      const dictation = new DictationSession(
+        shell,
+        new FakeTranscriber("unused"),
+        new MockInputInjector(),
+      );
+      const beginning = dictation.toggle();
+      await Promise.resolve(); // let getForegroundWindow() resolve before the IPC ack
+      ackVoiceStarted();
+      await beginning;
+
+      window.emit(trigger);
+      await Promise.resolve();
+
+      expect(dismissed, `trigger: ${trigger}`).toBe(1);
+    }
+  });
+
+  it("does not auto-hide while dictation is inserting text", async () => {
+    // pinnedAgainstBlur must cover "inserting", not just "recording"/"transcribing" — an
+    // in-flight SendInput call is exactly the kind of thing the bar must stay up through.
+    vi.useFakeTimers();
+    let dismissed = 0;
+    shell.onDismissed(() => (dismissed += 1));
+
+    shell.showVoiceState("inserting");
+    window.focused = false;
+    shell.showResult("stale result from an earlier run");
+    vi.advanceTimersByTime(60_000);
+
+    expect(dismissed).toBe(0);
+    expect(window.isVisible()).toBe(true);
+  });
+
+  it("narrate() shows the bar without stealing focus and cancels any pending auto-hide", () => {
+    window.focused = false;
+    shell.narrate("Dictating into — Untitled - Notepad");
+
+    expect(window.isVisible()).toBe(true);
+    expect(window.isFocused()).toBe(false); // showInactive, not show — never steals focus
+    const status = window.sent.filter((m) => m.channel === "commandbar:status").at(-1);
+    expect(status?.args[0]).toBe("Dictating into — Untitled - Notepad");
   });
 });

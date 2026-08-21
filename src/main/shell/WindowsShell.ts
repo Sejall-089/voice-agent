@@ -91,17 +91,36 @@ export class WindowsShell implements OSShell, VoiceShell {
 
   // Ends an in-flight capture as a DISMISSAL — no text, and voice throws its recording away.
   // Idempotent, so hide() and the window event can both call it.
+  //
+  // Guards on voiceState too, not just pendingInput (M12): dictation never calls showInput()
+  // — there is no typed-text capture to resolve — so pendingInput is null for the entire
+  // life of a dictation session, and this must still fire so DictationSession hears about an
+  // Escape/blur/direct hide and discards its recording instead of typing into whatever the
+  // user walked away from.
   private endCapture(): void {
-    if (this.pendingInput === null) return;
+    if (this.pendingInput === null && this.voiceState === "idle") return;
     // Dismiss before resolving, so the awaiting caller already sees an abandoned session.
     this.onDismiss?.();
+    // Own the busy flag here too, rather than trusting the async abandon() this triggers to
+    // reset it in time: hide() below reaches endCapture() via TWO paths on a single call —
+    // its own explicit invocation, and the "hide" event that same window.hide() emits a few
+    // lines later. The old pendingInput-only guard was self-clearing (resolveInput() nulls
+    // it), so the second path always no-op'd. voiceState is not self-clearing the same way
+    // unless this method clears it directly, so without this line the second path would see
+    // a still-non-idle voiceState and fire this same dismissal a second time.
+    this.voiceState = "idle";
     this.resolveInput("");
   }
 
-  // May a BLUR hide the bar? Not while the microphone is live or whisper is running: the
-  // bar is deliberately unfocused then, and hiding would take the indicator with it.
+  // May a BLUR hide the bar? Not while the microphone is live, whisper is running, or
+  // dictation is inserting text: the bar is deliberately unfocused in all three cases, and
+  // hiding would take the indicator with it.
   private get pinnedAgainstBlur(): boolean {
-    return this.voiceState === "recording" || this.voiceState === "transcribing";
+    return (
+      this.voiceState === "recording" ||
+      this.voiceState === "transcribing" ||
+      this.voiceState === "inserting"
+    );
   }
 
   // Is voice holding something the user has not decided about? Any non-idle state, and
@@ -167,6 +186,17 @@ export class WindowsShell implements OSShell, VoiceShell {
     if (!this.window.isFocused()) {
       this.scheduleAutoHide();
     }
+  }
+
+  // Says what is about to happen (or just happened) BEFORE/without stealing focus. Original
+  // use was `caution`-tool narration (M10, via executeAction's "notify"); M12's
+  // DictationSession reuses it verbatim — same channel, same reasoning — to name the window
+  // it is about to type into ("Dictating into — Untitled - Notepad") rather than adding a
+  // parallel status surface for a second narration source.
+  narrate(text: string): void {
+    if (!this.window.isVisible()) this.window.showInactive();
+    this.cancelAutoHide();
+    this.window.webContents.send("commandbar:status", text);
   }
 
   // --- VoiceShell (M7) ---
@@ -326,13 +356,7 @@ export class WindowsShell implements OSShell, VoiceShell {
           // Narration for `caution` tools (M10, core/risk.ts): what is about to happen inside
           // another app, said before it happens. This is the action kind the OSShell contract
           // has carried unimplemented since M0 — M10 is the first tool with something to say.
-          //
-          // showInactive, like showResult: a reply is drafted while the user is looking at
-          // Gmail, and stealing focus to announce it would pull them out of the thing being
-          // narrated. Auto-hide is cancelled because the run is still going.
-          if (!this.window.isVisible()) this.window.showInactive();
-          this.cancelAutoHide();
-          this.window.webContents.send("commandbar:status", action.payload);
+          this.narrate(action.payload);
           return { ok: true };
         }
       }

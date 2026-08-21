@@ -51,6 +51,13 @@ Fuzzy human sentence  →  exact function call.
   search, no navigation, no editing or removing existing content, no revision tool. See
   §6b and §9's M11.
 
+**Added after v0 (M12):**
+- System-wide dictation: a THIRD, separate hotkey (not the M8 instruction hotkey) that
+  types the raw transcript at the OS caret of whatever window currently has focus, in ANY
+  app. Never reaches the planner — no tool selection, no risk tier, no confirm gate; it is
+  the "insert text at cursor" primitive the Gmail/Notion CDP work always implied but never
+  generalized past one browser tab. See §4c and §9's M12.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
   live-verified. It was out of v0 deliberately — voice is a second way to produce the
@@ -89,7 +96,8 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | Active window      | `active-win` (optional)                  | If it complicates the build, skip; context still works from clipboard. |
 | Speech to text (M7)| **whisper.cpp**, local, via a spawned `whisper-cli.exe` | No cloud STT, no API key, no new npm dependency. Audio is captured in the renderer (Web Audio → 16 kHz mono WAV); `src/core/transcribers/`. |
 | Browser control (M10, extended M11)| **Chrome DevTools Protocol** over `ws`, hand-rolled (`core/browser/`) | One `CdpClient` (app-agnostic) attaches to a Chrome the user starts with `--remote-debugging-port` + a dedicated `--user-data-dir` (Chrome 136+ refuses the port on the default profile); `ChromeGmail` and `ChromeNotion` are the per-app layers on top. `ws` is pure JS — no second native rebuild. Not puppeteer: the element-resolution logic is the safety-critical part and stays in our own tested code. M11 added real CDP-level input (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`) alongside the `Input.insertText` M10 already used — Notion's editor ignores JS-dispatched `.click()`/`.focus()`/`execCommand()` (they report success but save nothing); only genuine device-level input registers. |
-| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10/M11, optional) `CHROME_DEBUG_URL` — one debug Chrome, both Gmail and Notion tools gate on it. |
+| System-wide input (M12) | **`SendInput` + `KEYEVENTF_UNICODE`**, hand-rolled over a persistent PowerShell host process (`src/main/shell/WindowsInputInjector.ts`) | The one Windows primitive with a real success signal: it returns the count of keystrokes the OS actually accepted, so a short write (most often UIPI blocking an unelevated process from typing into an elevated window) is a thrown error, never a silently-swallowed partial type — the same discipline M11 learned the hard way when `execCommand()` reported success and saved nothing. UI Automation's `ValuePattern.SetValue` was considered and rejected: it has no insert-at-caret operation, only whole-value replacement, which is destructive exactly where dictation must not be. Clipboard + `Ctrl+V` was rejected too — `getContext()` already uses the clipboard as this app's own context-capture channel (§4), and routing dictation through it would race that. PowerShell (`Add-Type` compiling one P/Invoke declaration, once, at construction) rather than a native node module — same reasoning as whisper.cpp's spawned binary: this repo already rebuilds `better-sqlite3` twice per install, and a second native addon would double that fragility. |
+| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10/M11, optional) `CHROME_DEBUG_URL` — one debug Chrome, both Gmail and Notion tools gate on it, and (M12, optional) `DICTATE_HOTKEY` — dictation itself needs no new secret, only the whisper config it already shares with voice. |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
 interface (§4) so a Mac/Linux shell can be added later without touching the core.
@@ -299,6 +307,117 @@ microphone, and `Enter` on an empty bar does nothing — exactly as before voice
 exactly one planner call site and `/core` is unchanged by M7/M8. Dictated instructions pass the same
 registry check, the same resolution, and the same confirm gate; the planner cannot tell
 where the string came from.
+
+---
+
+## 4c. System-wide dictation (M12) — never reaches the planner
+
+Everything in §4a exists to produce an *instruction string* for the planner. M12 is a
+different, simpler primitive: hold nothing, tap the dictation hotkey to start listening, tap
+it again to stop and type the raw transcript at the OS caret of whatever window currently has
+focus — in ANY app, not just this one. There is no tool selection, no risk tier, no confirm
+gate, because there is no planner call at all. It is the "insert text at cursor" primitive the
+Gmail/Notion CDP work always implied but never generalized past one browser tab.
+
+**A separate hotkey, not the M8 instruction hotkey, disambiguated by which key combo is
+pressed rather than by hold-vs-tap.** Hold-vs-tap needs a system-wide low-level keyboard hook
+to detect key-up (`globalShortcut` only fires on press), which is a much bigger primitive to
+buy a distinction this app doesn't otherwise need. The stronger reason is semantic: the two
+modes want *opposite* focus behaviour. `showInput()` calls `window.focus()` on purpose — the
+instruction bar is a conversation with the agent. Dictation must never focus the bar — it is
+a conversation with whatever app you're already in — so a misfire has asymmetric cost: an
+instruction misfire wastes a planner run; a dictation misfire types characters into someone's
+live document with no undo.
+
+```
+DICTATE_HOTKEYS = [Ctrl+Shift+Alt+D, Ctrl+Alt+D, Ctrl+Alt+J]   (DICTATE_HOTKEY in .env overrides)
+```
+Negotiated exactly like the instruction hotkey list (§4a, §9's M8) — first free combo wins,
+logged. Deliberately NOT Space-based, so the two negotiations can never collide with each
+other on the OS. `Ctrl+Alt+V` (Excel's Paste Special) and `Alt+Shift+D` (Word's insert-date
+field) were considered and excluded outright, not merely deprioritized — both are real,
+common bindings in exactly the apps dictation is most likely used in. `Ctrl+Alt+J` is the
+third candidate: no default binding in Word/Excel, and unused in Chrome/VS Code (Chrome's own
+download/console shortcuts are `Ctrl+J`/`Ctrl+Shift+J`, one modifier short of this).
+
+**The gesture is a toggle, not the instruction bar's Enter-driven shape.** M8 collapsed
+voice's original toggle into begin()/finish() because Enter is already there once the bar is
+open and focused — that reason doesn't transfer here, because during dictation `Enter`
+belongs to whatever app is being dictated into, not to this app. So `DictationSession`
+(`src/main/shell/DictationSession.ts`) is deliberately M7's original toggle shape, reused for
+a different target:
+
+```
+idle ──toggle()──► recording ──toggle()──► transcribing ──► inserting ──► idle
+         │              └──cap (DEFAULT_MAX_RECORDING_MS = 30s)──► stopped ──toggle()──►┘
+         └──abandon()──► idle (silent, mirrors VoiceSession)
+```
+
+The 30s cap is a SAFETY CEILING for a forgotten stop-tap, not a typical session length —
+dictation's normal ending is the second tap, and unlike the instruction bar's 90s cap (which
+sits behind a visible, focused bar the whole time), a dictation take runs silently in the
+background with nothing on screen to prompt you back to it. It is a named, tunable constant
+(`DEFAULT_MAX_RECORDING_MS`, same convention as `ChromeNotion`'s `FOCUS_SETTLE_MS`/
+`KEY_SETTLE_MS`) flagged as a value real live use may need to adjust, not a literal.
+
+Shares WindowsShell's existing `voiceState` field and `showVoiceState`/`hasUnsubmittedAudio`/
+`pinnedAgainstBlur` plumbing with `VoiceSession` rather than adding a second parallel "busy"
+concept — the two machines are mutually exclusive at runtime (they share the one `MicRecorder`
+in the renderer), so one field safely serves both. `"inserting"` was added to `VoiceState` for
+this reason.
+
+**Mutual exclusion (`src/main/dictate.ts`).** Dictation and the instruction bar's own voice
+capture share one microphone and, while dictation runs, the same `BrowserWindow` (shown via
+`showInactive()` so it never steals focus). If the instruction hotkey fired mid-dictation,
+`shell.showInput()`'s `window.focus()` would yank focus away from whatever the user is
+dictating into — exactly the failure this feature exists to avoid. Each hotkey's handler
+checks the other session's state before doing anything; both sessions' `abandon()` are no-ops
+when already idle, so `shell.onDismissed()` can call both unconditionally.
+
+**Insertion mechanism: `SendInput` + `KEYEVENTF_UNICODE`, not UI Automation, not clipboard,
+not `SendKeys`.** See the tech-stack table (§3) for the full reasoning; the short version is
+that `SendInput` is the only one of the three with a real, un-swallowable success signal (a
+short write throws), UIA's `ValuePattern.SetValue` has no insert-at-caret operation (only
+whole-value replacement — destructive exactly where dictation must not be), and clipboard+
+`Ctrl+V` would race `getContext()`'s own use of the clipboard as this app's context-capture
+channel (§4). Text is chunked (`CHUNK_SIZE_CHARS`/`CHUNK_DELAY_MS`, named and tunable) into
+small `SendInput` bursts rather than one giant call — apps doing per-keystroke work
+(autocomplete, an IDE's own input handling) have been observed to drop or reorder events
+under a single large burst.
+
+**Focus is checked twice: at trigger time, and again immediately before typing.** The
+foreground window (handle + title) is captured when recording begins — before anything is
+narrated, so the user knows where text will land *before* speaking, not after. If focus
+changed by the time transcription finishes (the whole capture takes real, unpredictable time),
+`DictationSession` refuses to type at all rather than guess it is still safe — the transcript
+is surfaced in the refusal message so nothing said is lost, but nothing is typed into a window
+the user has since moved on from. The same refusal applies if the starting focus could not be
+captured in the first place (no target to compare against is treated as "unsafe", never as
+"assume it's fine").
+
+**Raw transcript only, no cleanup pass.** `WhisperCppTranscriber`'s existing
+`cleanTranscript()` (stripping `[BLANK_AUDIO]`/`(silence)` tokens, collapsing whitespace) is
+the only processing the text gets — dictation reuses it for free, since it lives in the
+transcriber both paths already share. A rewrite pass was considered and rejected for v1: it
+would add a full model round trip to the one feature whose entire value is speak-then-it-
+appears-immediately latency (§3b: a planner run alone is 6-13s); it has no draft/confirm step
+to review the result against, unlike every other generated-text path in this app; and a raw
+transcript is falsifiable against what was actually said, while a cleaned one is not. The seam
+is left, not built: a `TextTransform = (text: string) => Promise<string>` (identity by
+default) would let a later milestone add an opt-in cleanup pass, reusing `composeShared.ts`'s
+primitives, without restructuring anything here.
+
+**No new risk tier.** `Risk` (core/risk.ts) is metadata on a *registry entry*, read by the
+planner after the model has already chosen a tool. Dictation has no registry entry and no
+model choice for a gate to constrain — there is nothing to gate. The discipline `caution`
+encodes is met without the plumbing: narrate before acting (the captured window title, shown
+before recording even starts), say what happened after (the typed transcript stays visible),
+and refuse rather than guess (an unreadable focus, a focus change, or a short/blocked
+`SendInput` write all refuse outright, never silently partial).
+
+**Dictation never presses Enter, and never will in v1.** The transcript is a single string,
+typed exactly as transcribed — no keypress is synthesized around it, so dictation can never
+accidentally submit a form or send a message on its own.
 
 ---
 
@@ -659,13 +778,22 @@ Post-v0:
       `(args, deps) => string | Promise<string>`, mirroring `confirmSummary`'s M10 widening;
       adds the `NotionSurface` interface with a CDP-backed `ChromeNotion` (real device-level
       input, not `execCommand` — see §6b for why); and one tool, `addToPage` (§6b).
+- [x] **M12 — System-wide dictation.** Adds `InputInjector`/`WindowsInputInjector` (§4c,
+      `SendInput`+`KEYEVENTF_UNICODE` over a persistent PowerShell host — the first thing in
+      this app to act on the OS outside a browser or the app's own bar); `DictationSession`
+      (M7's original toggle shape, reused for a different target — see §4c for why begin()/
+      finish() doesn't transfer); a SEPARATE, negotiated dictation hotkey; and `dictate.ts`'s
+      mutual-exclusion guard against the instruction bar's own voice capture. Never reaches
+      the planner — no registry entry, no risk tier, no confirm gate (§4c explains why that
+      is a deliberate omission, not a gap). `/core` is untouched.
 
-**v0 status: complete.** 201 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
-M8/M9, 41 by M10, and 36 by M11 (against `MockShell`, fake Gmail/Notion tabs, and jsdom
-fixtures; no browser, inbox, or Notion account is ever touched by the test suite). The eval
-harness (`npm run eval`, `tests/eval/`) runs the memory story as one continuous
-scenario — cold memory refuses → teaching fixes it → a correction versions it →
-recall reveals it — plus the seven demo tasks and the closed-world refusal.
+**v0 status: complete.** 231 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
+M8/M9, 41 by M10, 36 by M11, and 30 by M12 (against `MockShell`, fake Gmail/Notion tabs, jsdom
+fixtures, and a `MockInputInjector` standing in for real `SendInput`; no browser, inbox,
+Notion account, or OS keystroke is ever touched by the test suite). The eval harness (`npm run
+eval`, `tests/eval/`) runs the memory story as one continuous scenario — cold memory refuses →
+teaching fixes it → a correction versions it → recall reveals it — plus the seven demo tasks
+and the closed-world refusal.
 
 **Live-run findings:** what actually got tested, against a real `OPENAI_API_KEY` and a real
 Slack webhook, and how it went:
@@ -790,6 +918,53 @@ using `addToPage` will visibly bring Chrome to the foreground; and whether the m
 avoids routing a revision-style follow-up ("make that note shorter") to `addToPage` instead of
 producing an honest miss, the same class of model-judgment risk M10 flagged for
 `reviseDraft` vs. `draftReply`.
+
+### M12 — proven vs. live-only
+
+**Proven deterministically (30 new tests, no PowerShell process and no OS keystroke):**
+`DictationSession`'s full state machine, including the cap/stop/abandon paths, is pinned the
+same way `VoiceSession`'s is (`tests/DictationSession.test.ts`, against `MockInputInjector`).
+Specifically: `toggle()` from idle captures the foreground window before narrating anything
+and before the microphone opens; a normal cycle stops, transcribes, re-checks focus, and types
+in that order (`recording -> transcribing -> inserting -> idle`, asserted as an ordering fact,
+not inferred); a focus change between speaking and typing refuses outright, with the
+transcript preserved in the refusal message, and types nothing; the same refusal fires when
+the starting focus could not even be captured (no target is treated as unsafe, never as safe
+by default); a short/blocked `typeText()` write becomes a thrown-and-caught refusal, never a
+partial type, and the session is not left stuck — the next tap starts a fresh recording; the
+30s cap releases the microphone without transcribing or typing, and a capped recording holds
+indefinitely until the next tap or `abandon()`; `abandon()` discards a live recording silently,
+matching `VoiceSession`'s own rule that a cancel is not an error; the transcript is typed
+byte-for-byte with no Enter synthesized around it and no rewrite pass over it. Separately
+(`tests/WindowsShell.capture.test.ts`), the regression this milestone's `endCapture()` change
+exists for is pinned directly: Escape, a direct `window.hide()`, and the window closing all
+still discard a dictation session even though it never calls `showInput()` — before the fix,
+`endCapture()`'s guard fired only when a typed-text capture was pending, so a dictation-only
+session (mic live, no pending `showInput()`) was invisible to every dismissal path; a second,
+narrower regression the same fix introduced and then closed is also pinned — `hide()` reaches
+`endCapture()` twice on one call (its own explicit invocation and the "hide" event that same
+call emits a moment later), and the fix's own naive first draft double-fired `onDismiss()` on
+that second call, caught by re-running the EXISTING `VoiceSession` Escape test, not a new one.
+`pinnedAgainstBlur` covers the new `"inserting"` state exactly like `"recording"`/
+`"transcribing"`. The mutual-exclusion guard (`tests/dictate.test.ts`) is proven generically:
+the dictation hotkey is blocked while the instruction voice session is non-idle and fires again
+once it returns to idle; it is never blocked when there is no instruction voice at all (voice
+disabled means nothing to conflict with, not "always blocked").
+
+**NOT proven, and only a live run can prove it:** that `WindowsInputInjector`'s PowerShell host
+actually compiles and runs its `SendInput`/`GetForegroundWindow` P/Invoke declarations under
+real `powershell.exe` — verified once, manually, outside the test suite (an inert, zero-length
+`SendInput` call plus a real foreground-window read, deliberately chosen so the verification
+step itself could never inject a keystroke into this machine), but never exercised by
+`npm test`, the same "no real binary in CI" split `WhisperCppTranscriber` and `ChromeGmail`'s
+CDP transport already have; whether real keystrokes actually land correctly in materially
+different real targets (a terminal, an IDE with its own autocomplete, a browser's own text
+fields, Word/Excel specifically, given the M12 hotkey list was chosen around exactly those
+apps' existing shortcuts); whether the elevated-window refusal (UIPI blocking `SendInput`)
+fires the way the design assumes rather than failing some other way; whether `CHUNK_SIZE_CHARS`
+/`CHUNK_DELAY_MS` hold up against an editor with heavier per-keystroke processing than anything
+tested; and whether the 30s cap is the right length in practice — flagged in code and here as a
+value real live use may need to adjust, not a settled constant.
 
 ### M7 voice — what is proved, and what still needs a microphone
 

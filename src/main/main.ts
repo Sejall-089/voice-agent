@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { app, BrowserWindow, globalShortcut, screen, session } from "electron";
 import { WindowsShell } from "./shell/WindowsShell.ts";
 import { VoiceSession } from "./shell/VoiceSession.ts";
+import { DictationSession } from "./shell/DictationSession.ts";
+import { WindowsInputInjector } from "./shell/WindowsInputInjector.ts";
+import { createOnDictateHotkey, dictationIsBusy } from "./dictate.ts";
 import { createRunInstruction } from "./runInstruction.ts";
 import { Planner } from "../core/planner.ts";
 import { buildRegistry } from "../core/registry.ts";
@@ -32,7 +35,24 @@ const HOTKEYS = [
   "Alt+Shift+Space",
 ];
 
+// The SEPARATE dictation hotkey (M12) — deliberately not part of the HOTKEYS list above and
+// deliberately not Space-based, so the two negotiations can never collide with each other.
+// Tap to start listening, tap again to stop and type the transcript into whatever window
+// currently has focus, in ANY app — see DictationSession.ts for why this is a toggle rather
+// than reusing the instruction bar's "Enter submits" shape.
+//
+// Ctrl+Alt+V and Alt+Shift+D were both considered and deliberately excluded, not merely
+// deprioritized: Ctrl+Alt+V is Excel's Paste Special, and Alt+Shift+D is Word's insert-date
+// field — real, common bindings in exactly the apps dictation is most likely used in, so
+// neither belongs on this list even as a last resort. Ctrl+Alt+J is the third candidate: it
+// has no default binding in Word/Excel, and in Chrome/VS Code it is unused (Chrome's own
+// download/console shortcuts are Ctrl+J and Ctrl+Shift+J, one modifier short of this).
+const DICTATE_HOTKEYS = ["CommandOrControl+Shift+Alt+D", "CommandOrControl+Alt+D", "CommandOrControl+Alt+J"];
+
 let commandBar: BrowserWindow | null = null;
+// Held at module scope so will-quit (below) can release the persistent host process —
+// app.whenReady()'s own closure ends long before the app actually quits.
+let inputInjector: WindowsInputInjector | null = null;
 
 const WINDOW_WIDTH = 640;
 const WINDOW_HEIGHT = 640;
@@ -133,8 +153,24 @@ app.whenReady().then(() => {
   const transcriber = createTranscriber();
   const voice = transcriber ? new VoiceSession(shell, transcriber) : null;
 
+  // M12: dictation needs the same transcriber voice does — no whisper, no dictation either,
+  // same "off is a real state" rule as M7/M8. The injector is only constructed alongside it,
+  // so a voice-off install never spawns the PowerShell input host at all.
+  const injector = transcriber ? new WindowsInputInjector() : null;
+  inputInjector = injector;
+  const dictation =
+    transcriber && injector ? new DictationSession(shell, transcriber, injector) : null;
+
   // One hotkey: open the bar and start listening at the same moment.
   const onHotkey = (): void => {
+    // Dictation and the instruction bar share one microphone AND, while dictation is
+    // running, the same window (shown via showInactive() so it never steals focus from
+    // whatever the user is dictating into) — shell.showInput() calling window.focus() mid-
+    // dictation would defeat the entire point. See dictate.ts for the reverse guard.
+    if (dictationIsBusy(dictation)) {
+      console.log("[main] instruction hotkey ignored - dictation is in progress");
+      return;
+    }
     void (async () => {
       const typed = shell.showInput(); // resolves on Enter/Escape with whatever was typed
       void voice?.begin(); // ...and it is already listening
@@ -149,13 +185,29 @@ app.whenReady().then(() => {
   };
   const hotkey = registerHotkey(shell, onHotkey);
 
+  // The dictation hotkey: only registered when dictation can actually work (transcriber +
+  // injector both present), mirroring the instruction hotkey's own construction above.
+  const dictateHotkey = dictation
+    ? registerDictateHotkey(shell, createOnDictateHotkey(dictation, voice))
+    : null;
+
   // Typing, or dismissing the bar, silently discards the recording. Both are "I did not
-  // mean to dictate", and neither should ever produce a stray transcript.
+  // mean to dictate", and neither should ever produce a stray transcript. Both sessions'
+  // abandon() no-op when idle, so it is safe to call both unconditionally — exactly one of
+  // them can ever be non-idle at a time (mutual exclusion above / in dictate.ts).
   shell.onTypingStarted(() => void voice?.abandon());
-  shell.onDismissed(() => void voice?.abandon());
+  shell.onDismissed(() => {
+    void voice?.abandon();
+    void dictation?.abandon();
+  });
 
   console.log(
     `[main] ready - ${hotkey ?? "(no free hotkey)"} opens the bar${voice ? " and starts listening" : " (voice off)"}`,
+  );
+  console.log(
+    dictation
+      ? `[main] dictation ready - ${dictateHotkey ?? "(no free hotkey)"} types into the focused window`
+      : "[main] dictation disabled - voice is off (WHISPER_EXE_PATH / WHISPER_MODEL_PATH not set)",
   );
 });
 
@@ -177,6 +229,29 @@ function registerHotkey(shell: WindowsShell, onTrigger: () => void): string | nu
   console.error(
     `[main] no hotkey available - all of ${candidates.join(", ")} are already in use. ` +
       `Set HOTKEY in .env to a free combo.`,
+  );
+  return null;
+}
+
+// Same shape as registerHotkey, for the SEPARATE dictation combo (M12) — a distinct
+// candidate list and env override (DICTATE_HOTKEY) so the two negotiations can never
+// collide with each other on the OS.
+function registerDictateHotkey(shell: WindowsShell, onTrigger: () => void): string | null {
+  const configured = process.env["DICTATE_HOTKEY"];
+  const candidates = configured ? [configured] : DICTATE_HOTKEYS;
+
+  for (const combo of candidates) {
+    if (shell.registerHotkey(combo, onTrigger)) {
+      if (combo !== candidates[0]) {
+        console.log(`[main] dictation hotkey fell back to ${combo} - earlier choices were taken`);
+      }
+      return combo;
+    }
+  }
+
+  console.error(
+    `[main] no dictation hotkey available - all of ${candidates.join(", ")} are already in ` +
+      `use. Set DICTATE_HOTKEY in .env to a free combo.`,
   );
   return null;
 }
@@ -242,4 +317,6 @@ app.on("window-all-closed", () => {
 // Release the global hotkey so nothing lingers after the app exits.
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  // Release the persistent PowerShell input host (M12), or it outlives the app.
+  inputInjector?.dispose();
 });
