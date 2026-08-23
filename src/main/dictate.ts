@@ -50,6 +50,10 @@ export function dictationIsBusy(dictation: StateHolder | null): boolean {
 
 export interface InputCapturing {
   isInputCapturing(): boolean;
+  // M14 §8: a confirm dialog awaiting an answer blocks this hotkey too. Dictation would grab
+  // the shared microphone and type into whatever has focus — which, with a modal dialog up,
+  // is the dialog.
+  isConfirmPending(): boolean;
 }
 
 // Combines "is voice mid-capture" with "is the instruction bar open at all" into the single
@@ -63,6 +67,7 @@ export function combineInstructionBusy(
 ): StateHolder {
   return {
     getState: () => {
+      if (shell.isConfirmPending()) return "confirming";
       if (shell.isInputCapturing()) return "capturing";
       return voice ? voice.getState() : "idle";
     },

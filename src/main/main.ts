@@ -5,12 +5,9 @@ import { WindowsShell } from "./shell/WindowsShell.ts";
 import { VoiceSession } from "./shell/VoiceSession.ts";
 import { DictationSession } from "./shell/DictationSession.ts";
 import { WindowsInputInjector } from "./shell/WindowsInputInjector.ts";
-import {
-  combineInstructionBusy,
-  createOnDictateHotkey,
-  dictationIsBusy,
-} from "./dictate.ts";
+import { combineInstructionBusy, createOnDictateHotkey } from "./dictate.ts";
 import { createRunInstruction } from "./runInstruction.ts";
+import { createOnInstructionHotkey } from "./instructionHotkey.ts";
 import { Planner } from "../core/planner.ts";
 import { buildRegistry } from "../core/registry.ts";
 import { createLLMClient } from "../core/llm/factory.ts";
@@ -222,37 +219,16 @@ app.whenReady().then(() => {
       ? new DictationSession(shell, transcriber, injector)
       : null;
 
-  // One hotkey: open the bar and start listening at the same moment.
-  const onHotkey = (): void => {
-    // Dictation and the instruction bar share one microphone AND, while dictation is
-    // running, the same window (shown via showInactive() so it never steals focus from
-    // whatever the user is dictating into) — shell.showInput() calling window.focus() mid-
-    // dictation would defeat the entire point. See dictate.ts for the reverse guard.
-    if (dictationIsBusy(dictation)) {
-      console.log(
-        "[main] instruction hotkey ignored - dictation is in progress",
-      );
-      return;
-    }
-    // Barge-in. Stopping here as well as in startRecording() is deliberate: this fires the
-    // instant the key is pressed, while the microphone takes 160-680ms to warm up, so the app
-    // goes quiet when you reach for it rather than when the mic is ready. startRecording() is
-    // the structural backstop that makes the invariant unbreakable.
-    speech?.stop();
-
-    void (async () => {
-      const typed = shell.showInput(); // resolves on Enter/Escape with whatever was typed
-      void voice?.begin(); // ...and it is already listening
-
-      const text = await typed;
-      // Nothing typed means you dictated, and Enter was the "stop talking" gesture. If you
-      // typed (or dismissed the bar), the session was already abandoned and answers "".
-      const instruction =
-        text.trim().length > 0 ? text : ((await voice?.finish()) ?? "");
-
-      await runInstruction(instruction);
-    })();
-  };
+  // One hotkey: open the bar and start listening at the same moment. The handler lives in
+  // instructionHotkey.ts rather than here, so its guards are testable without booting electron
+  // — which is exactly what the missing M14 §8 guard needed and did not have.
+  const onHotkey = createOnInstructionHotkey({
+    shell,
+    dictation,
+    voice,
+    speech,
+    runInstruction,
+  });
   const hotkey = registerHotkey(shell, onHotkey);
 
   // The dictation hotkey: only registered when dictation can actually work (transcriber +

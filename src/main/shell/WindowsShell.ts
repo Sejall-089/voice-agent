@@ -58,6 +58,10 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // The speech queue (M14), or null on an install with no synthesizer configured. Held rather
   // than constructed here because it needs this shell to play through.
   private speech: Speaker | null = null;
+  // Whether a confirm dialog is on screen awaiting an answer (M14 §8). Set SYNCHRONOUSLY
+  // before the dialog is created, so there is no instant in which it is visible and this is
+  // still false — the gap a live tester would find first.
+  private confirmPending = false;
 
   constructor(private readonly window: BrowserWindow) {
     // Both listeners are registered ONCE, for the app's lifetime.
@@ -486,7 +490,23 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
 
   // The gate in front of every `dangerous` action (spec.md §5 step 6b). The message it shows is
   // built by the planner from the RESOLVED arguments, so the user approves the concrete action.
+  // Is a `dangerous` action sitting on screen waiting for a yes or no? (M14 §8.)
+  //
+  // The hotkeys read this. Without it, pressing the instruction hotkey mid-dialog starts a
+  // SECOND concurrent planner run while the first is still parked at the confirm gate — and
+  // `showInput()` calls `window.focus()`, which takes focus off the dialog, and `window.show()`
+  // re-registers the global Escape that `confirm()` deliberately released so the dialog's own
+  // cancel would work. Found in live testing, exactly as predicted, because the guard that was
+  // designed to prevent it never got built.
+  isConfirmPending(): boolean {
+    return this.confirmPending;
+  }
+
   async confirm(message: string): Promise<boolean> {
+    // Set before anything awaits, so "the dialog is up" and "the guard knows" can never be
+    // observed in different states.
+    this.confirmPending = true;
+
     // The bar is still visible (and its Escape registration still live) at this point —
     // nothing hides it between submit and the confirm gate. The native dialog already
     // relies on Escape meaning "no" (cancelId below), so our global hook has to step aside
@@ -504,6 +524,9 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       });
       return response === 0;
     } finally {
+      // In the finally, not after the await: a dialog that THREW must not leave the hotkeys
+      // blocked forever with nothing on screen to answer.
+      this.confirmPending = false;
       // Re-arm only if the bar is still on screen — it normally is (confirm always follows
       // a still-open bar), but don't force it back open if something else already hid it.
       if (this.window.isVisible()) this.registerEscape();

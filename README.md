@@ -140,7 +140,8 @@ points at the dialog; it never reads the draft aloud.
 
 **Answering a confirm by voice is deliberately not part of this.** Putting speech recognition
 on the one gate that must never be bypassed needs its own fail-closed design, so while a
-confirm is open both hotkeys are blocked and the app says so rather than doing nothing.
+confirm is open both hotkeys are blocked and the app says so rather than doing nothing — it
+won't quietly start a second instruction over the top of a decision you haven't made yet.
 
 "Plus 7 more" is only honest if the rest is still somewhere, so it is: a one-slot, five-minute
 scratch store, and an **`elaborate`** tool that reads it out when you say "go on" or "read them
@@ -176,7 +177,7 @@ screen — speech is the disposable channel.
 
 What exists today: all of it, wired end to end — the transform, the store, `elaborate`,
 `readSchedule`'s spoken form, the planner wiring, the queue and barge-in machine, the Piper
-wrapper, and playback in the renderer — with 123 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+wrapper, and playback in the renderer — with 137 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
 wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
 audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
 and §6's `speakResult`.

@@ -756,6 +756,29 @@ in hidden windows.
 (a crashed or destroyed renderer, caught by the same timeout the voice path uses). The queue
 drains by awaiting it, so a `play()` left pending would strand every utterance behind it forever.
 
+**The pending-confirm guard (§8).** While a `dangerous` action is on screen awaiting a yes or
+no, **both** hotkeys are blocked and the block is announced — narrated and spoken — rather than
+silently ignored, because a hotkey that does nothing is indistinguishable from a broken app.
+
+`WindowsShell.confirmPending` is set **synchronously before** `showMessageBox` is called, so
+there is no instant in which the dialog is visible and the guard does not know it, and cleared in
+the `finally`, so a dialog that throws cannot leave the app permanently deaf. The dictation
+hotkey is blocked by the same condition (`combineInstructionBusy`): it would otherwise take the
+shared microphone and type into whatever has focus, which with a modal dialog up is the dialog.
+
+Without it, the press starts a **second concurrent planner run** while the first is still parked
+at the gate — and does real damage on the way: `showInput()` calls `window.focus()`, taking
+focus off the dialog, and `window.show()` re-registers the global Escape that `confirm()`
+deliberately released so the dialog's own cancel would work.
+
+This was found in live testing, having been designed and approved and then never built: it was
+added to the plan after the build order was written and never folded into it. The handler now
+lives in `src/main/instructionHotkey.ts` rather than inside `main.ts`, which is the part worth
+keeping — importing `main.ts` boots electron, so a guard living there has no test that *could*
+have failed. Answering a confirm **by voice** remains deliberately out of scope: that would put
+speech recognition on the one gate that must never be bypassed, and gets its own milestone with a
+fail-closed design or it does not happen.
+
 ### Speech is an action, not a method (added in M14)
 
 `LocalAction` gained a fourth kind, `{ kind: "speak" }`, beside `notify`. It is an **action the

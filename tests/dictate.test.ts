@@ -88,14 +88,14 @@ describe("dictationIsBusy", () => {
 
 describe("combineInstructionBusy (M12.1)", () => {
   it("is idle when neither voice nor the bar is busy", () => {
-    const busy = combineInstructionBusy({ getState: () => "idle" }, { isInputCapturing: () => false });
+    const busy = combineInstructionBusy({ getState: () => "idle" }, { isInputCapturing: () => false, isConfirmPending: () => false });
     expect(busy.getState()).toBe("idle");
   });
 
   it("is busy while voice is recording, exactly as before", () => {
     const busy = combineInstructionBusy(
       { getState: () => "recording" },
-      { isInputCapturing: () => false },
+      { isInputCapturing: () => false, isConfirmPending: () => false },
     );
     expect(busy.getState()).not.toBe("idle");
   });
@@ -105,13 +105,23 @@ describe("combineInstructionBusy (M12.1)", () => {
     // is still open with unsubmitted typed text — dictation's Enter must not collide with it.
     const busy = combineInstructionBusy(
       { getState: () => "idle" },
-      { isInputCapturing: () => true },
+      { isInputCapturing: () => true, isConfirmPending: () => false },
     );
     expect(busy.getState()).not.toBe("idle");
   });
 
+  it("is busy while a confirm dialog is waiting (M14 §8)", () => {
+    // Dictation would grab the shared microphone and type into whatever has focus — which,
+    // with a confirm dialog up, is the dialog.
+    const busy = combineInstructionBusy(null, {
+      isInputCapturing: () => false,
+      isConfirmPending: () => true,
+    });
+    expect(busy.getState()).not.toBe("idle");
+  });
+
   it("is idle when there is no voice session at all and the bar isn't capturing", () => {
-    const busy = combineInstructionBusy(null, { isInputCapturing: () => false });
+    const busy = combineInstructionBusy(null, { isInputCapturing: () => false, isConfirmPending: () => false });
     expect(busy.getState()).toBe("idle");
   });
 });

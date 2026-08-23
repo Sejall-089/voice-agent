@@ -804,3 +804,54 @@ describe("WindowsShell — speech output", () => {
     expect(win.sent.some((message) => message.channel === "speech:stop")).toBe(true);
   });
 });
+
+describe("WindowsShell — the confirm-pending flag (M14 §8)", () => {
+  it("is false when no dialog is open", () => {
+    const shell = new WindowsShell(makeWindow() as never);
+
+    expect(shell.isConfirmPending()).toBe(false);
+  });
+
+  it("is true for the whole time the dialog is on screen", async () => {
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    win.show();
+
+    let answer: (value: { response: number }) => void = () => undefined;
+    dialogShowMessageBox.mockImplementation(
+      () => new Promise<{ response: number }>((resolve) => (answer = resolve)),
+    );
+
+    const asking = shell.confirm("Send this invite?");
+    // Set synchronously, before anything awaits — there must be no instant where the dialog
+    // is up and the guard does not know it.
+    expect(shell.isConfirmPending()).toBe(true);
+
+    answer({ response: 0 });
+    await asking;
+    expect(shell.isConfirmPending()).toBe(false);
+  });
+
+  it("clears on a cancel", async () => {
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    win.show();
+    dialogShowMessageBox.mockImplementation(() => Promise.resolve({ response: 1 }));
+
+    await shell.confirm("Send this invite?");
+
+    expect(shell.isConfirmPending()).toBe(false);
+  });
+
+  it("clears even when the dialog itself throws", async () => {
+    // In the `finally`, not after the await: a dialog that blew up must not leave both hotkeys
+    // blocked forever with nothing on screen to answer.
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    win.show();
+    dialogShowMessageBox.mockImplementation(() => Promise.reject(new Error("dialog exploded")));
+
+    await expect(shell.confirm("Send this invite?")).rejects.toThrow("dialog exploded");
+    expect(shell.isConfirmPending()).toBe(false);
+  });
+});
