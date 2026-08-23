@@ -679,6 +679,51 @@ would be describing a guess. It may do **SAFE work only**: it runs before the us
 to anything. If it throws, the planner never opens the dialog and nothing runs — "we cannot say
 what would happen" is itself a refusal.
 
+### 4d. Voice output (M14) — a parallel contract, not a change to OSShell
+
+Same shape as §4a's answer for the microphone, and for the same reason: `/core` has no business
+knowing a speaker exists. `SpeechShell` (`src/main/shell/SpeechShell.ts`) is playback —
+`play(wav)` and `stopPlayback()` — while `SpeechSynthesizer` (`core/types.ts`, beside
+`Transcriber`) is text→audio. Two interfaces rather than one because the engine is swappable
+(Piper now, ElevenLabs later) while "play these bytes, let me stop them" is the same job on any
+OS with any engine. `SpeechSession` sits between them, holding the queue.
+
+```
+idle ──speak()──► synthesizing ──► playing ──► idle
+                       │              │
+                       └──stop()──────┴──► idle (queue cleared, nothing said)
+```
+
+**`speak()` returns immediately.** It queues; it does not wait for audio. A `caution` tool
+narrates and then acts, and if speaking blocked, the app would say "opening the reply box" and
+then sit there for two seconds before opening it. The announcement is meant to overlap the
+action — that is what narrating *while* acting means.
+
+**`stop()` is instant and total** — the queue is cleared, playback is cut off, and work already
+in flight is invalidated by a generation counter (a boolean could not do it: two barge-ins in
+quick succession have to invalidate two different utterances). Without that last part, audio
+synthesized before the interruption would arrive *after* it and talk over the instruction the
+user is already speaking.
+
+**The microphone is never open while the app is talking.** Enforced in the shell's
+`startRecording()`, the one chokepoint every path to the microphone passes through, rather than
+at each hotkey — the same lesson M8 learned when cleanup bound to a single code path leaked on
+every other one. This is not a UX preference: the instruction hotkey opens the bar *and* the
+microphone in the same moment (§4a), so an app still speaking would be transcribed by whisper
+into the user's own instruction.
+
+**Nothing is lost when speech is cut off**, which is what makes barge-in safe rather than
+destructive: the full text is already on screen. That is the two-representations decision
+(§6's `speakResult`) paying for itself — speech is the disposable channel, the screen is the
+durable one.
+
+**A synthesis failure is reported and survived**, not swallowed: one bad utterance must not
+wedge a queue whose next item might be a confirm question. It is reported *once* per broken
+spell rather than per utterance — a misconfigured engine fails on every one, and burying the
+screen in the same message is as useless as saying nothing. Saying nothing is worse, though: a
+speaker that has quietly stopped working is indistinguishable from one that had nothing to say,
+which is this project's least favourite failure mode (§4a's dead hotkey).
+
 ### Speech is an action, not a method (added in M14)
 
 `LocalAction` gained a fourth kind, `{ kind: "speak" }`, beside `notify`. It is an **action the

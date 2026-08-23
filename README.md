@@ -162,8 +162,17 @@ every refusal. Speech is an *action* it requests, not a method it calls, so a ma
 synthesizer accepts it and stays quiet, and the whole policy is testable with no audio device
 at all.
 
+**Talk over it and it stops.** Press either hotkey mid-sentence and the app goes quiet
+immediately — queue dropped, playback cut, anything the engine was still working on thrown
+away. That last part matters: audio synthesized just before you interrupted would otherwise
+arrive just after, and talk over the instruction you're already speaking. The microphone is
+never open while the app is talking, enforced where every path to the microphone passes through
+rather than at each hotkey. Nothing is lost when it's cut off, because the full text is still on
+screen — speech is the disposable channel.
+
 What exists today: the transform, the store, `elaborate`, `readSchedule`'s spoken form, the
-planner wiring, and the fake engine that guards it, with 83 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+planner wiring, the queue and barge-in machine, and the fake engine that guards it, with 97
+tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
 wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
 audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
 and §6's `speakResult`.

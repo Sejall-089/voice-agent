@@ -1,5 +1,6 @@
 import type { AudioClip } from "../../core/types.ts";
 import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
+import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
 
 export interface MockShellOptions {
@@ -8,13 +9,16 @@ export interface MockShellOptions {
   confirms?: boolean[]; // queued answers for confirm()
   clips?: AudioClip[]; // queued return values for stopRecording()
   failRecording?: string; // when set, startRecording() rejects with this message
+  // When set, play() stays pending until the test calls finishPlayback() or stopPlayback() —
+  // the only way to assert what happens DURING an utterance rather than around it.
+  holdPlayback?: boolean;
 }
 
 // Headless implementation of the OSShell contract (spec.md §4) and the VoiceShell contract
 // (M7). Imports no electron, so the whole core + planner + tools + voice state machine run
 // under vitest with no desktop and no microphone. Actions, results, and voice states land
 // in public arrays for assertions.
-export class MockShell implements OSShell, VoiceShell {
+export class MockShell implements OSShell, VoiceShell, SpeechShell {
   public readonly results: string[] = [];
   public readonly actions: LocalAction[] = [];
   public readonly confirmMessages: string[] = [];
@@ -26,6 +30,9 @@ export class MockShell implements OSShell, VoiceShell {
   // Everything the planner asked to be said out loud, in order (M14) — see executeAction below
   // for why this is a list of its own rather than part of `actions`.
   public readonly spoken: string[] = [];
+  // Utterances handed to the player, in order, and how many times playback was cut off (M14).
+  public readonly played: Uint8Array[] = [];
+  public stopPlaybackCalls = 0;
   public recordingsStarted = 0;
   public recordingsStopped = 0;
   public recordingsCancelled = 0;
@@ -42,6 +49,8 @@ export class MockShell implements OSShell, VoiceShell {
   // Whatever DictationSession last armed via armStopKey() — null once disarmed. Tests fire it
   // with pressStopKey(), the same "simulate the OS/IPC boundary" idea ackVoiceStarted() uses.
   private stopKeyCallback: (() => void | Promise<void>) | null = null;
+  private readonly holdPlayback: boolean;
+  private pendingPlay: (() => void) | null = null;
 
   constructor(options: MockShellOptions) {
     this.context = options.context;
@@ -49,6 +58,7 @@ export class MockShell implements OSShell, VoiceShell {
     this.confirms = [...(options.confirms ?? [])];
     this.clips = [...(options.clips ?? [])];
     this.failRecording = options.failRecording;
+    this.holdPlayback = options.holdPlayback ?? false;
   }
 
   registerHotkey(): boolean {
@@ -97,6 +107,12 @@ export class MockShell implements OSShell, VoiceShell {
   // --- VoiceShell ---
 
   startRecording(): Promise<void> {
+    // THE invariant, enforced where every path to the microphone passes through rather than at
+    // each hotkey (M14). VoiceSession and DictationSession both arrive here, and so will
+    // anything written later — binding it to the one chokepoint is the same lesson M8 learned
+    // when cleanup bound to a single code path leaked on every other one. WindowsShell mirrors
+    // this exactly; it lives in both because a shell is what owns the device.
+    this.stopPlayback();
     this.recordingsStarted += 1;
     if (this.failRecording !== undefined) {
       return Promise.reject(new Error(this.failRecording));
@@ -135,6 +151,35 @@ export class MockShell implements OSShell, VoiceShell {
   disarmStopKey(): void {
     this.disarmStopKeyCalls += 1;
     this.stopKeyCallback = null;
+  }
+
+  // --- SpeechShell (M14) ---
+
+  // Resolves immediately unless the test asked for playback to be held, which is how "barge in
+  // while something is actually playing" becomes expressible rather than a matter of timing.
+  play(wav: Uint8Array): Promise<void> {
+    this.played.push(wav);
+    if (!this.holdPlayback) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.pendingPlay = resolve;
+    });
+  }
+
+  // Must leave nothing audible AND must let a held play() resolve — SpeechShell's contract says
+  // play() resolves when it is cut off, and a queue drained by awaiting it would otherwise be
+  // stranded behind an utterance nobody is even hearing.
+  stopPlayback(): void {
+    this.stopPlaybackCalls += 1;
+    const pending = this.pendingPlay;
+    this.pendingPlay = null;
+    pending?.();
+  }
+
+  // Test helper: let a held utterance finish of its own accord, as the real player would.
+  finishPlayback(): void {
+    const pending = this.pendingPlay;
+    this.pendingPlay = null;
+    pending?.();
   }
 
   // Test helper, not part of any real shell interface: simulates the global Enter press.

@@ -19,7 +19,23 @@ export class FakeSynthesizer implements SpeechSynthesizer {
   public readonly spoken: string[] = [];
   public calls = 0;
 
-  constructor(private readonly options: { failWith?: string } = {}) {}
+  // Set when `hold` is on: the synthesis in flight, waiting for the test to release it. This is
+  // what makes "barge in WHILE the engine is working" expressible — the race that decides
+  // whether an interrupted utterance can still arrive late and talk over the next instruction.
+  private pending: (() => void) | null = null;
+
+  constructor(
+    private readonly options: { failWith?: string; hold?: boolean } = {},
+  ) {}
+
+  // Let a held synthesis complete. Returns whether there was one, so a test cannot pass by
+  // releasing nothing.
+  release(): boolean {
+    const pending = this.pending;
+    this.pending = null;
+    pending?.();
+    return pending !== null;
+  }
 
   synthesize(text: string): Promise<Uint8Array> {
     this.calls += 1;
@@ -39,7 +55,12 @@ export class FakeSynthesizer implements SpeechSynthesizer {
     }
 
     this.spoken.push(text);
-    return Promise.resolve(silentWav(text.length));
+    const wav = silentWav(text.length);
+    if (this.options.hold !== true) return Promise.resolve(wav);
+
+    return new Promise<Uint8Array>((resolve) => {
+      this.pending = () => resolve(wav);
+    });
   }
 }
 
