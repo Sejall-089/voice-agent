@@ -44,7 +44,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for diagrams and [`spec.md`](spec.md) f
 
 ---
 
-## The seven demo tasks
+## The demo tasks
 
 | # | Say this | It does |
 |---|---|---|
@@ -159,6 +159,7 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice **and** dictation (M12). Optional — leave them blank and neither the bar's microphone nor the dictation hotkey ever activate; typed commands work exactly as before. |
 | `HOTKEY` | Optional. Pins the instruction-bar combo instead of letting the app pick the first free one. |
 | `DICTATE_HOTKEY` | Optional. Pins the **dictation** combo (M12) — separate from `HOTKEY` above. Needs `WHISPER_*` set too, or there's no transcriber to dictate with. |
+| `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` · `GOOGLE_REFRESH_TOKEN` | Tasks 12-14 (M13). All three, or the calendar tools aren't offered at all. The refresh token comes from `npm run calendar:connect` — it's a **secret**, and the app never logs it or puts it in an error. |
 | `CHROME_DEBUG_URL` | Tasks 8-11 (the Gmail reply tools **and** the Notion tool — one debug Chrome, both). Optional — leave it blank and none of those four tools are ever offered at all. |
 
 ### Setting up the Gmail reply tools (optional)
@@ -204,6 +205,46 @@ after that, or no page open at all, is an honest refusal.
 
 **Known limits:** Chrome tab only — the Notion **desktop app** is a different, unverified
 transport and isn't supported.
+
+### Setting up Google Calendar (optional)
+
+The only integration that talks to a real **API** rather than driving a browser. That's not a
+change of principle: Gmail and Notion needed a DOM because the point was a live, editable draft
+you could read before it went anywhere. A calendar event is structured data — a title, a start,
+an end, a guest list — so there's nothing to tweak in place, and an API doesn't break when
+Google reskins.
+
+One-time setup, in the [Cloud Console](https://console.cloud.google.com): new project → enable
+the **Google Calendar API** → OAuth consent screen (External) → Credentials → OAuth client ID →
+**Desktop app**. Put the client ID and secret in `.env`, then:
+
+```bash
+npm run calendar:connect     # opens your normal browser, prints a refresh token
+```
+
+Paste the token into `.env` as `GOOGLE_REFRESH_TOKEN` and **restart the app**. The consent flow
+runs in a standalone script, not in an Electron window, because Google blocks OAuth in embedded
+webviews — that's their policy, not a preference here.
+
+**Two things that look like bugs and aren't:**
+
+- **"Google hasn't verified this app."** Calendar is a *sensitive* scope; clearing that warning
+  requires full verification — domain ownership, a published privacy policy, a review — which
+  isn't worth pursuing for a personal project. Click **Advanced → Go to \<your app name\>**.
+  Expect it every time you reconnect.
+- **Access dying after 7 days.** A Cloud project left in **"Testing"** publishing status expires
+  refresh tokens after a week. Set it to **"In production"** on the consent screen — an
+  unverified app can still be used by its own owner, and the tokens stop expiring.
+
+**What it refuses to do**, each rather than guessing: move an event when the description matches
+none or several (it lists the candidates); move a **repeating** event (instance-or-series is a
+real choice — Google's own UI asks, so this doesn't pretend to know); move or create an
+**all-day** event; invite someone whose email address it doesn't have. That last one matters
+more than it looks — silently dropping "the design team" would take the guest count to zero and
+skip the confirm gate entirely.
+
+**Known limits:** your primary calendar only; no recurring events; no free/busy lookup across
+other people's calendars; reads all-day events but won't write one.
 
 ### Setting up voice (optional)
 
@@ -294,12 +335,12 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (308 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (323 tests): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
-`MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, and jsdom
+`MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
 fixtures — **no API key, no network, no real Slack, no microphone, no whisper model, no browser,
-no inbox, no Notion account, and no OS keystroke actually sent.**
+no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystroke actually sent.**
 
 ---
 
@@ -443,6 +484,22 @@ M12/M12.1 was still doing its job. **Not yet proven:** whether 1 char/40ms is th
 trade point or something less costly would still fix the repetition, and whether the
 double-`finish()` race has any trigger besides Enter's observed double-fire.
 
+**M13 — proven against fakes, not yet live.** The three calendar tools, the argument-dependent
+risk tier, and the OAuth refresh logic are all covered deterministically (49 tests): every
+refusal, the escalate-never-de-escalate rule, resolve-the-tier-exactly-once, declining a
+`dangerous` create provably creating nothing, and — the one that decides every tier —
+that Google listing you as an attendee on your own event maps to **zero** guests. Two bugs
+surfaced during the build, both from tests rather than live use: a derived end time coming back
+in UTC while its start was `+05:30` (same instant, so nothing broke — which is why it was worth
+fixing before it hid something), and a refresh token that could reach an error message through
+an interpolated network-error string, now redacted. **Not yet proven:** anything requiring a
+real Google account. Specifically `GoogleCalendar.ts` itself — the one deliberately untested
+file, thin for exactly that reason, as `ChromeGmail` was — and above all whether Google's
+free-text search matches events the way a person describes them out loud, since the whole
+refuse-rather-than-guess behaviour rests on that match count being sensible. Also unproven:
+whether the model reliably turns "tomorrow at 3" into a correct ISO instant now that the prompt
+carries a clock. That change is proven to *render*, not proven to *work*.
+
 ---
 
 ## Scope
@@ -469,6 +526,14 @@ needs real CDP-level input instead. Even the safety RULE ("resolve every target 
 refuse on ambiguity") only partly transferred: Notion exposes no ARIA roles on page content at
 all, so the identification strategy had to become `data-block-id` + document order rather than
 role + accessible name.
+
+**M13 added a real API integration rather than a fourth thing to drive** — Google Calendar,
+over HTTP. Not a reversal of the DOM approach: Gmail and Notion needed a browser because the
+deliverable was a live, editable draft you could read before it went anywhere. A calendar event
+is structured data, so there's nothing to edit in place and nothing a DOM buys. It also forced
+the first real change to the risk model since M10 — a tier that depends on the *arguments* of a
+call, because an event with guests emails them the instant it exists and there's no later
+"send" left to gate.
 
 **M12 added acting outside any browser at all — system-wide dictation.** Deliberately the
 narrowest possible slice of "act on the OS": one operation (insert text at the caret),

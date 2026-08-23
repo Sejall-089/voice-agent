@@ -10,6 +10,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
+    "calendar:connect": "node scripts/calendar-connect.mjs",
     "eval": "vitest run tests/eval --reporter=verbose",
     "preeval": "npm run rebuild:node",
     "rebuild:node": "npm rebuild better-sqlite3",

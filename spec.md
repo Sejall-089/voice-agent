@@ -1268,6 +1268,34 @@ reintroducing the repetition; whether the double-`finish()` race has any OTHER t
 Enter's observed double-fire; and whether `Ctrl+M`'s adjacency to the instruction bar's
 `Ctrl+Alt+M` ever causes real-world confusion even though the two are technically independent.
 
+### M13 — proven vs. live-only
+
+**Proven deterministically (49 new tests), against fakes:** the three tools through the real
+planner; the argument-dependent tier mechanism, including that a resolver which throws or
+returns an undeclared tier **escalates** rather than de-escalates, and that the tier is resolved
+**exactly once** per run; every refusal (no match, several matches, recurring, all-day, all-day
+create, an unaddressable guest, an end before a start); duration preservation across positive
+and negative UTC offsets; the time-of-check/time-of-use guard; that `createEvent` with guests
+declined **provably creates nothing**; that a named auth failure surfaces verbatim as `refused`
+from BOTH the handler path and the earlier narration path; the whole of `googleCalendarMap`,
+including the organizer-in-`attendees` quirk that decides every tier; the whole of
+`GoogleCalendarAuth`, including single-flight refresh, expiry skew, `invalid_grant` → revoked,
+and that a 5xx or a dropped connection is **not** called a revocation; and that no failure path
+puts the refresh token or client secret into a message or a stack.
+
+**NOT proven — only a live run against a real Google account can:** that `GoogleCalendar`'s
+requests are shaped correctly at all (it is the one untested file, deliberately thin, exactly as
+`ChromeGmail` was); that `q=` search matches events the way a person describes them out loud —
+the single most likely source of a real bug, since the whole default-deny refusal rests on the
+match count being sensible; that `sendUpdates=all` actually emails guests when we say it will;
+that the real consent flow completes, and that the "unverified app" interstitial and the
+"Testing"-status 7-day expiry behave as documented; and whether the model reliably turns spoken
+relative times into correct ISO instants now that it has a clock — the prompt change is proven
+to render, not proven to work.
+
+Every milestone from M10 on has produced at least one live bug no fixture caught. There is no
+reason to expect this one is different.
+
 ### M7 voice — what is proved, and what still needs a microphone
 
 **Proved deterministically (24 tests, no audio / no model / no mic / no electron):** every

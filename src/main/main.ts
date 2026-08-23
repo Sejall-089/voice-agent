@@ -22,8 +22,12 @@ import { ChromeGmail } from "../core/gmail/ChromeGmail.ts";
 import { UnavailableGmail } from "../core/gmail/UnavailableGmail.ts";
 import { ChromeNotion } from "../core/notion/ChromeNotion.ts";
 import { UnavailableNotion } from "../core/notion/UnavailableNotion.ts";
+import { GoogleCalendar } from "../core/calendar/GoogleCalendar.ts";
+import { GoogleCalendarAuth } from "../core/calendar/GoogleCalendarAuth.ts";
+import { UnavailableCalendar } from "../core/calendar/UnavailableCalendar.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
 import type {
+  CalendarSurface,
   GmailSurface,
   NotionSurface,
   Transcriber,
@@ -147,9 +151,14 @@ app.whenReady().then(() => {
   // currently gate on the same CHROME_DEBUG_URL — one debug Chrome, two app surfaces in it.
   const gmail = createGmail();
   const notion = createNotion();
+  // M13: same idea, a different gate — not a browser to drive but a connected Google account.
+  // The check is synchronous and offline (is there a refresh token?), so nothing on the network
+  // decides what the model is offered.
+  const calendar = createCalendar();
   const tools = buildRegistry({
     gmail: gmail !== null,
     notion: notion !== null,
+    calendar: calendar !== null,
   });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
@@ -165,6 +174,7 @@ app.whenReady().then(() => {
     gmail ?? new UnavailableGmail(),
     draft,
     notion ?? new UnavailableNotion(),
+    calendar ?? new UnavailableCalendar(),
   );
 
   // THE planner call site. Typed text and dictated text both funnel through here, so the
@@ -343,6 +353,27 @@ function createNotion(): NotionSurface | null {
     return null;
   }
   return new ChromeNotion({ baseUrl });
+}
+
+// M13. All three are read HERE, in composition — /core never touches process.env, and the
+// refresh token is a secret that is never logged (spec §10). Missing credentials disable one
+// capability rather than breaking the app: the tools are simply not on the menu.
+function createCalendar(): CalendarSurface | null {
+  const clientId = process.env["GOOGLE_CLIENT_ID"];
+  const clientSecret = process.env["GOOGLE_CLIENT_SECRET"];
+  const refreshToken = process.env["GOOGLE_REFRESH_TOKEN"];
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    console.log(
+      "[main] Calendar tools disabled - run `npm run calendar:connect` and set " +
+        "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN",
+    );
+    return null;
+  }
+
+  return new GoogleCalendar({
+    auth: new GoogleCalendarAuth({ clientId, clientSecret, refreshToken }),
+  });
 }
 
 // A couple of starter facts so a live "open my dashboard" / "rewrite in my tone" can be
