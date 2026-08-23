@@ -1,4 +1,4 @@
-import { calendarAuthError } from "../errors.ts";
+import { calendarAuthError, UserFixableError } from "../errors.ts";
 import { mapEvent, mapEvents, toGoogleEvent, toGoogleMove } from "./googleCalendarMap.ts";
 import type { CalendarAuth } from "./CalendarAuth.ts";
 import type { GoogleEvent } from "./googleCalendarMap.ts";
@@ -33,12 +33,26 @@ export class GoogleCalendar implements CalendarSurface {
     this.fetchFn = options.fetchFn ?? globalThis.fetch;
   }
 
+  // Read from the EVENTS collection, not from `GET /calendars/primary`.
+  //
+  // This was M13's first live bug, and a good one. `/calendars/primary` is the Calendars
+  // resource, which the `calendar.events` scope does not grant — it returns 403
+  // ACCESS_TOKEN_SCOPE_INSUFFICIENT. Since this method is the FIRST call in nearly every
+  // path (narration, the confirm dialog, readSchedule's handler), every single calendar
+  // instruction failed on its opening request, while the token itself was perfectly fine.
+  //
+  // The events list response carries the calendar's timezone at its top level, so the fix
+  // needs no extra scope and no reconnect: ask the collection we already have permission for.
+  // `maxResults=1` because the events themselves are irrelevant here — only the envelope is.
   async calendarTimeZone(): Promise<string> {
     if (this.timeZone !== null) return this.timeZone;
-    const calendar = await this.request<{ timeZone?: string }>("GET", `/calendars/${CALENDAR_ID}`);
+    const page = await this.request<{ timeZone?: string }>(
+      "GET",
+      `/calendars/${CALENDAR_ID}/events?maxResults=1`,
+    );
     // A calendar with no timezone shouldn't happen; UTC is the one fallback that is wrong in a
     // visible, obvious way rather than a plausible one.
-    this.timeZone = calendar.timeZone ?? "UTC";
+    this.timeZone = page.timeZone ?? "UTC";
     return this.timeZone;
   }
 
@@ -53,10 +67,11 @@ export class GoogleCalendar implements CalendarSurface {
       orderBy: "startTime",
       showDeleted: "false",
     });
-    const page = await this.request<{ items?: GoogleEvent[] }>(
+    const page = await this.request<{ items?: GoogleEvent[]; timeZone?: string }>(
       "GET",
       `/calendars/${CALENDAR_ID}/events?${query.toString()}`,
     );
+    this.rememberTimeZone(page.timeZone);
     return mapEvents(page.items ?? []);
   }
 
@@ -73,11 +88,21 @@ export class GoogleCalendar implements CalendarSurface {
       orderBy: "startTime",
       showDeleted: "false",
     });
-    const page = await this.request<{ items?: GoogleEvent[] }>(
+    const page = await this.request<{ items?: GoogleEvent[]; timeZone?: string }>(
       "GET",
       `/calendars/${CALENDAR_ID}/events?${params.toString()}`,
     );
+    this.rememberTimeZone(page.timeZone);
     return mapEvents(page.items ?? []);
+  }
+
+  // Every events listing carries the calendar's timezone in its envelope, so take it while
+  // it is going spare. In practice this means `calendarTimeZone()` almost never has to make
+  // a request of its own — `readSchedule` and `moveEvent` both list before they need it.
+  private rememberTimeZone(timeZone: string | undefined): void {
+    if (this.timeZone === null && typeof timeZone === "string" && timeZone.length > 0) {
+      this.timeZone = timeZone;
+    }
   }
 
   async getEvent(id: string): Promise<CalendarEvent> {
@@ -140,16 +165,73 @@ export class GoogleCalendar implements CalendarSurface {
       this.auth.invalidate();
       throw calendarAuthError("expired");
     }
-    if (response.status === 403) {
-      // Distinct from 401 on purpose: the token is fine, the app is not allowed. Almost always
-      // a missing scope, which reconnecting genuinely does fix.
-      throw calendarAuthError("revoked");
-    }
     if (!response.ok) {
-      // Status only — never the response body, which can echo event content back.
-      throw new Error(`Google Calendar refused the request (HTTP ${response.status}).`);
+      throw this.classify(response.status, await response.text());
     }
 
     return (await response.json()) as T;
   }
+
+  // A 403 is not one thing, and treating it as one was M13's second live bug. Google returns
+  // 403 for a missing scope, for an API nobody enabled, and for a rate limit — three problems
+  // with three different fixes, of which only one is anything like "your access was revoked".
+  // Reading them all as a revocation sent the user to reconnect, which for two of the three
+  // could not possibly have helped.
+  private classify(status: number, body: string): Error {
+    const reason = googleErrorReason(body);
+
+    if (status === 403) {
+      if (reason === "insufficientPermissions" || reason === "ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+        return calendarAuthError("insufficient-scope");
+      }
+      if (reason === "accessNotConfigured") {
+        // Not user-fixable by reconnecting, and not a malfunction either — it is a setup step
+        // that was missed, so it says which one.
+        return new UserFixableError(
+          "The Google Calendar API isn't enabled for your Cloud project — enable it at " +
+            "https://console.cloud.google.com (APIs & Services → Library), then try again.",
+        );
+      }
+      if (reason === "rateLimitExceeded" || reason === "userRateLimitExceeded") {
+        // Transient. Nothing to fix, nothing to reconnect — just too fast.
+        return new Error("Google Calendar is rate-limiting this app — try again in a moment.");
+      }
+      // An unrecognised 403. The reason CODE is safe to include (it is a Google constant, not
+      // user content) and is the single most useful thing for working out what happened.
+      return new Error(
+        `Google Calendar refused the request (HTTP 403${reason === null ? "" : `, ${reason}`}).`,
+      );
+    }
+
+    // Status only — never the response body, which can echo event content back.
+    return new Error(`Google Calendar refused the request (HTTP ${status}).`);
+  }
+}
+
+// The `reason` out of Google's standard error envelope. Defensive: an unparseable body simply
+// has no reason, which routes to the generic message rather than a confidently wrong one.
+function googleErrorReason(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const error = (parsed as { error?: unknown }).error;
+    if (typeof error !== "object" || error === null) return null;
+
+    const errors = (error as { errors?: unknown }).errors;
+    if (Array.isArray(errors) && errors.length > 0) {
+      const first = (errors[0] as { reason?: unknown }).reason;
+      if (typeof first === "string") return first;
+    }
+
+    // Newer-style envelope: the reason lives under `details` instead.
+    const details = (error as { details?: unknown }).details;
+    if (Array.isArray(details)) {
+      for (const detail of details) {
+        const reason = (detail as { reason?: unknown }).reason;
+        if (typeof reason === "string") return reason;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }

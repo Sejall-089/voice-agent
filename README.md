@@ -335,7 +335,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (323 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (336 tests): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -485,20 +485,36 @@ trade point or something less costly would still fix the repetition, and whether
 double-`finish()` race has any trigger besides Enter's observed double-fire.
 
 **M13 — proven against fakes, not yet live.** The three calendar tools, the argument-dependent
-risk tier, and the OAuth refresh logic are all covered deterministically (49 tests): every
+risk tier, and the OAuth refresh logic are all covered deterministically (62 tests): every
 refusal, the escalate-never-de-escalate rule, resolve-the-tier-exactly-once, declining a
 `dangerous` create provably creating nothing, and — the one that decides every tier —
 that Google listing you as an attendee on your own event maps to **zero** guests. Two bugs
 surfaced during the build, both from tests rather than live use: a derived end time coming back
 in UTC while its start was `+05:30` (same instant, so nothing broke — which is why it was worth
 fixing before it hid something), and a refresh token that could reach an error message through
-an interpolated network-error string, now redacted. **Not yet proven:** anything requiring a
-real Google account. Specifically `GoogleCalendar.ts` itself — the one deliberately untested
-file, thin for exactly that reason, as `ChromeGmail` was — and above all whether Google's
-free-text search matches events the way a person describes them out loud, since the whole
-refuse-rather-than-guess behaviour rests on that match count being sensible. Also unproven:
-whether the model reliably turns "tomorrow at 3" into a correct ISO instant now that the prompt
-carries a clock. That change is proven to *render*, not proven to *work*.
+an interpolated network-error string, now redacted.
+
+**Then the first live run found two more, both in the one file that had no tests.** Every
+calendar instruction reported the connection as *revoked* while a manual token refresh with the
+same credentials returned `200` — so the answer had to come from the actual HTTP responses, not
+from the code path that produced the verdict. (1) `calendarTimeZone()` read
+`GET /calendars/primary`, the **Calendars** resource, which the `calendar.events` scope doesn't
+grant: `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT`. Since that's the first call in almost every path,
+*everything* failed on its opening request. The timezone now comes from the events listing's own
+envelope — same scope, and usually no extra request at all. (2) Every 403 was being read as a
+revocation, which is what made the first bug unreadable: it told you to reconnect, and
+reconnecting asks for the *same* permissions, so it could never have worked. 403s are now
+classified by reason, and `insufficient-scope` joined the named auth failures.
+
+The lesson is narrower than "test everything". Leaving that file untested was right for request
+*shaping* — only a real API can verify that — and wrong for error *classification*, which is
+ordinary logic that happened to live in the same file. That logic is tested now; the shaping
+still isn't, because it still can't be.
+
+**Still not proven:** whether Google's free-text search matches events the way a person
+describes them out loud — the whole refuse-rather-than-guess behaviour rests on that match count
+being sensible — and whether the model reliably turns "tomorrow at 3" into a correct ISO instant
+now that the prompt carries a clock. That change is proven to *render*, not proven to *work*.
 
 ---
 

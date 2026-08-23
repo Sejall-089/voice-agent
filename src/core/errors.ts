@@ -24,7 +24,16 @@ export class UnresolvedReferenceError extends UserFixableError {
 // from a real API failure. Collapsing them into `Error` would hand the user "Something went
 // wrong" for a problem they could fix in thirty seconds — the same reasoning that made a
 // truncated `chooseTool` response its own outcome in M9 instead of a fake refusal.
-export type CalendarAuthReason = "not-connected" | "expired" | "revoked";
+// `insufficient-scope` was added after the first live run, and it is the one that was learned
+// rather than designed. A 403 was originally read as a revocation, which sent the user to
+// reconnect — and reconnecting requests the SAME permissions, so it could never have helped.
+// "Connected, but not permitted to do this" is a genuinely different state with a genuinely
+// different fix, and collapsing it into "revoked" produced a loop instead of an answer.
+export type CalendarAuthReason =
+  | "not-connected"
+  | "expired"
+  | "revoked"
+  | "insufficient-scope";
 
 export class CalendarAuthError extends UserFixableError {
   constructor(
@@ -63,6 +72,17 @@ export function calendarAuthError(reason: CalendarAuthReason): CalendarAuthError
       return new CalendarAuthError(
         reason,
         `Google revoked this app's access to your calendar — ${RECONNECT}.`,
+      );
+    case "insufficient-scope":
+      // Deliberately does NOT say "reconnect and it'll work". The grant is missing a
+      // permission this build asks for, and if the connect script requests the same scopes it
+      // did last time, reconnecting changes nothing — so it says what is actually true and
+      // points at the one thing that would.
+      return new CalendarAuthError(
+        reason,
+        "I'm connected to your Google Calendar but not allowed to do that — the permission " +
+          "granted doesn't cover it. If you connected before this app last changed what it " +
+          `asks for, ${RECONNECT}.`,
       );
   }
 }

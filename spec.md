@@ -820,6 +820,16 @@ receives `deps` at all.
   someone can add a guest between that read and the act. The handler re-reads and refuses if
   the event has guests while the call resolved to `caution` — otherwise a call nobody was asked
   to confirm would email a person nobody mentioned. This is what `ToolDeps.tier` exists for.
+- **The scope is `calendar.events`, and that constrains which endpoints exist.** Least privilege
+  costs something specific here, learned on the first live run: `GET /calendars/primary` is the
+  **Calendars** resource, which that scope does not grant, so reading the calendar's timezone
+  from it returned `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT`. The timezone is taken from the
+  **events listing's own envelope** instead — every `events.list` response carries it — which
+  needs no extra scope, no reconnect, and usually no extra request, since `readSchedule` and
+  `moveEvent` both list before they need it.
+- **A 403 is not one thing.** Google returns it for a missing scope, for an API nobody enabled,
+  and for a rate limit — three problems, three different fixes, and only one of them resembles
+  "your access was revoked". They are classified from the error envelope's `reason`.
 - **Google's quirks stop at one file.** `googleCalendarMap.ts` is M13's `gmailScript.ts`: pure,
   exhaustively tested, and the only place that knows Google includes the **organizer** in
   `attendees` (left alone, every solo event looks like it has a guest and *everything* gets
@@ -1270,7 +1280,7 @@ Enter's observed double-fire; and whether `Ctrl+M`'s adjacency to the instructio
 
 ### M13 — proven vs. live-only
 
-**Proven deterministically (49 new tests), against fakes:** the three tools through the real
+**Proven deterministically (62 new tests), against fakes:** the three tools through the real
 planner; the argument-dependent tier mechanism, including that a resolver which throws or
 returns an undeclared tier **escalates** rather than de-escalates, and that the tier is resolved
 **exactly once** per run; every refusal (no match, several matches, recurring, all-day, all-day
@@ -1283,18 +1293,41 @@ including the organizer-in-`attendees` quirk that decides every tier; the whole 
 and that a 5xx or a dropped connection is **not** called a revocation; and that no failure path
 puts the refresh token or client secret into a message or a stack.
 
-**NOT proven — only a live run against a real Google account can:** that `GoogleCalendar`'s
-requests are shaped correctly at all (it is the one untested file, deliberately thin, exactly as
-`ChromeGmail` was); that `q=` search matches events the way a person describes them out loud —
+**The first live run found two bugs, both in the one file that had no tests.** The symptom was
+that every calendar instruction reported the connection as revoked while a manual token refresh
+with the same credentials returned `200` — so the diagnosis had to come from the actual HTTP
+responses, not from reading the code path that produced the verdict.
+
+1. **Wrong endpoint for the scope.** `calendarTimeZone()` read `GET /calendars/primary` — the
+   Calendars resource, which `calendar.events` does not grant. It returned `403
+   ACCESS_TOKEN_SCOPE_INSUFFICIENT` on `calendar.v3.Calendars.Get`. Because that method is the
+   first call in nearly every path (narration, the confirm dialog, `readSchedule`'s handler),
+   *every* instruction failed on its opening request. Now read from the events listing's own
+   envelope, which the same scope covers.
+2. **Every 403 was read as a revocation**, which is what made the first bug unreadable: the app
+   told the user to reconnect, and reconnecting requests the *same* scopes, so it could never
+   have helped. 403s are now classified by `reason`, and `insufficient-scope` was added as a
+   fourth `CalendarAuthReason` — "connected but not permitted" is a different state from
+   "access withdrawn", with a different fix.
+
+The lesson is narrower than "test everything": leaving `GoogleCalendar` untested was right for
+request *shaping*, which only a real API can verify, and wrong for error *classification*, which
+is ordinary logic that happened to live in the same file. That logic is now tested (13 tests,
+including the real captured 403 body); the shaping still isn't, because it still can't be.
+
+**NOT proven — only further live use against a real Google account can:** that `q=` search
+matches events the way a person describes them out loud —
 the single most likely source of a real bug, since the whole default-deny refusal rests on the
 match count being sensible; that `sendUpdates=all` actually emails guests when we say it will;
-that the real consent flow completes, and that the "unverified app" interstitial and the
-"Testing"-status 7-day expiry behave as documented; and whether the model reliably turns spoken
-relative times into correct ISO instants now that it has a clock — the prompt change is proven
-to render, not proven to work.
+that the "unverified app" interstitial and the "Testing"-status 7-day expiry behave as
+documented; and whether the model reliably turns spoken relative times into correct ISO instants
+now that it has a clock — the prompt change is proven to render, not proven to work.
 
-Every milestone from M10 on has produced at least one live bug no fixture caught. There is no
-reason to expect this one is different.
+**Confirmed live:** the token refresh, the granted scope, `events.list` against the real primary
+calendar, and the timezone coming back correctly from its envelope.
+
+Every milestone from M10 on has produced at least one live bug no fixture caught. This one
+produced two before a single instruction had been spoken.
 
 ### M7 voice — what is proved, and what still needs a microphone
 
