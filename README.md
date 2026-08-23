@@ -152,10 +152,12 @@ they become a count — *"You have 5 things coming up. First up, Wed 26 Aug, 3 t
 2 guests. Want me to read the rest?"* The screen still names every guest in full.
 
 Dates and times are rewritten for the ear in the same place — "Wed 26 Aug, 3:00–4:00 PM" is said
-as "Wednesday 26 August, 3 to 4 PM". The abbreviations are read as ordinary words otherwise
-("wed", "aug"), and the en dash is worse than that: recon caught Piper receiving it as mojibake
-and voicing the mis-decoded bytes, so nothing but ASCII reaches the engine until the wrapper's
-encoding is proven.
+as "Wednesday 26 August, 3 to 4 PM". Every part of that earned its place by measurement: the
+abbreviations are otherwise read as ordinary words ("wed", "aug"); the en dash was arriving as
+mojibake and being voiced as its mis-decoded bytes (fixed at the source, by forcing UTF-8 on the
+engine); and even once decoded correctly it is dropped silently rather than said as "to", so the
+word has to be supplied. The colon goes the same way — the engine reads "3:00" as "three zero
+zero", applying no time normalisation of its own.
 
 The planner now asks for all of this out loud — narration, the confirm question, every result,
 every refusal. Speech is an *action* it requests, not a method it calls, so a machine with no
@@ -172,7 +174,7 @@ screen — speech is the disposable channel.
 
 What exists today: the transform, the store, `elaborate`, `readSchedule`'s spoken form, the
 planner wiring, the queue and barge-in machine, the fake engine that guards it, and the Piper
-wrapper — with 114 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+wrapper — with 117 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
 wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
 audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
 and §6's `speakResult`.

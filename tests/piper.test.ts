@@ -71,14 +71,22 @@ describe("PiperSynthesizer — the happy path", () => {
     expect((failure as Error).message).toContain("STDIN=Hello there.");
   });
 
-  it("passes the environment through to the child", async () => {
-    // The seam PYTHONUTF8=1 will use if recon's Q6 confirms the mojibake diagnosis. Proving the
-    // plumbing now means that fix is one line of composition later, not a change to this file.
-    const failure = await piper("echo-env", { env: { PYTHONUTF8: "1" } })
+  it("forces UTF-8 on the child without being asked", async () => {
+    // Recon's Q6 settled this by measurement: the same sentence synthesized with and without
+    // PYTHONUTF8=1, and only the second came back intelligible. So it is a property of the
+    // engine, not a preference, and it defaults on rather than waiting for composition to
+    // remember it — a fact a caller can forget is a bug waiting to happen.
+    const failure = await piper("echo-env").synthesize("Anything.").catch((e: unknown) => e);
+
+    expect((failure as Error).message).toContain("PYTHONUTF8=1");
+  });
+
+  it("still lets a caller override the environment", async () => {
+    const failure = await piper("echo-env", { env: { PYTHONUTF8: "0" } })
       .synthesize("Anything.")
       .catch((error: unknown) => error);
 
-    expect((failure as Error).message).toContain("PYTHONUTF8=1");
+    expect((failure as Error).message).toContain("PYTHONUTF8=0");
   });
 
   it("leaves no temp file behind", async () => {

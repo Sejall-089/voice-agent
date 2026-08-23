@@ -74,7 +74,7 @@ describe("toSpokenResult — plain prose", () => {
     // Piper receives U+2013 as mojibake (bytes E2 80 93, read as Windows-1252: "â" + "€") and
     // says the pieces. A range that means "to" now says so at the producer, where the meaning
     // is known (calendar/format.ts's speakableWhen); everywhere else a comma is the safe read.
-    expect(toSpokenResult("Standup 9:00–9:15 AM").text).toBe("Standup 9 to 9:15 AM.");
+    expect(toSpokenResult("Standup 9:00–9:15 AM").text).toBe("Standup 9 to 9 15 AM.");
     expect(toSpokenResult("A — B").text).toBe("A, B.");
   });
 
@@ -280,9 +280,26 @@ describe("dates and times, spoken", () => {
       end: "2026-08-27T00:30:00+05:30",
     });
 
+    // No colon: confirmed by ear that the engine reads one digit by digit ("3:00" came back as
+    // "three zero zero"), so "11:30" would have been "eleven three zero".
     expect(toSpokenLine(formatWhen(late, ZONE))).toBe(
-      "Wednesday 26 August, 11:30 PM to Thursday 27 August, 12:30 AM.",
+      "Wednesday 26 August, 11 30 PM to Thursday 27 August, 12 30 AM.",
     );
+  });
+
+  it("says a leading-zero minute as 'oh', the way a person does", () => {
+    const late = event({
+      start: "2026-08-26T15:05:00+05:30",
+      end: "2026-08-26T16:00:00+05:30",
+    });
+
+    expect(toSpokenLine(formatWhen(late, ZONE))).toBe("Wednesday 26 August, 3 oh 5 to 4 PM.");
+  });
+
+  it("never lets a colon reach the engine from a time", () => {
+    for (const time of ["3:00 PM", "3:05 PM", "3:30 PM", "11:45 AM", "12:00 AM"]) {
+      expect(toSpokenLine(time)).not.toContain(":");
+    }
   });
 
   it("says an all-day event without the parentheses", () => {

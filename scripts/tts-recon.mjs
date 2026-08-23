@@ -20,8 +20,14 @@
 //   Q4  What audio format comes out (rate / channels / bit depth)? Decides whether the renderer
 //       can just decode it, and confirms it is NOT AudioClip's 16 kHz mono.
 //   Q5  How does it voice the characters `core/speech.ts` strips — bullet, asterisk, hash,
-//       ellipsis — and the one it deliberately KEEPS, the unspaced en dash in "3:00–4:00 PM"?
-//       Q5 is the only one needing ears: the WAVs are left on disk to listen to.
+//       ellipsis? Needs ears: the WAVs are left on disk to listen to.
+//   Q6  Was the garbling an ENCODING fault or a pronunciation one? ANSWERED: encoding. The
+//       same sentence with and without PYTHONUTF8=1 differs, so the engine was decoding stdin
+//       with the locale codepage. PiperSynthesizer now sets it by default.
+//   Q7  What does the engine actually SAY on stderr when it fails? Captured rather than
+//       guessed, so failure classification can be written from evidence (core/errors.ts).
+//   Q8  How must a time be written to be said correctly? Q6's listening pass found "3:00" is
+//       read "three zero zero" — no time normalisation, and a colon read digit by digit.
 //
 // Plain ESM, node built-ins only, no build step — same shape as scripts/notion-recon.mjs.
 //
@@ -330,6 +336,7 @@ async function main() {
       `    PYTHONUTF8=1  ${utf8Ms ?? "-"}ms   ${utf8.wav}`,
   );
   await captureFailureText();
+  await captureTimeWordings();
 
   if (rawMs !== null && utf8Ms !== null && Math.abs(rawMs - utf8Ms) > 150) {
     console.log(
@@ -340,6 +347,38 @@ async function main() {
     console.log(
       `  → No real difference, so the encoding hypothesis is WRONG and the mojibake ` +
         `diagnosis in core/speech.ts needs revisiting. Play both before concluding.`,
+    );
+  }
+}
+
+// Q8 — HOW SHOULD A TIME BE WRITTEN SO IT IS SAID CORRECTLY?
+//
+// Q6's listening pass answered more than it was asked. "3:00–4:00 PM" came back as disconnected
+// digits — "three zero zero, four zero zero" — with the dash dropped silently. Two things follow:
+// the engine applies NO time normalisation of its own (or "3:00" would have been "three"), and a
+// colon is read digit by digit. So "11:30" would be "eleven three zero", which nobody says.
+//
+// core/speech.ts now removes the colon: on the hour it goes entirely, otherwise the minutes
+// become a separate number, and a leading zero becomes "oh". That is reasoning from one observed
+// data point, not a measurement, so these probes settle it. Play them in pairs — the raw form
+// first, then what the cleaner would send — and keep whichever is actually said correctly.
+async function captureTimeWordings() {
+  console.log(`\nQ8 time wording. Play each PAIR and note which is said correctly:`);
+
+  const pairs = [
+    ["half past", "The meeting is at 3:30 PM.", "The meeting is at 3 30 PM."],
+    ["leading zero", "The meeting is at 3:05 PM.", "The meeting is at 3 oh 5 PM."],
+    ["on the hour", "The meeting is at 3:00 PM.", "The meeting is at 3 PM."],
+    ["quarter to", "The meeting is at 11:45 AM.", "The meeting is at 11 45 AM."],
+  ];
+
+  for (const [label, written, spoken] of pairs) {
+    const a = await synthesize(`q8_${label.replace(/\s+/g, "_")}_raw`, written);
+    const b = await synthesize(`q8_${label.replace(/\s+/g, "_")}_cleaned`, spoken);
+    console.log(
+      `\n  ${label}\n` +
+        `    as written  ${JSON.stringify(written)}\n      ${a.wav}\n` +
+        `    as cleaned  ${JSON.stringify(spoken)}\n      ${b.wav}`,
     );
   }
 }

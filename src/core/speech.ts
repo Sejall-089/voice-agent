@@ -227,8 +227,21 @@ function speakable(line: string): string {
         /(\d{1,2}(?::\d{2})?(?:\s*[AP]M)?)\s*–\s*(\d{1,2}(?::\d{2})?\s*[AP]M)/g,
         "$1 to $2",
       )
-      // "3:00" is said "three", not "three oh oh". Half past keeps its minutes.
+      // A COLON IS READ DIGIT BY DIGIT. Confirmed by ear: "3:00" came back as "three zero
+      // zero", which also settles that the engine applies no time normalisation of its own —
+      // if it did, that would have been "three" or "three o'clock". So the colon has to go.
+      //
+      // On the hour it disappears entirely ("3:00 PM" → "3 PM"). Otherwise the minutes stay as
+      // a separate number, which is how the time is actually said: "3 30" reads as "three
+      // thirty", and a leading zero becomes the "oh" an English speaker says out loud rather
+      // than the "zero" the digits would give.
+      //
+      // NOT yet confirmed by ear, unlike the rule above it: recon's Q8 probes these exact
+      // renderings. The current behaviour is known wrong (a colon reaches the engine); this is
+      // believed right and marked as such rather than asserted.
       .replace(/\b(\d{1,2}):00\b/g, "$1")
+      .replace(/\b(\d{1,2}):0(\d)\b/g, "$1 oh $2")
+      .replace(/\b(\d{1,2}):(\d{2})\b/g, "$1 $2")
       // The other two range shapes `formatWhen` produces: a dash straight after a meridiem
       // (a meeting crossing midnight) or after a day and month (a multi-day all-day event).
       .replace(/\b([AP]M)\s*–\s*/g, "$1 to ")

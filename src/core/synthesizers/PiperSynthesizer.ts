@@ -32,11 +32,8 @@ export interface PiperOptions {
   // Where the voice files live. Passed through so nothing is ever downloaded at synthesis time:
   // a "nothing leaves the machine" feature must not make a network call on its first utterance.
   dataDir?: string;
-  // Extra environment for the child. This exists for one specific, evidenced reason: recon
-  // heard an en dash come back as the Windows-1252 reading of its UTF-8 bytes, which points at
-  // the engine decoding stdin with the locale codepage. `PYTHONUTF8=1` is the fix if that
-  // diagnosis holds (scripts/tts-recon.mjs's Q6 settles it). Injected rather than hardcoded so
-  // the answer changes one line of composition, not this file.
+  // Extra environment for the child, MERGED OVER the UTF-8 defaults below rather than replacing
+  // them. Present so a caller can override; not required for correct behaviour.
   env?: Record<string, string>;
   // The archived rhasspy/piper v1.2.0 build spells these `--model` / `--output_file`; the
   // maintained piper1-gpl uses `-m` / `-f`. Recon's `--help` dump says which this install takes.
@@ -49,6 +46,20 @@ export interface PiperOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+// NOT a preference — a property of the engine, measured. Recon's Q6 synthesized the same
+// sentence twice, with and without these set, and only the second came back intelligible: the
+// engine decodes stdin with the locale codepage on Windows, so an en dash arrived as the
+// Windows-1252 reading of its UTF-8 bytes and was voiced as "â €".
+//
+// It lives HERE rather than in main.ts's composition on purpose. Composition is where choices
+// go; this is a fact about how this engine has to be invoked to work at all, and a fact that a
+// future caller can forget is a bug waiting to happen. Callers can still override it through
+// `env`, which merges over these.
+const UTF8_ENV: Record<string, string> = {
+  PYTHONUTF8: "1",
+  PYTHONIOENCODING: "utf-8",
+};
 
 export class PiperSynthesizer implements SpeechSynthesizer {
   private readonly timeoutMs: number;
@@ -114,9 +125,7 @@ export class PiperSynthesizer implements SpeechSynthesizer {
     return new Promise<void>((resolve, reject) => {
       const child = spawn(exePath, args, {
         windowsHide: true,
-        env: this.options.env === undefined
-          ? process.env
-          : { ...process.env, ...this.options.env },
+        env: { ...process.env, ...UTF8_ENV, ...this.options.env },
       });
 
       let stderr = "";
