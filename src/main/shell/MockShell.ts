@@ -23,6 +23,9 @@ export class MockShell implements OSShell, VoiceShell {
   // narrate() calls (M12: caution-tool narration AND DictationSession's window-title cue
   // share this one list — same channel in the real WindowsShell, so one recording of it here).
   public readonly narrations: string[] = [];
+  // Everything the planner asked to be said out loud, in order (M14) — see executeAction below
+  // for why this is a list of its own rather than part of `actions`.
+  public readonly spoken: string[] = [];
   public recordingsStarted = 0;
   public recordingsStopped = 0;
   public recordingsCancelled = 0;
@@ -77,6 +80,16 @@ export class MockShell implements OSShell, VoiceShell {
   }
 
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }> {
+    // Speech gets its own list rather than joining `actions` (M14), the same way `narrate()`
+    // calls already do. Two reasons, and neither is convenience: `actions` means "the local
+    // side effects a handler asked for", and a dozen existing tests read it as exactly that
+    // ("no dialog and no narration" asserts it is empty) — folding speech in would make every
+    // one of them assert something about M14 that they are not about. And an assertion surface
+    // that is only ever speech is the one a speech test actually wants.
+    if (action.kind === "speak") {
+      this.spoken.push(action.payload);
+      return Promise.resolve({ ok: true });
+    }
     this.actions.push(action);
     return Promise.resolve({ ok: true });
   }

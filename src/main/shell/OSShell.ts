@@ -10,7 +10,14 @@ export interface CapturedContext {
 export type LocalAction =
   | { kind: "openUrl"; payload: string }
   | { kind: "copyToClipboard"; payload: string }
-  | { kind: "notify"; payload: string };
+  | { kind: "notify"; payload: string }
+  // M14. Say this out loud. An ACTION rather than a method on this interface, for the same
+  // reason narration is one: the core asks the shell to do a thing, and whether this install
+  // can actually speak is the shell's business, not the planner's. A shell with no synthesizer
+  // accepts it and does nothing — exactly as `notify` did for every milestone before M10 had
+  // anything to narrate. The payload is already speakable (core/speech.ts); nothing downstream
+  // rewrites it.
+  | { kind: "speak"; payload: string };
 
 export interface OSShell {
   // Returns false when the OS refused the combo — another app already owns it. The caller

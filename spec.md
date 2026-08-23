@@ -679,6 +679,31 @@ would be describing a guess. It may do **SAFE work only**: it runs before the us
 to anything. If it throws, the planner never opens the dialog and nothing runs — "we cannot say
 what would happen" is itself a refusal.
 
+### Speech is an action, not a method (added in M14)
+
+`LocalAction` gained a fourth kind, `{ kind: "speak" }`, beside `notify`. It is an **action the
+core requests** rather than a method on `OSShell`, for the same reason narration is: whether this
+install can actually speak is the shell's business. A shell with no synthesizer accepts it and
+does nothing — the same shape `notify` had for every milestone before M10 had anything to
+narrate — so `/core` never learns whether there is a speaker, exactly as it never learns whether
+there is a microphone (§4a).
+
+The consequence worth having: the whole speech *policy* lives in `planner.ts` and
+`core/speech.ts`, and is provable under `MockShell` with no audio device and no electron. The
+planner speaks at three points, and the order is deliberate at two of them:
+
+| when | order |
+|---|---|
+| `caution` narration | `notify` first, then say it |
+| `dangerous` confirm | **say it before the dialog opens** — once `showMessageBox` is up it owns the user's attention, and a question asked after the thing it is about has appeared is not a question |
+| any result, refusal, or failure | show it first (the screen is instant), then say it |
+
+A tool's `speakResult` is worked out **before** the result is shown, so a tool that cannot say
+what it did fails the run rather than leaving the screen and the voice disagreeing — the same
+rule `narrate` and `confirmSummary` already follow. Empty spoken text emits no action at all:
+the real engine exits non-zero on empty input, so "there was nothing to say" must not become an
+error in the log.
+
 ### `speakResult` (added in M14)
 
 The fourth optional hook, and the same shape and reasoning as `narrate` and `confirmSummary`:

@@ -250,6 +250,14 @@ function speakable(line: string): string {
       // it); this line is the belt to those braces, because a producer that forgets is
       // otherwise one character away from garbling a whole utterance.
       .replace(/[–—]/g, ", ")
+      // An arrow is a word out loud. `remember` returns `Updated "team": #design → #design-team
+      // (v2).` — a real result string with a real U+2192 in it, which would have been garbled
+      // exactly like the en dash. Found by the FakeSynthesizer cross-check rather than by
+      // reading the code, which is the entire argument for writing that fake's rules
+      // independently of this cleaner.
+      .replace(/\s*[→⇒]\s*/g, " to ")
+      .replace(/\s*[←⇐]\s*/g, " from ")
+      .replace(/\s*[↔⇔]\s*/g, " and ")
       // The rest of the typographic punctuation this codebase and the model can emit, mapped to
       // ASCII for the same reason. NOT letters: mangling a name like "José" is worse than
       // risking its pronunciation, and the encoding fix is what actually solves that.

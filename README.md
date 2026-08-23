@@ -157,8 +157,13 @@ as "Wednesday 26 August, 3 to 4 PM". The abbreviations are read as ordinary word
 and voicing the mis-decoded bytes, so nothing but ASCII reaches the engine until the wrapper's
 encoding is proven.
 
-What exists today: the transform, the store, `elaborate`, and `readSchedule`'s spoken form, with
-52 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+The planner now asks for all of this out loud — narration, the confirm question, every result,
+every refusal. Speech is an *action* it requests, not a method it calls, so a machine with no
+synthesizer accepts it and stays quiet, and the whole policy is testable with no audio device
+at all.
+
+What exists today: the transform, the store, `elaborate`, `readSchedule`'s spoken form, the
+planner wiring, and the fake engine that guards it, with 83 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
 wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
 audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
 and §6's `speakResult`.

@@ -398,6 +398,14 @@ export class WindowsShell implements OSShell, VoiceShell {
           clipboard.writeText(action.payload);
           return { ok: true };
         }
+        case "speak": {
+          // M14. Accepted and discarded until the speech session is wired (M14 step 4/6): this
+          // install has no synthesizer yet, and "the app cannot speak" is a real, supported
+          // state — the same one every install is in when PIPER_EXE_PATH is unset. Returning
+          // ok rather than an error is deliberate: a planner run must not fail because the
+          // machine is silent, exactly as it does not fail when there is no microphone.
+          return { ok: true };
+        }
         case "notify": {
           // Narration for `caution` tools (M10, core/risk.ts): what is about to happen inside
           // another app, said before it happens. This is the action kind the OSShell contract

@@ -88,6 +88,21 @@ export interface Transcriber {
   transcribe(clip: AudioClip): Promise<string>;
 }
 
+// --- Text to speech, behind an interface like Transcriber (M14) ---
+
+export interface SpeechSynthesizer {
+  // Text → one utterance as WAV bytes, header included. Throws (never returns a sentinel) when
+  // synthesis fails — including on empty input, which the real engine exits non-zero on rather
+  // than treating as silence.
+  //
+  // Deliberately NOT an AudioClip. That type's contract is "16 kHz mono, the one format the
+  // transcriber wants", and Piper's medium voices are 22.05 kHz; reusing it would be a lie
+  // about the shape of the thing. The WAV header carries the rate, so the player can just read
+  // it, and a future ElevenLabs implementation returns whatever IT produces without either side
+  // pretending to be the microphone path.
+  synthesize(text: string): Promise<Uint8Array>;
+}
+
 // --- The browser surface (M10), behind an interface like MessageSender / Transcriber ---
 
 // One email as the app sees it. Deliberately flat and app-neutral: nothing here says "Gmail",

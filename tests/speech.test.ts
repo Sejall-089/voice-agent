@@ -8,6 +8,7 @@ import {
   toSpokenResult,
 } from "../src/core/speech.ts";
 import { formatSchedule, formatWhen } from "../src/core/calendar/format.ts";
+import { FakeSynthesizer, unspeakable } from "./FakeSynthesizer.ts";
 import type { CalendarEvent } from "../src/core/types.ts";
 
 // M14 task 1. The transform between what the screen shows and what the app says.
@@ -309,5 +310,93 @@ describe("dates and times, spoken", () => {
   it("leaves what the SCREEN shows completely alone", () => {
     // Two representations, one source: this is a derivation, not a rewrite.
     expect(formatWhen(event(), ZONE)).toBe("Wed 26 Aug, 3:00–4:00 PM");
+  });
+});
+
+// The pair of contracts meeting: what the transform GUARANTEES, checked against what the engine
+// stand-in REFUSES.
+//
+// This is the test that makes both worth having. `unspeakable` is written out independently in
+// tests/FakeSynthesizer.ts — it does not call the cleaner — so if the cleaner grows a hole, this
+// fails instead of the two agreeing with each other and both being wrong. It is the check that
+// FakeCalendar's substring matching could not perform for M13.
+describe("the transform satisfies the engine's contract", () => {
+  const everything = [
+    schedule(10),
+    schedule(1),
+    "Sent to #design-team.\n\nA note with **bold** and `code` in it.",
+    "Opened https://www.github.com/dashboard",
+    'Adding "Design review" on Wed 26 Aug, 3:00–4:00 PM to your calendar…',
+    "# A heading\n\n- one\n- two\n- three",
+    "Nothing on your calendar in that window.",
+    'Updated "team": #design → #design-team (v2).',
+    "Sent. 🎉\n\nThanks!",
+    "Send this reply to alex@example.com?\n\nHi Alex,\n\nThursday works.\n\nSejal",
+    "Standup 9:00–9:15 AM — “quoted” and ‘curly’",
+  ];
+
+  for (const fixture of everything) {
+    const label = fixture.split("\n")[0]?.slice(0, 36) ?? "";
+
+    it(`is speakable, and its remainder is too: ${label}`, () => {
+      for (const spoken of [
+        toSpokenResult(fixture),
+        toSpokenNarration(fixture),
+        toSpokenConfirm(fixture),
+      ]) {
+        expect(unspeakable(spoken.text)).toBeNull();
+        // The remainder is spoken verbatim by `elaborate`, so it has to clear the same bar.
+        if (spoken.remainder !== null) expect(unspeakable(spoken.remainder)).toBeNull();
+      }
+    });
+  }
+});
+
+describe("FakeSynthesizer refuses what the real engine cannot take", () => {
+  it("rejects empty text — the engine exits 1 rather than making silence", () => {
+    expect(unspeakable("")).toContain("empty");
+    expect(unspeakable("   ")).toContain("empty");
+  });
+
+  it("rejects a line break — one call is one utterance", () => {
+    expect(unspeakable("one\ntwo")).toContain("line break");
+  });
+
+  it("rejects the typographic characters the engine mis-decodes", () => {
+    for (const bad of ["3–4", "a — b", "“hi”", "it’s", "one…"]) {
+      expect(unspeakable(bad)).not.toBeNull();
+    }
+  });
+
+  it("rejects markup the cleaner is supposed to have removed", () => {
+    for (const bad of ["• one", "**bold**", "# heading", "`code`"]) {
+      expect(unspeakable(bad)).not.toBeNull();
+    }
+  });
+
+  it("allows accented letters, matching what the cleaner deliberately keeps", () => {
+    // The transform leaves "José" alone rather than mangling a name; a fake that rejected it
+    // would be enforcing a rule the code does not have, and would fail honest text.
+    expect(unspeakable("Remembered: manager = José.")).toBeNull();
+  });
+
+  it("rejects an over-long utterance", () => {
+    expect(unspeakable("word ".repeat(200))).toContain("over the");
+  });
+
+  it("names the offending text, so a failure points at the transform not the engine", async () => {
+    const fake = new FakeSynthesizer();
+
+    await expect(fake.synthesize("3–4 PM")).rejects.toThrow(/refused: .*"3–4 PM"/);
+    expect(fake.spoken).toEqual([]);
+  });
+
+  it("hands back a real, parseable WAV for text it accepts", async () => {
+    const fake = new FakeSynthesizer();
+    const wav = await fake.synthesize("Done.");
+
+    expect(new TextDecoder().decode(wav.slice(0, 4))).toBe("RIFF");
+    expect(new DataView(wav.buffer).getUint32(24, true)).toBe(22_050); // not AudioClip's 16 kHz
+    expect(fake.spoken).toEqual(["Done."]);
   });
 });

@@ -8,7 +8,9 @@ import { UnavailableCalendar } from "./calendar/UnavailableCalendar.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
+import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts";
 import type { DraftStore } from "./draft.ts";
+import type { SpokenText } from "./speech.ts";
 import type { SpeechStore } from "./speechStore.ts";
 import type {
   ActionLog,
@@ -78,14 +80,14 @@ export class Planner {
     //    A TRUNCATED response is handled separately: the model never decided anything, so
     //    calling it "no tool for that" would be a lie about what happened.
     if (choice.kind === "incomplete") {
-      return this.refuseIncomplete(instruction, choice.reason);
+      return await this.refuseIncomplete(instruction, choice.reason);
     }
     if (choice.kind === "none") {
-      return this.refuse(instruction, choice.text);
+      return await this.refuse(instruction, choice.text);
     }
     const tool = this.registry.find((t) => t.name === choice.name);
     if (!tool) {
-      return this.refuse(instruction);
+      return await this.refuse(instruction);
     }
 
     // 4. Resolve vague argument references via memory — unless the tool declares its args are
@@ -99,7 +101,7 @@ export class Planner {
     // 5. Validate — required args present and concrete (generic; no tool-specific logic).
     const missing = missingRequired(tool, args);
     if (missing.length > 0) {
-      return this.fail(
+      return await this.fail(
         instruction,
         tool.name,
         args,
@@ -163,9 +165,10 @@ export class Planner {
       try {
         narration = await tool.narrate(args, deps);
       } catch (error) {
-        return this.failOrRefuse(instruction, tool.name, args, error);
+        return await this.failOrRefuse(instruction, tool.name, args, error);
       }
       await this.shell.executeAction({ kind: "notify", payload: narration });
+      await this.say(toSpokenNarration(narration));
     }
 
     // 6b. Confirm gate — a call that resolved to `dangerous` must pass shell.confirm() first.
@@ -181,8 +184,13 @@ export class Planner {
           : `Run ${tool.name}?`;
       } catch (error) {
         // If we cannot even describe what would happen, we certainly do not do it.
-        return this.failOrRefuse(instruction, tool.name, args, error);
+        return await this.failOrRefuse(instruction, tool.name, args, error);
       }
+      // Before the dialog, deliberately. Once showMessageBox is up it owns the user's
+      // attention, and a question asked after the thing it is about has appeared is not a
+      // question. Only the first paragraph is spoken — never the draft body (core/speech.ts).
+      await this.say(toSpokenConfirm(summary));
+
       const approved = await this.shell.confirm(summary);
       if (!approved) {
         this.log.logAction({
@@ -200,6 +208,11 @@ export class Planner {
     // 7. Execute the handler.
     try {
       const result = await tool.handler(args, deps);
+      // Worked out BEFORE the result is shown, so a tool whose speakResult throws fails the
+      // run rather than leaving the screen and the voice disagreeing about what happened.
+      const spoken = tool.speakResult
+        ? await tool.speakResult(result, args, deps)
+        : toSpokenResult(result);
 
       // 8. Record + show.
       this.log.logAction({
@@ -211,10 +224,25 @@ export class Planner {
         status: "ok",
       });
       this.shell.showResult(result);
+      await this.say(spoken);
       return { status: "ok", tool: tool.name, result };
     } catch (error) {
-      return this.failOrRefuse(instruction, tool.name, args, error);
+      return await this.failOrRefuse(instruction, tool.name, args, error);
     }
+  }
+
+  // Say it, and remember anything held back so "read them out" has an answer (M14).
+  //
+  // Empty text is SILENCE, not an utterance: the real engine exits non-zero on it, so emitting
+  // the action anyway would turn "there was nothing to say" into an error in the log. The
+  // remainder is stored even when it will never be asked for — it costs one assignment, and the
+  // alternative is the planner guessing at what the user is about to say next.
+  private async say(spoken: SpokenText): Promise<void> {
+    if (spoken.remainder !== null) this.speech.hold(spoken.remainder);
+    else this.speech.clear();
+
+    if (spoken.text.trim().length === 0) return;
+    await this.shell.executeAction({ kind: "speak", payload: spoken.text });
   }
 
   // Is this a malfunction, or a state of the world the user can change?
@@ -229,27 +257,28 @@ export class Planner {
   // can now fail. A calendar that isn't connected fails at NARRATION, before a handler is ever
   // reached, and telling someone "something went wrong" when the answer is "paste a token into
   // .env" would send them debugging the wrong thing.
-  private failOrRefuse(
+  private async failOrRefuse(
     instruction: string,
     tool: string,
     args: ToolInput,
     error: unknown,
-  ): PlannerOutcome {
+  ): Promise<PlannerOutcome> {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof UserFixableError) {
-      return this.refuseUserFixable(instruction, tool, args, message);
+      return await this.refuseUserFixable(instruction, tool, args, message);
     }
-    return this.fail(instruction, tool, args, message);
+    return await this.fail(instruction, tool, args, message);
   }
 
-  private refuse(
+  private async refuse(
     instruction: string,
     modelText?: string | null,
-  ): PlannerOutcome {
+  ): Promise<PlannerOutcome> {
     const shown =
       modelText && modelText.trim().length > 0 ? modelText.trim() : REFUSAL;
     this.log.logMiss(instruction);
     this.shell.showResult(shown);
+    await this.say(toSpokenResult(shown));
     return { status: "no_tool", tool: null, result: shown };
   }
 
@@ -261,10 +290,10 @@ export class Planner {
   // itself: spec §8 defines the miss list as a ranked backlog of tools worth building, and
   // a token-budget failure is not a missing tool. Same status, same table, reason recorded,
   // backlog uncorrupted.
-  private refuseIncomplete(
+  private async refuseIncomplete(
     instruction: string,
     reason: string,
-  ): PlannerOutcome {
+  ): Promise<PlannerOutcome> {
     const shown = `${TRUNCATED} (${reason})`;
     this.log.logAction({
       ts: new Date().toISOString(),
@@ -275,17 +304,18 @@ export class Planner {
       status: "no_tool",
     });
     this.shell.showResult(shown);
+    await this.say(toSpokenResult(shown));
     return { status: "no_tool", tool: null, result: shown };
   }
 
   // The request was understood; something about the world stops it. The message is the tool's
   // own, because the tool is the only thing that knows what would fix it.
-  private refuseUserFixable(
+  private async refuseUserFixable(
     instruction: string,
     tool: string,
     args: ToolInput,
     message: string,
-  ): PlannerOutcome {
+  ): Promise<PlannerOutcome> {
     this.log.logAction({
       ts: new Date().toISOString(),
       instruction,
@@ -295,15 +325,16 @@ export class Planner {
       status: "refused",
     });
     this.shell.showResult(message); // verbatim — the tool already phrased it for a human
+    await this.say(toSpokenResult(message));
     return { status: "refused", tool, result: message };
   }
 
-  private fail(
+  private async fail(
     instruction: string,
     tool: string,
     args: ToolInput,
     message: string,
-  ): PlannerOutcome {
+  ): Promise<PlannerOutcome> {
     this.log.logAction({
       ts: new Date().toISOString(),
       instruction,
@@ -314,6 +345,7 @@ export class Planner {
     });
     const shown = `Something went wrong: ${message}`;
     this.shell.showResult(shown);
+    await this.say(toSpokenResult(shown));
     return { status: "error", tool, result: message };
   }
 }
