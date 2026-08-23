@@ -83,10 +83,13 @@ mkdirSync(OUT_DIR, { recursive: true });
 
 // --- running one utterance ---
 
-function run(args, stdin, timeoutMs = 60_000) {
+function run(args, stdin, timeoutMs = 60_000, env = undefined) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(EXE, args, { windowsHide: true });
+    const child = spawn(EXE, args, {
+      windowsHide: true,
+      env: env === undefined ? process.env : { ...process.env, ...env },
+    });
 
     let stdout = "";
     let stderr = "";
@@ -122,12 +125,12 @@ function run(args, stdin, timeoutMs = 60_000) {
   });
 }
 
-function synthesize(name, text, timeoutMs) {
+function synthesize(name, text, timeoutMs, env) {
   const wav = join(OUT_DIR, `${name}.wav`);
   const args = LEGACY
     ? ["--model", MODEL, "--output_file", wav]
     : ["-m", MODEL, "-f", wav];
-  return run(args, text, timeoutMs).then((result) => ({ ...result, wav }));
+  return run(args, text, timeoutMs, env).then((result) => ({ ...result, wav }));
 }
 
 // --- reading the WAV back, so the answers are measured rather than eyeballed ---
@@ -291,10 +294,52 @@ async function main() {
       ["bullet", "markdown", "ellipsis", "en_dash"]
         .map((n) => `    ${by(n)?.result.wav ?? "(not written)"}`)
         .join("\n") +
-      `\n  The first three should confirm WHY core/speech.ts strips them. The fourth decides ` +
-      `whether "3:00–4:00 PM" survives as spoken text: if it is not voiced as "three to four", ` +
-      `the keep-unspaced-dashes rule is wrong.`,
+      `\n  The first three should confirm WHY core/speech.ts strips them.`,
   );
+
+  // Q6 — SEPARATING THE TWO DEFECTS THE FIRST RUN CONFLATED.
+  //
+  // The en dash came back as garbled non-English sounds, reported as "a circumflex, euros".
+  // That is exactly U+2013's UTF-8 bytes (E2 80 93) read as Windows-1252 — "â" + "€" + a curly
+  // quote — which points at an ENCODING fault, not a pronunciation one. Python on Windows
+  // decodes stdin with the locale codepage unless PYTHONUTF8 says otherwise.
+  //
+  // But fixing that only guarantees Piper RECEIVES an en dash. Whether it then SAYS "to" is a
+  // second, independent question: espeak-ng generally treats a dash as a clause break, and
+  // rendering "3:00–4:00" as "three to four" needs range-aware normalisation most front ends
+  // do not do. The two probes below settle both at once:
+  //
+  //   * different durations  → the encoding was the fault, and PYTHONUTF8=1 fixes it
+  //   * same durations       → the encoding was never the problem; look elsewhere
+  //   * and then LISTEN to the utf8 one: if it does not say "three to four", the word
+  //     conversion in core/speech.ts is load-bearing and stays. If it does, that rule is
+  //     redundant (though harmless, and worth keeping as insurance against this env var
+  //     going missing).
+  const RANGE = "The meeting is 3:00–4:00 PM.";
+  const raw = await synthesize("q6_dash_default_env", RANGE);
+  const utf8 = await synthesize("q6_dash_pythonutf8", RANGE, undefined, {
+    PYTHONUTF8: "1",
+    PYTHONIOENCODING: "utf-8",
+  });
+  const rawMs = describeWav(raw.wav).durationMs;
+  const utf8Ms = describeWav(utf8.wav).durationMs;
+
+  console.log(
+    `\nQ6 encoding: "${RANGE}"\n` +
+      `    default env   ${rawMs ?? "-"}ms   ${raw.wav}\n` +
+      `    PYTHONUTF8=1  ${utf8Ms ?? "-"}ms   ${utf8.wav}`,
+  );
+  if (rawMs !== null && utf8Ms !== null && Math.abs(rawMs - utf8Ms) > 150) {
+    console.log(
+      `  → The two differ, so the garbling WAS an encoding fault. Spawn piper with ` +
+        `PYTHONUTF8=1. Now play the second file: does it say "three to four"?`,
+    );
+  } else {
+    console.log(
+      `  → No real difference, so the encoding hypothesis is WRONG and the mojibake ` +
+        `diagnosis in core/speech.ts needs revisiting. Play both before concluding.`,
+    );
+  }
 }
 
 function lastLine(text) {
