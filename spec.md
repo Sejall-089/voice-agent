@@ -539,7 +539,7 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -556,6 +556,9 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `reviseDraft` | 9. Tweak that reply                   | yes (tone)    | caution      | re-compose from the LIVE box text → replace it |
 | `sendReply`   | 10. Send it                           | no            | **dangerous**| confirm (recipient + whole draft) → click Gmail's Send |
 | `addToPage`   | 11. Add a note to the open Notion page | yes (tone)   | caution      | read open page → compose → real-CDP click + type at the end |
+| `readSchedule`| 12. What's on my calendar             | no            | safe         | list a time window → format as text |
+| `createEvent` | 13. Put something on the calendar     | no            | caution / **dangerous** | create it; `dangerous` when anyone is invited |
+| `moveEvent`   | 14. Move something                    | no            | caution / **dangerous** | find it (default-deny) → move; `dangerous` when it has guests |
 
 The `Irreversible` column above is the M10 `risk` tier — see the `risk` subsection below. The first six tools kept
 their exact behaviour through that migration: only `sendMessage` and `sendReply` confirm.
@@ -766,6 +769,68 @@ unverified transport). **Known limits:** one page at a time, and the CDP-level i
 appears to require the tab be the genuine foreground tab in its Chrome window (unverified
 *why* — plausibly Chrome deprioritizing hit-testing for a backgrounded tab's compositor), so
 `ChromeNotion` calls `Page.bringToFront` before acting, unlike Gmail's tools.
+
+---
+
+## 6c. The calendar flow (M13)
+
+Google Calendar, via its **API** — not the DOM, not CDP, not a browser at all.
+
+That is a reversal of M10 and M11, and the reason is specific rather than a change of taste.
+Gmail and Notion were driven through a browser because the *point* was a live, editable draft
+the user could read and tweak before it went anywhere: a reply box with words in it. A calendar
+event is structured data — a title, a start, an end, a guest list. There is nothing to tweak in
+place, so a DOM buys nothing and costs a dependency on Google's markup surviving a reskin. This
+is much closer to how `sendMessage` already works than to how `draftReply` does.
+
+**Three tools:**
+
+| Tool | Task | Tier | Handler does |
+|------|------|------|--------------|
+| `readSchedule` | 12. What's on | `safe` | list a window → format |
+| `createEvent` | 13. Put it on the calendar | `caution` / **`dangerous`** | create; guests are emailed at once |
+| `moveEvent` | 14. Move it | `caution` / **`dangerous`** | look up → move; guests are emailed at once |
+
+**Why the tier is argument-dependent** — the design decision this milestone turned on. Gmail
+could gate `sendReply` alone because drafting and sending are separate moments. A calendar event
+has no equivalent later step: attendees are emailed the instant it is created or moved, so there
+is no "send" left to gate. The tier therefore has to come from the *arguments of that call*, not
+from which tool was picked. See "Argument-dependent tiers" under §6 for the mechanism.
+
+`createEvent` reads its guest list straight from its own arguments. `moveEvent` has to **look one
+up** — "push the review to 4" says nothing about who is on it — which is why `RiskPolicy.resolve`
+receives `deps` at all.
+
+**What holds it together:**
+
+- **Default-deny on which event.** `moveEvent` matching zero events, or more than one, refuses
+  and names the candidates. The same rule `gmailScript.ts` applies to buttons, one level up:
+  if we cannot say *which* one, we do not touch any of them.
+- **Two events it declines to move.** A **recurring** instance (instance-or-series is a real
+  choice with a real wrong answer — Google's own UI asks) and an **all-day** event. Both refuse
+  by name rather than guessing.
+- **All-day is read but never written.** `readSchedule` shows all-day events, `createEvent`
+  declines to make one, and `moveEvent` declines to move one. A bare `2026-08-26` parses as a
+  real moment, so without an explicit refusal "block out Thursday" would quietly become a
+  midnight-to-midnight timed event — a plausible-looking wrong answer, the worst kind.
+- **A guest with no address stops the call.** Dropping an unusable entry would take the
+  attendee count to zero, downgrade the tier from `dangerous` to `caution`, and skip the
+  confirm gate — the unsendable entry is the whole reason to stop.
+- **A time-of-check/time-of-use guard.** `moveEvent`'s tier is decided by reading a guest list;
+  someone can add a guest between that read and the act. The handler re-reads and refuses if
+  the event has guests while the call resolved to `caution` — otherwise a call nobody was asked
+  to confirm would email a person nobody mentioned. This is what `ToolDeps.tier` exists for.
+- **Google's quirks stop at one file.** `googleCalendarMap.ts` is M13's `gmailScript.ts`: pure,
+  exhaustively tested, and the only place that knows Google includes the **organizer** in
+  `attendees` (left alone, every solo event looks like it has a guest and *everything* gets
+  gated), that an all-day `end.date` is **exclusive**, and that `date` and `dateTime` are
+  different fields.
+
+**Out of scope for M13, and not scaffolded:** recurring events (beyond refusing to move one);
+choosing a calendar (primary only); free/busy lookup across other people's calendars; natural-
+language date parsing below the planning layer (the model resolves "tomorrow at 3" from the
+clock in the prompt — see §5); creating all-day events; deleting events; responding to
+invitations.
 
 ---
 

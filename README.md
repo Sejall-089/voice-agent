@@ -74,6 +74,20 @@ Task 11 is one-shot, not three like 8-10: Notion has no staging area and no send
 there's nothing to draft-then-send. A follow-up like "make that note shorter" is an honest
 miss, not a silent edit — see [Scope](#scope).
 
+…and three more in **M13**, with a Google account connected:
+
+| # | Say this | It does |
+|---|---|---|
+| 12 | "what's on tomorrow?" | Lists the day's events, with who's on each |
+| 13 | "block out an hour Thursday to write the deck" | Adds it — **narrates**, doesn't ask, because it reaches nobody |
+| 14 | "set up a design sync with alex@… and sam@…" | Names the event, the time and **every** invitee, and creates it only if you say yes |
+
+Tasks 13 and 14 are the **same tool**. That's the M13 design decision: unlike Gmail, where
+drafting and sending are separate moments, a calendar event emails its guests the instant it's
+created — there's no later "send" to gate. So the risk tier is decided from *this call's
+arguments*, not from which tool was picked. "Move the review to 4" works the same way, except
+it has to look up who's on it first (see `spec.md` §6c).
+
 Anything else → an honest refusal, logged as a miss (a ranked backlog of what to build next).
 It never guesses.
 
@@ -280,9 +294,9 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (257 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (308 tests): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
-flow, the Notion page-writing flow, and both eval suites. All headless against `MockShell`, a
+flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, and jsdom
 fixtures — **no API key, no network, no real Slack, no microphone, no whisper model, no browser,
 no inbox, no Notion account, and no OS keystroke actually sent.**

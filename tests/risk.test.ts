@@ -243,7 +243,10 @@ describe("a tier that depends on the arguments", () => {
 });
 
 describe("registry invariants", () => {
-  const all = buildRegistry({ gmail: true });
+  // The WHOLE menu, every optional surface switched on. An invariant that only inspected the
+  // tools this machine happens to have configured would go quiet exactly when a new integration
+  // was added — which is the moment it is most worth having.
+  const all = buildRegistry({ gmail: true, notion: true, calendar: true });
 
   // Every invariant below asks about the whole MENU, so each one reads `declaredTiers` rather
   // than the tier of one particular call. That is what declaring `tiers` up front buys: "could
@@ -267,7 +270,25 @@ describe("registry invariants", () => {
     const gated = all
       .filter((tool) => declaredTiers(tool.risk).includes("dangerous"))
       .map((tool) => tool.name);
-    expect(gated.sort()).toEqual(["sendMessage", "sendReply"]);
+    // createEvent and moveEvent join the list in M13 — not because they always email someone,
+    // but because they CAN, and that is the question an invariant has to ask.
+    expect(gated.sort()).toEqual(["createEvent", "moveEvent", "sendMessage", "sendReply"]);
+  });
+
+  // New in M13, and only meaningful now that a tool can land on either tier: a tool that can be
+  // caution AND dangerous needs both a way to announce itself and a way to ask, because which
+  // one it will need is not known until the call is made.
+  it("gives a tool that can go either way both a narration and a confirm summary", () => {
+    const eitherWay = all.filter((tool) => {
+      const tiers = declaredTiers(tool.risk);
+      return tiers.includes("caution") && tiers.includes("dangerous");
+    });
+
+    expect(eitherWay.map((tool) => tool.name).sort()).toEqual(["createEvent", "moveEvent"]);
+    for (const tool of eitherWay) {
+      expect(tool.narrate, `${tool.name} has no narration`).toBeTypeOf("function");
+      expect(tool.confirmSummary, `${tool.name} has no confirmSummary`).toBeTypeOf("function");
+    }
   });
 
   it("gives every dangerous tool a way to describe what it is about to do", () => {

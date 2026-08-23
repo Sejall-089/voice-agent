@@ -1,14 +1,16 @@
 import type { OSShell } from "../main/shell/OSShell.ts";
 import { toToolSchemas } from "./registry.ts";
-import { UnresolvedReferenceError } from "./errors.ts";
+import { UserFixableError } from "./errors.ts";
 import { UnavailableSender } from "./senders/SlackSender.ts";
 import { UnavailableGmail } from "./gmail/UnavailableGmail.ts";
 import { UnavailableNotion } from "./notion/UnavailableNotion.ts";
+import { UnavailableCalendar } from "./calendar/UnavailableCalendar.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
 import type { DraftStore } from "./draft.ts";
 import type {
   ActionLog,
+  CalendarSurface,
   GmailSurface,
   LLMClient,
   Memory,
@@ -45,6 +47,10 @@ export class Planner {
     private readonly draft: DraftStore = new InMemoryDraftStore(),
     // Same idea again for Notion (M11) — the same Chrome, a second app surface in it.
     private readonly notion: NotionSurface = new UnavailableNotion(),
+    // And again for the calendar (M13) — not a browser this time, an API. The default rejects
+    // with a NAMED auth failure rather than a bare error, so "not connected" reads as something
+    // to fix rather than something broken.
+    private readonly calendar: CalendarSurface = new UnavailableCalendar(),
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -99,7 +105,10 @@ export class Planner {
     // because a GUI action's concrete facts — who this reply would actually go to, what is in
     // the box right now — live in the app being acted on, not in the arguments the model
     // proposed. A confirm dialog that could not read them would be describing a guess.
-    const deps: ToolDeps = {
+    // `tier: null` here is not a placeholder — it is the truth for the one caller that sees it.
+    // A `RiskPolicy` resolver is what DECIDES the tier, so it necessarily runs before there is
+    // one, and must not be able to read a stale answer while deciding.
+    const classifying: ToolDeps = {
       context,
       llm: this.llm,
       shell: this.shell,
@@ -108,6 +117,8 @@ export class Planner {
       gmail: this.gmail,
       notion: this.notion,
       draft: this.draft,
+      calendar: this.calendar,
+      tier: null,
     };
 
     // 6. What does THIS call cost? Through M12 the answer was a constant the tool carried, and
@@ -122,7 +133,12 @@ export class Planner {
     //    answers disagree — narrating an action and then not confirming it — which is a hole in
     //    the gate rather than a slow path. A resolver that fails escalates rather than
     //    de-escalates; see resolveRisk in core/risk.ts.
-    const tier = await resolveRisk(tool.risk, args, deps);
+    const tier = await resolveRisk(tool.risk, args, classifying);
+
+    // Everything downstream of the decision is told what it was. A handler whose tier was
+    // decided by reading the world needs this to notice the world moving under it between the
+    // classification and the act.
+    const deps: ToolDeps = { ...classifying, tier };
 
     // 6a. Narration gate — a `caution` tool runs on its own, but must SAY what it is about to
     //     do first (core/risk.ts). Before M10 nothing needed this, because nothing acted inside
@@ -140,8 +156,7 @@ export class Planner {
       try {
         narration = await tool.narrate(args, deps);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return this.fail(instruction, tool.name, args, message);
+        return this.failOrRefuse(instruction, tool.name, args, error);
       }
       await this.shell.executeAction({ kind: "notify", payload: narration });
     }
@@ -159,8 +174,7 @@ export class Planner {
           : `Run ${tool.name}?`;
       } catch (error) {
         // If we cannot even describe what would happen, we certainly do not do it.
-        const message = error instanceof Error ? error.message : String(error);
-        return this.fail(instruction, tool.name, args, message);
+        return this.failOrRefuse(instruction, tool.name, args, error);
       }
       const approved = await this.shell.confirm(summary);
       if (!approved) {
@@ -192,15 +206,33 @@ export class Planner {
       this.shell.showResult(result);
       return { status: "ok", tool: tool.name, result };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      // "I don't know what you mean" is an honest refusal, not a malfunction. Show it as the
-      // tool worded it — no "Something went wrong" wrapper — and log it as `refused`.
-      // Generic: the planner distinguishes the error TYPE, never the tool.
-      if (error instanceof UnresolvedReferenceError) {
-        return this.refuseUnresolved(instruction, tool.name, args, message);
-      }
-      return this.fail(instruction, tool.name, args, message);
+      return this.failOrRefuse(instruction, tool.name, args, error);
     }
+  }
+
+  // Is this a malfunction, or a state of the world the user can change?
+  //
+  // "I don't know what you mean" and "I'm not connected to your calendar yet" are honest
+  // refusals, not breakages: they get shown exactly as the tool worded them — no "Something
+  // went wrong" wrapper — and logged as `refused`. Generic, and deliberately so: the planner
+  // distinguishes the error TYPE (`UserFixableError`), never the tool that threw it.
+  //
+  // M10 did this for `UnresolvedReferenceError` alone, in one place — the handler's catch.
+  // M13 widened it on both axes: any `UserFixableError`, from any of the three places a tool
+  // can now fail. A calendar that isn't connected fails at NARRATION, before a handler is ever
+  // reached, and telling someone "something went wrong" when the answer is "paste a token into
+  // .env" would send them debugging the wrong thing.
+  private failOrRefuse(
+    instruction: string,
+    tool: string,
+    args: ToolInput,
+    error: unknown,
+  ): PlannerOutcome {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof UserFixableError) {
+      return this.refuseUserFixable(instruction, tool, args, message);
+    }
+    return this.fail(instruction, tool, args, message);
   }
 
   private refuse(
@@ -239,8 +271,9 @@ export class Planner {
     return { status: "no_tool", tool: null, result: shown };
   }
 
-  // An unresolved reference: the request was understood, we just don't know the fact yet.
-  private refuseUnresolved(
+  // The request was understood; something about the world stops it. The message is the tool's
+  // own, because the tool is the only thing that knows what would fix it.
+  private refuseUserFixable(
     instruction: string,
     tool: string,
     args: ToolInput,

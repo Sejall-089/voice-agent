@@ -9,9 +9,11 @@ import type {
   OSShell,
 } from "../main/shell/OSShell.ts";
 import type { DraftStore } from "./draft.ts";
-import type { ToolRisk } from "./risk.ts";
+import type { Risk, ToolRisk } from "./risk.ts";
 
 export type { CapturedContext, LocalAction };
+// Re-exported so a tool can name its own tier without reaching past this file for one type.
+export type { Risk };
 
 // --- Tool schemas (what the LLM sees) ---
 
@@ -135,6 +137,66 @@ export interface NotionSurface {
   appendToPage(text: string): Promise<void>;
 }
 
+// --- The calendar surface (M13), behind an interface like GmailSurface / NotionSurface ---
+
+// One calendar event as the app sees it. Flat and vendor-neutral, like EmailMessage and
+// NotionPage: nothing here says "Google", so the tools never learn whose API it came out of.
+//
+// This is also the first surface that is an API rather than a browser. That is not a change of
+// principle — it is the same reasoning that made Slack an API: there is no live, editable draft
+// box to put words in, only structured data, so there is nothing a DOM would buy.
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  // ISO instant with offset for a timed event; YYYY-MM-DD when `allDay`.
+  start: string;
+  // For an all-day event this is the INCLUSIVE last day. Google's wire format makes it
+  // exclusive (a one-day event on the 26th ends on the 27th); that is normalized away at the
+  // mapping boundary so this field means one thing everywhere above it.
+  end: string;
+  allDay: boolean;
+  // OTHER people's email addresses — never the user's own. This is what decides the risk tier
+  // of createEvent/moveEvent, so it has to mean "who would be emailed about this", not "who is
+  // listed on it". Google includes the organizer in its own attendee list, so a naive mapping
+  // would make every solo event look like it had a guest and quietly gate everything.
+  attendees: string[];
+  // An instance of a recurring series. M13 REFUSES to move one — instance-vs-series is a real
+  // choice with a real wrong answer, and guessing it is worse than declining.
+  recurring: boolean;
+}
+
+// What createEvent asks for. No `allDay`: M13 writes timed events only, so `start`/`end` are
+// always ISO instants here. Reading handles all-day events; writing declines them (spec §6c).
+export interface EventDraft {
+  title: string;
+  start: string;
+  end: string;
+  attendees: string[];
+}
+
+// Acting on the user's primary calendar. Every method either does exactly the named thing or
+// throws with a human-readable reason — same contract as GmailSurface and NotionSurface.
+//
+// The tiers on the two writing methods are NOT fixed: they depend on whether that particular
+// event has guests (core/risk.ts's RiskPolicy). Both read methods exist partly to answer that
+// question before anything is gated.
+export interface CalendarSurface {
+  // SAFE. The calendar's OWN timezone, used to display times the way the user sees them in
+  // Google Calendar. Not the same thing as the user's local zone, which is what the planner
+  // prompt carries (spec §5) — usually identical, never assumed to be.
+  calendarTimeZone(): Promise<string>;
+  listUpcoming(from: string, to: string, limit: number): Promise<CalendarEvent[]>; // SAFE
+  // SAFE. Zero or many matches is not an answer — the caller REFUSES rather than picking one,
+  // the same default-deny rule gmailScript.ts applies to buttons.
+  findEvent(query: string, from: string, to: string): Promise<CalendarEvent[]>;
+  getEvent(id: string): Promise<CalendarEvent>; // SAFE
+  // CAUTION with no attendees, DANGEROUS with them — there is no separate "send" step to gate,
+  // because guests are emailed the moment this returns.
+  createEvent(draft: EventDraft): Promise<CalendarEvent>;
+  // Same split, decided by the guests on the event BEING MOVED.
+  moveEvent(id: string, start: string, end: string): Promise<CalendarEvent>;
+}
+
 // --- Memory resolve seam (M1 no-op; M3 becomes SQLite-backed) ---
 
 export interface MemoryResolver {
@@ -187,6 +249,18 @@ export interface ToolDeps {
   gmail: GmailSurface;
   notion: NotionSurface;
   draft: DraftStore;
+  // M13. Same idea again — an unconnected default, so a tool can never reach a calendar the
+  // app was not configured to use.
+  calendar: CalendarSurface;
+  // What tier THIS call resolved to (core/risk.ts). `null` only inside a `RiskPolicy.resolve`,
+  // which is the thing that decides it and therefore runs before it exists; by the time
+  // `narrate`, `confirmSummary` or the handler sees it, it is always set.
+  //
+  // A handler needs this for one specific job: a tier decided by reading the world can go stale
+  // between the reading and the acting. `moveEvent` classifies an event as guest-free, and a
+  // second later someone else adds a guest to it — without this, the handler would email a
+  // person the user was never asked about. Knowing the tier lets it refuse instead.
+  tier: Risk | null;
 }
 
 // A handler returns the text to display; it throws on failure (planner catches).
