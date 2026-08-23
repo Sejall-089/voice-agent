@@ -119,10 +119,12 @@ full design.
 
 ---
 
-## Voice output (M14 — in progress, does not speak yet)
+## Voice output (M14 — in progress)
 
-The app is being taught to say its narration, confirms, and results out loud instead of only
-showing them. Local synthesis (Piper), no API key, for the same reason voice *input* is local.
+The app says its narration, confirms, and results out loud instead of only showing them. Local
+synthesis (Piper), no API key, for the same reason voice *input* is local — and **off is a real
+state**: with `PIPER_EXE_PATH` unset it simply stays quiet, the `elaborate` tool is never
+offered, and nothing else changes.
 
 The decision worth knowing about is that there are **two representations, not one**. The
 screen keeps exactly the text it shows today, and the spoken line is *derived* from it by pure
@@ -172,9 +174,9 @@ never open while the app is talking, enforced where every path to the microphone
 rather than at each hotkey. Nothing is lost when it's cut off, because the full text is still on
 screen — speech is the disposable channel.
 
-What exists today: the transform, the store, `elaborate`, `readSchedule`'s spoken form, the
-planner wiring, the queue and barge-in machine, the fake engine that guards it, and the Piper
-wrapper — with 117 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+What exists today: all of it, wired end to end — the transform, the store, `elaborate`,
+`readSchedule`'s spoken form, the planner wiring, the queue and barge-in machine, the Piper
+wrapper, and playback in the renderer — with 123 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
 wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
 audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
 and §6's `speakResult`.

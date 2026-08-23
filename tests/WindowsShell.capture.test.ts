@@ -71,6 +71,7 @@ const { ipcMain, makeWindow, globalShortcut, dialogShowMessageBox } = await vi.h
       },
       isVisible: () => win.visible,
       isFocused: () => win.focused,
+      isDestroyed: () => false,
       webContents: {
         send(channel: string, ...args: unknown[]): void {
           win.sent.push({ channel, args });
@@ -707,5 +708,99 @@ describe("WindowsShell.isInputCapturing (M12.1's tightened mutual-exclusion chec
     ipcMain.emit("commandbar:submit", {}, "typed text");
     await capture;
     expect(shell.isInputCapturing()).toBe(false);
+  });
+});
+
+// --- Speech output (M14) ---
+//
+// The shell half of voice output: what it hands to the queue, what it sends the renderer, and
+// the one invariant that has to hold here rather than at each hotkey. SpeechSession's own
+// behaviour is tested against MockShell in SpeechSession.test.ts; this is the electron-shaped
+// end, which is exactly the code a test that avoids electron would skip.
+
+function fakeSpeaker() {
+  const calls: string[] = [];
+  return {
+    calls,
+    speak: (text: string) => calls.push(`speak:${text}`),
+    stop: () => calls.push("stop"),
+    isSpeaking: () => false,
+  };
+}
+
+describe("WindowsShell — speech output", () => {
+  it("hands a speak action to the queue", async () => {
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    const speaker = fakeSpeaker();
+    shell.attachSpeech(speaker);
+
+    const result = await shell.executeAction({ kind: "speak", payload: "Done." });
+
+    expect(result.ok).toBe(true);
+    expect(speaker.calls).toEqual(["speak:Done."]);
+  });
+
+  it("accepts a speak action on an install that cannot speak", async () => {
+    // "The app has no voice" is a supported state, not an error. A planner run must not fail
+    // because the machine is silent, exactly as it does not fail with no microphone.
+    const shell = new WindowsShell(makeWindow() as never);
+
+    await expect(
+      shell.executeAction({ kind: "speak", payload: "Done." }),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it("stops speaking when the microphone opens", async () => {
+    // THE invariant, at the chokepoint every path to the mic goes through. Not a preference:
+    // the instruction hotkey opens the bar AND the mic together, so an app still speaking
+    // would be transcribed by whisper into the user's own instruction.
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    const speaker = fakeSpeaker();
+    shell.attachSpeech(speaker);
+
+    const started = shell.startRecording();
+    ackVoiceStarted();
+    await started;
+
+    expect(speaker.calls).toContain("stop");
+  });
+
+  it("sends the bytes and resolves when the renderer reports back", async () => {
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    const wav = new Uint8Array([1, 2, 3]);
+
+    const playing = shell.play(wav);
+    const sent = win.sent.find((message) => message.channel === "speech:play");
+    expect(sent?.args[0]).toBe(wav);
+
+    ipcMain.emit("speech:ended", {}, undefined);
+    await expect(playing).resolves.toBeUndefined();
+  });
+
+  it("resolves even when the renderer never answers", async () => {
+    // The queue upstream drains by awaiting this. A play() that stayed pending after a
+    // crashed or destroyed renderer would strand every utterance behind it forever.
+    vi.useFakeTimers();
+    try {
+      const shell = new WindowsShell(makeWindow() as never);
+      const playing = shell.play(new Uint8Array([1]));
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(playing).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells the renderer to stop", () => {
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+
+    shell.stopPlayback();
+
+    expect(win.sent.some((message) => message.channel === "speech:stop")).toBe(true);
   });
 });

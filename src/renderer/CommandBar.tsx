@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MicRecorder } from "./audio/recorder.ts";
+import { SpeechPlayer } from "./audio/player.ts";
 
 type VoiceState = "idle" | "recording" | "stopped" | "transcribing";
 
@@ -18,6 +19,9 @@ export function CommandBar(): JSX.Element {
   // throwaway recorder on every single render.
   const recorderRef = useRef<MicRecorder | null>(null);
   const recorder = (recorderRef.current ??= new MicRecorder());
+  // One player for the window's lifetime, same reasoning as the recorder above.
+  const playerRef = useRef<SpeechPlayer | null>(null);
+  const player = (playerRef.current ??= new SpeechPlayer());
   // One "I started typing" signal per bar opening, not one per keystroke.
   const typedRef = useRef(false);
   // Read inside IPC callbacks, which close over the first render's state otherwise.
@@ -84,6 +88,22 @@ export function CommandBar(): JSX.Element {
       if (state === "recording") setHeard(null);
     });
 
+    // --- Speech output (M14). Same division as voice: main owns the queue, this owns the
+    // device. Every path reports back exactly once, because the queue upstream drains by
+    // waiting for that report — a silent failure here would strand every utterance behind it.
+
+    const offSpeak = window.api.onSpeak((wav) => {
+      let failure: string | undefined;
+      void player
+        .play(wav, (message) => (failure = message))
+        .then(() => window.api.speechEnded(failure));
+    });
+
+    const offStopSpeaking = window.api.onStopSpeaking(() => {
+      // play()'s promise resolves on its own when cut off, which is what reports the end.
+      player.stop();
+    });
+
     return () => {
       offShow();
       offEcho();
@@ -94,6 +114,9 @@ export function CommandBar(): JSX.Element {
       offVoiceStop();
       offVoiceCancel();
       offVoiceState();
+      offSpeak();
+      offStopSpeaking();
+      player.stop();
     };
   }, []);
 

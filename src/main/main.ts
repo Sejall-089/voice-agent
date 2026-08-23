@@ -18,6 +18,8 @@ import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
 import { SlackSender } from "../core/senders/SlackSender.ts";
 import { WhisperCppTranscriber } from "../core/transcribers/WhisperCppTranscriber.ts";
+import { PiperSynthesizer } from "../core/synthesizers/PiperSynthesizer.ts";
+import { SpeechSession } from "./shell/SpeechSession.ts";
 import { ChromeGmail } from "../core/gmail/ChromeGmail.ts";
 import { UnavailableGmail } from "../core/gmail/UnavailableGmail.ts";
 import { ChromeNotion } from "../core/notion/ChromeNotion.ts";
@@ -30,6 +32,7 @@ import type {
   CalendarSurface,
   GmailSurface,
   NotionSurface,
+  SpeechSynthesizer,
   Transcriber,
 } from "../core/types.ts";
 
@@ -102,6 +105,9 @@ function createCommandBar(): BrowserWindow {
       preload: join(__dirname, "../preload/preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // The bar is hidden most of the time, and Chromium throttles timers and media in hidden
+      // windows. Speech plays through this window whether or not it is on screen (M14).
+      backgroundThrottling: false,
     },
   });
 
@@ -118,6 +124,11 @@ function createCommandBar(): BrowserWindow {
 
   return win;
 }
+
+// Chromium refuses to play audio that no user gesture asked for. Every utterance this app
+// produces is triggered by a hotkey or by the planner finishing, never by a click inside the
+// window, so without this the very first thing the app tries to say fails silently.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 app.whenReady().then(() => {
   commandBar = createCommandBar();
@@ -155,10 +166,13 @@ app.whenReady().then(() => {
   // The check is synchronous and offline (is there a refresh token?), so nothing on the network
   // decides what the model is offered.
   const calendar = createCalendar();
+  // M14: same gate shape again — a capability the app cannot exercise is never offered.
+  const synthesizer = createSynthesizer();
   const tools = buildRegistry({
     gmail: gmail !== null,
     notion: notion !== null,
     calendar: calendar !== null,
+    speech: synthesizer !== null,
   });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
@@ -176,6 +190,17 @@ app.whenReady().then(() => {
     notion ?? new UnavailableNotion(),
     calendar ?? new UnavailableCalendar(),
   );
+
+  // The speech queue, wired both ways: the session plays THROUGH the shell, and the shell
+  // hands it whatever the planner asks to have said. A failure to speak is narrated on screen
+  // rather than logged and forgotten — a speaker that quietly stopped working looks exactly
+  // like one that had nothing to say.
+  const speech = synthesizer
+    ? new SpeechSession(shell, synthesizer, {
+        onFailure: (message) => shell.narrate(message),
+      })
+    : null;
+  if (speech) shell.attachSpeech(speech);
 
   // THE planner call site. Typed text and dictated text both funnel through here, so the
   // planner cannot tell them apart and voice needs no changes anywhere in /core.
@@ -209,6 +234,12 @@ app.whenReady().then(() => {
       );
       return;
     }
+    // Barge-in. Stopping here as well as in startRecording() is deliberate: this fires the
+    // instant the key is pressed, while the microphone takes 160-680ms to warm up, so the app
+    // goes quiet when you reach for it rather than when the mic is ready. startRecording() is
+    // the structural backstop that makes the invariant unbreakable.
+    speech?.stop();
+
     void (async () => {
       const typed = shell.showInput(); // resolves on Enter/Escape with whatever was typed
       void voice?.begin(); // ...and it is already listening
@@ -231,11 +262,16 @@ app.whenReady().then(() => {
   // globally, the dictation hotkey must stay blocked for the bar's whole open lifetime — not
   // just while voice happens to still be recording — or the bar's own Enter-to-submit and
   // dictation's Enter-to-finish could both fire from one keypress.
-  const dictateHotkey = dictation
-    ? registerDictateHotkey(
-        shell,
-        createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell)),
-      )
+  const onDictate = dictation
+    ? createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell))
+    : null;
+  const dictateHotkey = onDictate
+    ? registerDictateHotkey(shell, () => {
+        // Same reason as the instruction hotkey: dictation types into another app, and the
+        // app talking over it is noise on top of a microphone the two already share.
+        speech?.stop();
+        onDictate();
+      })
     : null;
 
   // Typing, or dismissing the bar, silently discards the recording. Both are "I did not
@@ -329,6 +365,30 @@ function createTranscriber(): Transcriber | null {
     exePath,
     modelPath,
     language: process.env["WHISPER_LANGUAGE"] ?? "en",
+  });
+}
+
+// M14. Same shape and the same rule as createTranscriber above: paths are read HERE, and a
+// missing one disables one capability rather than breaking the app. Unset means the app simply
+// does not speak — no session is built, the `elaborate` tool is never offered, and every
+// `speak` action the planner emits is accepted and discarded.
+function createSynthesizer(): SpeechSynthesizer | null {
+  const exePath = process.env["PIPER_EXE_PATH"];
+  const modelPath = process.env["PIPER_MODEL_PATH"];
+  if (!exePath || !modelPath) {
+    console.log(
+      "[main] voice output disabled - PIPER_EXE_PATH / PIPER_MODEL_PATH not set",
+    );
+    return null;
+  }
+  const dataDir = process.env["PIPER_DATA_DIR"];
+  return new PiperSynthesizer({
+    exePath,
+    modelPath,
+    ...(dataDir ? { dataDir } : {}),
+    // The archived v1.2.0 build spells the flags differently from the maintained one. Recon's
+    // `--help` dump says which this install takes.
+    legacyFlags: process.env["PIPER_LEGACY_FLAGS"] === "1",
   });
 }
 

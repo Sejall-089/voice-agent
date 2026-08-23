@@ -8,7 +8,17 @@ import {
 } from "electron";
 import type { AudioClip } from "../../core/types.ts";
 import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
+import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
+
+// What this shell needs from the speech queue — declared here rather than importing
+// SpeechSession so the dependency runs one way: the session depends on the shell (it plays
+// through it), and the shell only knows this much about the session.
+export interface Speaker {
+  speak(text: string): void;
+  stop(): void;
+  isSpeaking(): boolean;
+}
 
 // How long to wait for the renderer to answer a voice request before giving up. Without
 // this a crashed renderer would leave VoiceSession stuck in "transcribing" forever, and
@@ -20,7 +30,7 @@ const RENDERER_REPLY_TIMEOUT_MS = 15_000;
 const AUTO_HIDE_MS = 12_000;
 
 // Windows implementation of the OSShell contract, plus the VoiceShell contract (M7).
-export class WindowsShell implements OSShell, VoiceShell {
+export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // What voice is doing right now. Tracked as the STATE rather than one "busy" boolean
   // because two different questions hang off it and they have different answers in the
   // "stopped" case — see the two getters below.
@@ -45,6 +55,9 @@ export class WindowsShell implements OSShell, VoiceShell {
   // other reasons (the instruction bar, caution-tool narration) where Enter must behave
   // completely normally for whatever app has real OS focus.
   private stopKeyRegistered = false;
+  // The speech queue (M14), or null on an install with no synthesizer configured. Held rather
+  // than constructed here because it needs this shell to play through.
+  private speech: Speaker | null = null;
 
   constructor(private readonly window: BrowserWindow) {
     // Both listeners are registered ONCE, for the app's lifetime.
@@ -245,9 +258,57 @@ export class WindowsShell implements OSShell, VoiceShell {
     this.window.webContents.send("commandbar:status", text);
   }
 
+  // --- SpeechShell (M14) ---
+
+  // The queue, once main.ts has built one. Set after construction because the session needs
+  // THIS shell to play through — the same shape as onDismissed/onTypingStarted.
+  attachSpeech(session: Speaker): void {
+    this.speech = session;
+  }
+
+  isSpeaking(): boolean {
+    return this.speech?.isSpeaking() ?? false;
+  }
+
+  // Everything about to be said is dropped, and what is playing is cut off. Called on either
+  // hotkey (main.ts) and, structurally, whenever the microphone opens (below).
+  stopSpeaking(): void {
+    this.speech?.stop() ?? this.stopPlayback();
+  }
+
+  play(wav: Uint8Array): Promise<void> {
+    // Resolve on the renderer's report, whatever it says. A rejection here would strand the
+    // whole queue behind one bad utterance, so a failure resolves and is reported instead.
+    const finished = this.awaitRenderer<null>("speech:ended", (_payload, error) => {
+      if (error) console.error(`[WindowsShell] playback: ${error}`);
+      return null;
+    }).catch((error: unknown) => {
+      // A renderer that never answered — a crash, or a window destroyed mid-utterance. The
+      // queue must keep moving.
+      console.error(`[WindowsShell] playback did not report back: ${messageOf(error)}`);
+      return null;
+    });
+
+    this.window.webContents.send("speech:play", wav);
+    return finished.then(() => undefined);
+  }
+
+  stopPlayback(): void {
+    // Fire-and-forget: the renderer's own play() promise resolves when it is cut off, and that
+    // is what reports the end, so there is nothing to wait for here.
+    if (!this.window.isDestroyed()) this.window.webContents.send("speech:stop");
+  }
+
   // --- VoiceShell (M7) ---
 
   async startRecording(): Promise<void> {
+    // THE invariant, enforced at the one chokepoint every path to the microphone passes
+    // through rather than at each hotkey — M8's lesson about binding cleanup to the event and
+    // not to one code path. Not a UX preference: the instruction hotkey opens the bar AND the
+    // microphone in the same moment (spec §4a), so an app still speaking would be transcribed
+    // by whisper into the user's own instruction. MockShell mirrors this exactly.
+    this.stopSpeaking();
+
     this.cancelAutoHide();
     this.voiceState = "recording";
     // showInactive: dictation is about the app you are already in. Stealing focus to show a
@@ -399,11 +460,15 @@ export class WindowsShell implements OSShell, VoiceShell {
           return { ok: true };
         }
         case "speak": {
-          // M14. Accepted and discarded until the speech session is wired (M14 step 4/6): this
-          // install has no synthesizer yet, and "the app cannot speak" is a real, supported
-          // state — the same one every install is in when PIPER_EXE_PATH is unset. Returning
-          // ok rather than an error is deliberate: a planner run must not fail because the
-          // machine is silent, exactly as it does not fail when there is no microphone.
+          // M14. Handed to the queue, which never blocks: `speak` returns once the utterance is
+          // queued, not once it has been heard, so a `caution` tool announces itself and then
+          // acts rather than waiting two seconds in between.
+          //
+          // With no synthesizer configured there is no session, and this is accepted and
+          // discarded. "The app cannot speak" is a real, supported state — the same one every
+          // install is in when PIPER_EXE_PATH is unset — and a planner run must not fail
+          // because the machine is silent, exactly as it does not fail with no microphone.
+          this.speech?.speak(action.payload);
           return { ok: true };
         }
         case "notify": {
@@ -444,6 +509,10 @@ export class WindowsShell implements OSShell, VoiceShell {
       if (this.window.isVisible()) this.registerEscape();
     }
   }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // The IPC payload crosses a process boundary, so it is validated rather than trusted.

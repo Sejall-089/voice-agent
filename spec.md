@@ -740,6 +740,22 @@ hand-authored selector that had never matched anything. `scripts/tts-recon.mjs`'
 real wording for the two most likely setup failures; teaching the classifier to tell "wrong voice
 file" from "wrong flag" is worth doing *after* that, with evidence behind it.
 
+**Where playback lives.** In the renderer, beside the microphone (`src/renderer/audio/player.ts`),
+not in the main process — that is where the Web Audio APIs are, and it puts both halves of "voice"
+in one process, which makes "never listen while speaking" a local guarantee rather than a
+cross-process race. An `<audio>` element rather than `decodeAudioData`: its `ended` event is
+exactly the signal `play()` has to resolve on, with no decode step that can fail separately.
+
+Two Electron settings are load-bearing and easy to lose. `autoplay-policy=no-user-gesture-required`
+— every utterance is triggered by a hotkey or by the planner finishing, never by a click inside the
+window, so without it the first thing the app tries to say fails silently. And
+`backgroundThrottling: false` — the bar is hidden most of the time, and Chromium throttles media
+in hidden windows.
+
+`play()` resolves on whatever the renderer reports, and resolves even when it reports **nothing**
+(a crashed or destroyed renderer, caught by the same timeout the voice path uses). The queue
+drains by awaiting it, so a `play()` left pending would strand every utterance behind it forever.
+
 ### Speech is an action, not a method (added in M14)
 
 `LocalAction` gained a fourth kind, `{ kind: "speak" }`, beside `notify`. It is an **action the

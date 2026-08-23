@@ -81,6 +81,26 @@ const api = {
   notifyTyping(): void {
     ipcRenderer.send("commandbar:typing");
   },
+
+  // --- Speech output (M14). Main owns the queue; the renderer owns the speaker. ---
+
+  // main → renderer: play these WAV bytes.
+  onSpeak(callback: (wav: Uint8Array) => void): () => void {
+    const listener = (_e: IpcRendererEvent, wav: Uint8Array): void => callback(wav);
+    ipcRenderer.on("speech:play", listener);
+    return () => ipcRenderer.removeListener("speech:play", listener);
+  },
+  // main → renderer: stop immediately (barge-in).
+  onStopSpeaking(callback: () => void): () => void {
+    const listener = (): void => callback();
+    ipcRenderer.on("speech:stop", listener);
+    return () => ipcRenderer.removeListener("speech:stop", listener);
+  },
+  // renderer → main: that utterance is over — finished, cut off, or never started. Always
+  // sent, because the queue upstream is drained by waiting for it.
+  speechEnded(error?: string): void {
+    ipcRenderer.send("speech:ended", error);
+  },
 };
 
 export type CommandBarApi = typeof api;
