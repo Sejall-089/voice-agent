@@ -6,8 +6,10 @@ import { UnavailableGmail } from "./gmail/UnavailableGmail.ts";
 import { UnavailableNotion } from "./notion/UnavailableNotion.ts";
 import { UnavailableCalendar } from "./calendar/UnavailableCalendar.ts";
 import { InMemoryDraftStore } from "./draft.ts";
+import { InMemorySpeechStore } from "./speechStore.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
 import type { DraftStore } from "./draft.ts";
+import type { SpeechStore } from "./speechStore.ts";
 import type {
   ActionLog,
   CalendarSurface,
@@ -51,6 +53,10 @@ export class Planner {
     // with a NAMED auth failure rather than a bare error, so "not connected" reads as something
     // to fix rather than something broken.
     private readonly calendar: CalendarSurface = new UnavailableCalendar(),
+    // M14. Scratch state again, like `draft`: what the app held back the last time it spoke a
+    // summary rather than the whole thing, so an "and the rest?" follow-up has something to
+    // answer from. One per app run, in memory only.
+    private readonly speech: SpeechStore = new InMemorySpeechStore(),
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -118,6 +124,7 @@ export class Planner {
       notion: this.notion,
       draft: this.draft,
       calendar: this.calendar,
+      speech: this.speech,
       tier: null,
     };
 

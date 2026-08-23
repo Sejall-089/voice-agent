@@ -9,6 +9,8 @@ import type {
   OSShell,
 } from "../main/shell/OSShell.ts";
 import type { DraftStore } from "./draft.ts";
+import type { SpokenText } from "./speech.ts";
+import type { SpeechStore } from "./speechStore.ts";
 import type { Risk, ToolRisk } from "./risk.ts";
 
 export type { CapturedContext, LocalAction };
@@ -252,6 +254,10 @@ export interface ToolDeps {
   // M13. Same idea again — an unconnected default, so a tool can never reach a calendar the
   // app was not configured to use.
   calendar: CalendarSurface;
+  // M14. What the app held back the last time it spoke a summary instead of the whole thing.
+  // Scratch state owned by the planner (one per app run), handed down like `draft` — see
+  // core/speechStore.ts for why it deliberately never reaches SQLite.
+  speech: SpeechStore;
   // What tier THIS call resolved to (core/risk.ts). `null` only inside a `RiskPolicy.resolve`,
   // which is the thing that decides it and therefore runs before it exists; by the time
   // `narrate`, `confirmSummary` or the handler sees it, it is always set.
@@ -308,6 +314,25 @@ export interface Tool extends ToolSchema {
   // acts, so it must never change the world it is describing. If it throws, the planner treats
   // that as "we can't say what we're about to do" and nothing runs — same as confirmSummary.
   narrate?: (args: ToolInput, deps: ToolDeps) => string | Promise<string>;
+  // How to SAY this tool's result (M14). The fourth optional hook, and the same shape and
+  // reasoning as `narrate` and `confirmSummary`: the planner asks the tool how to describe
+  // itself and never learns which tool it is asking.
+  //
+  // Optional because the default is good: `core/speech.ts` derives a spoken line from the
+  // displayed result generically, and most tools return one short sentence that needs nothing
+  // else. A tool defines this only when the generic derivation would say something a person
+  // would not — `readSchedule`'s formatted list is the case that justified the hook, because
+  // the generic head-of-list reads attendees' email addresses out loud, character by
+  // character, and there is no fixing that from outside the tool that knows they are addresses.
+  //
+  // Takes the result the handler already produced rather than re-deriving from the world: the
+  // spoken and displayed versions must describe the same answer, and a second read of a
+  // calendar could legitimately return something different.
+  speakResult?: (
+    result: string,
+    args: ToolInput,
+    deps: ToolDeps,
+  ) => SpokenText | Promise<SpokenText>;
 }
 
 // --- Action log seam (M1 in-memory; M3 becomes SQLite action_log) ---

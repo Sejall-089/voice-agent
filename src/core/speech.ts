@@ -102,6 +102,15 @@ export function toSpokenConfirm(summary: string): SpokenText {
   };
 }
 
+// One line of text, cleaned and given a terminal stop — the building block a tool reaches for
+// when it writes its OWN spoken form (`Tool.speakResult`) instead of taking the derivation
+// above. Exported so the stripping rules live in exactly ONE place: a fake synthesizer that
+// rejects a stray bullet has to be able to assume every producer went through the same cleaner,
+// or the rule catches honest tools instead of bugs.
+export function toSpokenLine(text: string): string {
+  return sentence(speakable(text));
+}
+
 // --- Internals ---
 
 // One paragraph of a result, which may be a list or prose.

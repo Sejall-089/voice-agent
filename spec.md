@@ -549,7 +549,7 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -678,6 +678,45 @@ being acted on, not in the arguments the model proposed, so a dialog that could 
 would be describing a guess. It may do **SAFE work only**: it runs before the user has agreed
 to anything. If it throws, the planner never opens the dialog and nothing runs — "we cannot say
 what would happen" is itself a refusal.
+
+### `speakResult` (added in M14)
+
+The fourth optional hook, and the same shape and reasoning as `narrate` and `confirmSummary`:
+the planner asks the tool how to describe itself and never learns which tool it asked.
+
+```ts
+speakResult?: (result: string, args: ToolInput, deps: ToolDeps) => SpokenText | Promise<SpokenText>;
+```
+
+Optional, because the default is good — `core/speech.ts` derives a spoken line from the
+displayed result generically, and most tools return one short sentence that needs nothing more.
+A tool defines this only when the generic derivation would say something a person would not.
+
+**`readSchedule` is the case that justified the hook.** Its result is a formatted list, and the
+generic head-of-list reads attendees' addresses out loud, character by character — "with alex at
+example dot com and sam at example dot com". Nothing outside the tool knows those are addresses
+rather than words, so the fix cannot live in the generic path. Spoken, they become a count:
+*"You have 5 things coming up. First up, Wed 26 Aug, 3:00–4:00 PM, One, with 2 guests. Want me
+to read the rest?"* The screen still names every guest in full; this is a derived version, not a
+rewrite of what is shown.
+
+It takes the result the handler already produced rather than re-deriving from the world: the
+spoken and the displayed version must describe the same answer, and a second read of a calendar
+could legitimately return something different.
+
+**`elaborate` (M14, `safe`)** is the other half of the same decision. Speech is terse, so a
+remainder is held (`core/speechStore.ts` — one slot, 5-minute TTL, in memory, never SQLite for
+the same reason `DraftStore` isn't), and this tool reads it out. It empties the slot: "read them
+out" twice must mean "there's nothing more" the second time, not a repeat. With nothing held it
+raises `UserFixableError`, so the user gets *"There's nothing more to read out."* verbatim
+rather than "Something went wrong". Its own `speakResult` returns the held text **verbatim** —
+letting the generic derivation shorten an already-shortened remainder would let "read me the
+rest" answer with another "want me to read the rest?".
+
+Gated in `buildRegistry` on `speech: true`, a third kind of gate beside Gmail's browser and the
+calendar's account: whether this install can speak at all. With no synthesizer nothing ever
+fills the store, so the tool could only ever refuse, and an unofferable capability does not
+belong on the menu the model chooses from (§8's rule about keeping the miss log honest).
 
 ---
 

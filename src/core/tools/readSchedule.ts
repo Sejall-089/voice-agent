@@ -1,5 +1,7 @@
 import { formatSchedule } from "../calendar/format.ts";
+import { toSpokenLine, toSpokenResult } from "../speech.ts";
 import { optionalString } from "./calendarSupport.ts";
+import type { SpokenText } from "../speech.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
 const DAY_MS = 86_400_000;
@@ -63,4 +65,53 @@ export const readScheduleTool: Tool = {
 
     return formatSchedule(events, zone);
   },
+  // The one tool in M14 that writes its own spoken form, and the case that justified the hook
+  // existing at all (core/types.ts's `Tool.speakResult`).
+  //
+  // The generic derivation would read the head of the list, which means reading attendees'
+  // email addresses out loud — "with alex at example dot com and sam at example dot com" — and
+  // nothing outside this tool knows those are addresses rather than words. Here they become a
+  // count, which is what a person would say, and the count survives into the remainder too, so
+  // "read them out" doesn't reintroduce what the summary carefully avoided.
+  speakResult: (result: string): SpokenText => {
+    const lines = result
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    // Not a listing — this is the "Nothing on your calendar in that window." answer, which is
+    // already one plain sentence. The generic derivation is exactly right for it.
+    if (lines[0] === undefined || !lines[0].startsWith("•")) return toSpokenResult(result);
+
+    const spoken = lines.map(spokenEvent);
+    const first = spoken[0] ?? "";
+    if (spoken.length === 1) return { text: `One thing coming up. ${first}`, remainder: null };
+
+    return {
+      text: `You have ${spoken.length} things coming up. First up, ${first} Want me to read the rest?`,
+      remainder: spoken.slice(1).join(" "),
+    };
+  },
 };
+
+// One formatSchedule line as a person would say it: "Wed 26 Aug, 3:00–4:00 PM, Design review,
+// with 2 guests."
+//
+// This parses output produced a few lines above it, which is a coupling worth naming. It is
+// kept to ONE pattern — the " — with " tail — and that tail is only believed when it actually
+// contains an address, so a meeting whose TITLE happens to contain the same words is spoken
+// whole rather than mangled.
+function spokenEvent(line: string): string {
+  const tail = / — with (.+)$/.exec(line);
+  if (tail === null || tail[1] === undefined || !tail[1].includes("@")) {
+    return toSpokenLine(line);
+  }
+
+  const guests = tail[1]
+    .split(/,\s*|\s+and\s+/)
+    .filter((guest) => guest.trim().length > 0).length;
+
+  return toSpokenLine(
+    `${line.slice(0, tail.index)}${guests === 1 ? ", with one guest" : `, with ${guests} guests`}`,
+  );
+}

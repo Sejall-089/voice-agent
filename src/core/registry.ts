@@ -12,6 +12,7 @@ import { addToPageTool } from "./tools/addToPage.ts";
 import { readScheduleTool } from "./tools/readSchedule.ts";
 import { createEventTool } from "./tools/createEvent.ts";
 import { moveEventTool } from "./tools/moveEvent.ts";
+import { elaborateTool } from "./tools/elaborate.ts";
 
 // The closed-world menu of tools the app can do (spec.md §6). Adding a tool is additive:
 // a handler file plus an entry here. The planner never changes.
@@ -37,6 +38,13 @@ export const notionTools: Tool[] = [addToPageTool];
 // in the environment — so no network call decides what is on the menu.
 export const calendarTools: Tool[] = [readScheduleTool, createEventTool, moveEventTool];
 
+// The speech tool (M14). Gated on the app being able to SPEAK, which is a different kind of
+// gate again: not a browser to drive or an account to reach, but whether this install has a
+// synthesizer configured at all. With no voice nothing ever fills the store `elaborate` reads
+// from, so the tool could only ever refuse — and an unofferable capability does not belong on
+// the menu the model chooses from.
+export const speechTools: Tool[] = [elaborateTool];
+
 export interface RegistryOptions {
   // Whether a Chrome to drive is actually configured.
   gmail: boolean;
@@ -46,6 +54,9 @@ export interface RegistryOptions {
   notion?: boolean;
   // Optional (defaults to not offered) — whether the app has credentials for a Google account.
   calendar?: boolean;
+  // Optional (defaults to not offered) — whether this install can speak (M14). Decided in
+  // main.ts by the same "is it configured?" check the others use, on the piper paths.
+  speech?: boolean;
 }
 
 // The menu for one app run.
@@ -60,13 +71,14 @@ export function buildRegistry(options: RegistryOptions): Tool[] {
   if (options.gmail) tools.push(...gmailTools);
   if (options.notion === true) tools.push(...notionTools);
   if (options.calendar === true) tools.push(...calendarTools);
+  if (options.speech === true) tools.push(...speechTools);
   return tools;
 }
 
 // Look up a tool by the name the LLM proposed. Returns undefined for unknown names,
 // which the planner treats as a hallucinated tool (graceful refusal).
 export function findTool(name: string): Tool | undefined {
-  return [...registry, ...gmailTools, ...notionTools, ...calendarTools].find(
+  return [...registry, ...gmailTools, ...notionTools, ...calendarTools, ...speechTools].find(
     (tool) => tool.name === name,
   );
 }

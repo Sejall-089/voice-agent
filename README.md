@@ -140,10 +140,22 @@ points at the dialog; it never reads the draft aloud.
 on the one gate that must never be bypassed needs its own fail-closed design, so while a
 confirm is open both hotkeys are blocked and the app says so rather than doing nothing.
 
-What exists today: the transform and its tests (26), plus `scripts/tts-recon.mjs`, which
-interrogates a real Piper binary before any wrapper is written to it — the M11 lesson about
-never hand-authoring a fixture, applied to an audio engine. Nothing speaks yet. See `spec.md`
-§2 and §3.
+"Plus 7 more" is only honest if the rest is still somewhere, so it is: a one-slot, five-minute
+scratch store, and an **`elaborate`** tool that reads it out when you say "go on" or "read them
+out". It empties the slot, so asking twice tells you there's nothing more rather than repeating
+itself, and with nothing held it says so plainly instead of failing. It's only on the menu when
+the app can actually speak.
+
+`readSchedule` writes its own spoken form rather than taking the generic one, because the
+generic version would read attendees' email addresses out loud, character by character. Spoken,
+they become a count — *"You have 5 things coming up. First up, Wed 26 Aug, 3 to 4 PM, One, with
+2 guests. Want me to read the rest?"* The screen still names every guest in full.
+
+What exists today: the transform, the store, `elaborate`, and `readSchedule`'s spoken form, with
+42 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
+audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
+and §6's `speakResult`.
 
 ---
 
