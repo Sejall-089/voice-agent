@@ -1,0 +1,232 @@
+import { describe, it, expect } from "vitest";
+import {
+  MAX_SPOKEN_CHARS,
+  MAX_SPOKEN_ITEMS,
+  toSpokenConfirm,
+  toSpokenNarration,
+  toSpokenResult,
+} from "../src/core/speech.ts";
+import { formatSchedule } from "../src/core/calendar/format.ts";
+import type { CalendarEvent } from "../src/core/types.ts";
+
+// M14 task 1. The transform between what the screen shows and what the app says.
+//
+// Tested this hard for the reason M13 wrote down: the half of a voice feature that is ordinary
+// logic gets fixtures from day one, and only the audio itself waits for a live run. The inputs
+// below are REAL producer output wherever possible (formatSchedule, the actual confirm-summary
+// and result shapes the tools emit) rather than strings invented to suit the assertions.
+
+const ZONE = "Asia/Kolkata";
+
+function event(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
+  return {
+    id: "evt1",
+    title: "Design review",
+    start: "2026-08-26T15:00:00+05:30",
+    end: "2026-08-26T16:00:00+05:30",
+    allDay: false,
+    attendees: [],
+    recurring: false,
+    ...overrides,
+  };
+}
+
+const TITLES = [
+  "Event one",
+  "Event two",
+  "Event three",
+  "Event four",
+  "Event five",
+  "Event six",
+  "Event seven",
+  "Event eight",
+  "Event nine",
+  "Event ten",
+];
+
+function schedule(count: number): string {
+  return formatSchedule(
+    TITLES.slice(0, count).map((title) => event({ title })),
+    ZONE,
+  );
+}
+
+describe("toSpokenResult — plain prose", () => {
+  it("says a short result as it stands, holding nothing back", () => {
+    expect(toSpokenResult("Remembered: tone = concise, warm, and direct")).toEqual({
+      text: "Remembered: tone = concise, warm, and direct.",
+      remainder: null,
+    });
+  });
+
+  it("says a URL as its host, not character by character", () => {
+    // openTarget returns `Opened ${url}`. "h t t p s colon slash slash" is unbearable aloud.
+    expect(toSpokenResult("Opened https://github.com/dashboard").text).toBe(
+      "Opened github.com.",
+    );
+  });
+
+  it("never speaks an empty utterance for empty input", () => {
+    expect(toSpokenResult("   \n\n  ")).toEqual({ text: "", remainder: null });
+  });
+
+  it("caps long prose and holds the rest", () => {
+    const long = `${"word ".repeat(80)}end`;
+    const spoken = toSpokenResult(long);
+
+    expect(spoken.text.length).toBeLessThanOrEqual(MAX_SPOKEN_CHARS + 50);
+    expect(spoken.text).toContain("There's more. Want me to read the rest?");
+    expect(spoken.remainder).not.toBeNull();
+    expect(spoken.remainder).toContain("end");
+  });
+});
+
+describe("toSpokenResult — a headline with a body", () => {
+  // This codebase already uses a blank line to mean "headline, then the bulk":
+  // sendMessage returns `Sent to #design-team.\n\n<the whole message>`, sendReply
+  // `Sent.\n\n<the whole reply>`. Reading the message back at the person who just sent it is
+  // noise, so only the headline is spoken.
+  const sent = "Sent to #design-team.\n\nMeeting notes\nWe agreed to ship on Friday.";
+
+  it("speaks only the first paragraph", () => {
+    const spoken = toSpokenResult(sent);
+    expect(spoken.text).toBe(
+      "Sent to design-team. There's more. Want me to read the rest?",
+    );
+  });
+
+  it("holds the body for an elaborate-on-request follow-up", () => {
+    const spoken = toSpokenResult(sent);
+    expect(spoken.remainder).toBe("Meeting notes. We agreed to ship on Friday.");
+  });
+});
+
+describe("toSpokenResult — a list", () => {
+  it("reads the first few events and offers the count of the rest", () => {
+    const spoken = toSpokenResult(schedule(10));
+
+    expect(spoken.text).toContain("Wed 26 Aug, 3:00–4:00 PM, Event one.");
+    expect(spoken.text).toContain(`Plus ${10 - MAX_SPOKEN_ITEMS} more. Want me to read them?`);
+  });
+
+  it("never reads half an event — the offer replaces whole items, not a truncated one", () => {
+    const spoken = toSpokenResult(schedule(10));
+
+    expect(spoken.text).toContain("Event three.");
+    expect(spoken.text).not.toContain("Event four");
+    expect(spoken.remainder).toContain("Event four");
+    expect(spoken.remainder).toContain("Event ten");
+  });
+
+  it("offers nothing when the whole list fits", () => {
+    const spoken = toSpokenResult(schedule(2));
+
+    expect(spoken.text).not.toContain("Plus");
+    expect(spoken.remainder).toBeNull();
+  });
+
+  it("strips the bullet that formatSchedule writes for the screen", () => {
+    expect(schedule(3)).toContain("•"); // the real producer does emit them
+    expect(toSpokenResult(schedule(3)).text).not.toContain("•");
+  });
+});
+
+describe("toSpokenNarration", () => {
+  it("says what is about to happen, with the screen's ellipsis and quotes removed", () => {
+    // createEvent's actual narrate output.
+    const narration = 'Adding "Design review" on Wed 26 Aug, 3:00–4:00 PM to your calendar…';
+
+    expect(toSpokenNarration(narration)).toEqual({
+      text: "Adding Design review on Wed 26 Aug, 3:00–4:00 PM to your calendar.",
+      remainder: null,
+    });
+  });
+
+  it("never offers to read more — by the time anyone could ask, the action has happened", () => {
+    const spoken = toSpokenNarration(`${"word ".repeat(80)}end`);
+
+    expect(spoken.remainder).toBeNull();
+    expect(spoken.text).not.toContain("Want me to read");
+    expect(spoken.text.length).toBeLessThanOrEqual(MAX_SPOKEN_CHARS + 50);
+  });
+});
+
+describe("toSpokenConfirm", () => {
+  // sendReply's real summary shape: the decisive question, a blank line, then the WHOLE draft.
+  const summary =
+    "Send this reply to alex@example.com?\n\n" +
+    "Hi Alex,\n\nThursday works for me. Shall we say 2pm?\n\nSejal";
+
+  it("speaks the question and points at the dialog", () => {
+    expect(toSpokenConfirm(summary).text).toBe(
+      "Send this reply to alex@example.com? Check the dialog.",
+    );
+  });
+
+  it("NEVER speaks the draft body — the dialog is where that is read", () => {
+    const spoken = toSpokenConfirm(summary);
+
+    expect(spoken.text).not.toContain("Thursday");
+    expect(spoken.text).not.toContain("Sejal");
+  });
+
+  it("never offers to read the rest — that would duplicate what is on screen, aloud", () => {
+    expect(toSpokenConfirm(summary).remainder).toBeNull();
+  });
+
+  it("still caps a one-paragraph summary that has no body to split off", () => {
+    // createEvent's summary is a single sentence naming every guest, and a dozen guests make it
+    // long. There is no blank line to cut at, so the character cap has to do the work.
+    const guests = TITLES.map((name) => `${name.replace(" ", ".")}@example.com`).join(", ");
+    const long = `Create "Design review" on Wed 26 Aug, 3:00–4:00 PM and email an invitation to ${guests}?`;
+
+    const spoken = toSpokenConfirm(long);
+    expect(long.length).toBeGreaterThan(MAX_SPOKEN_CHARS);
+    expect(spoken.text.length).toBeLessThanOrEqual(MAX_SPOKEN_CHARS + 50);
+    expect(spoken.text).toContain("Check the dialog.");
+  });
+
+  it("says the question plainly when there is nothing else to see", () => {
+    expect(toSpokenConfirm("Send to design-team?")).toEqual({
+      text: "Send to design-team?",
+      remainder: null,
+    });
+  });
+});
+
+describe("every output is speakable", () => {
+  // The invariant a strict FakeSynthesizer will enforce independently in task 2. Asserted here
+  // too, over real producer output, because this is the file whose job it is to guarantee it.
+  const fixtures = [
+    schedule(10),
+    schedule(1),
+    "Sent to #design-team.\n\nA note with **bold** and `code` in it.",
+    "Opened https://www.github.com/dashboard",
+    'Adding "Design review" on Wed 26 Aug, 3:00–4:00 PM to your calendar…',
+    "# A heading\n\n- one\n- two\n- three",
+    "Nothing on your calendar in that window.",
+    "Updated \"team\": #design → #design-team (v2).",
+    "Sent. 🎉\n\nThanks!",
+  ];
+
+  const forbidden = ["\n", "•", "*", "_", "`", "#", '"', "…", "http"];
+
+  for (const fixture of fixtures) {
+    const label = fixture.split("\n")[0]?.slice(0, 40) ?? "";
+
+    it(`produces one clean line for: ${label}`, () => {
+      for (const spoken of [
+        toSpokenResult(fixture),
+        toSpokenNarration(fixture),
+        toSpokenConfirm(fixture),
+      ]) {
+        expect(spoken.text.length).toBeGreaterThan(0);
+        expect(spoken.text.length).toBeLessThanOrEqual(MAX_SPOKEN_CHARS + 50);
+        for (const char of forbidden) {
+          expect(spoken.text).not.toContain(char);
+          if (spoken.remainder !== null) expect(spoken.remainder).not.toContain(char);
+        }
+      }
+    });
+  }
+});

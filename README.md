@@ -119,6 +119,34 @@ full design.
 
 ---
 
+## Voice output (M14 — in progress, does not speak yet)
+
+The app is being taught to say its narration, confirms, and results out loud instead of only
+showing them. Local synthesis (Piper), no API key, for the same reason voice *input* is local.
+
+The decision worth knowing about is that there are **two representations, not one**. The
+screen keeps exactly the text it shows today, and the spoken line is *derived* from it by pure
+code in `src/core/speech.ts` — flattened to one line, stripped of the bullets and markdown a
+phonemizer would either mispronounce or drop, capped to a couple of sentences, with anything
+held back offered rather than read ("plus 7 more, want me to read them?").
+
+Deriving it rather than writing it twice is what keeps the two from drifting apart. Keeping
+them separate at all is what protects the confirm dialog: that text is deliberately
+*exhaustive* — the whole draft, every attendee by name, never "and 2 others" — because it's
+the last thing between an instruction and something irreversible. Speech says the question and
+points at the dialog; it never reads the draft aloud.
+
+**Answering a confirm by voice is deliberately not part of this.** Putting speech recognition
+on the one gate that must never be bypassed needs its own fail-closed design, so while a
+confirm is open both hotkeys are blocked and the app says so rather than doing nothing.
+
+What exists today: the transform and its tests (26), plus `scripts/tts-recon.mjs`, which
+interrogates a real Piper binary before any wrapper is written to it — the M11 lesson about
+never hand-authoring a fixture, applied to an audio engine. Nothing speaks yet. See `spec.md`
+§2 and §3.
+
+---
+
 ## Running it
 
 ```bash
