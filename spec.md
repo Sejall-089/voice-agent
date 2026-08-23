@@ -724,6 +724,22 @@ screen in the same message is as useless as saying nothing. Saying nothing is wo
 speaker that has quietly stopped working is indistinguishable from one that had nothing to say,
 which is this project's least favourite failure mode (§4a's dead hotkey).
 
+**What the engine wrapper proves, and what it cannot** (`core/synthesizers/PiperSynthesizer.ts`).
+M13's split, applied deliberately this time rather than rediscovered. Request *shaping* — the
+flag spelling piper accepts, what it does with the text, whether the audio is intelligible —
+needs a real binary. Everything that decides **what the user is told when it goes wrong** is
+ordinary branching and is tested (`tests/piper.test.ts`) against a stand-in that reproduces each
+failure on demand: a missing binary names `PIPER_EXE_PATH`, a non-zero exit surfaces the engine's
+own last line, a hang times out, and *three separate shapes* of "exited 0 and produced nothing
+usable" are caught rather than played as silence — M11's rule that a success report is not proof
+anything happened, in a new place.
+
+No failure reason is derived from **parsing stderr**, and that omission is the point: nobody has
+run this engine yet, and a classifier written from imagined output is exactly M10's
+hand-authored selector that had never matched anything. `scripts/tts-recon.mjs`'s Q7 captures the
+real wording for the two most likely setup failures; teaching the classifier to tell "wrong voice
+file" from "wrong flag" is worth doing *after* that, with evidence behind it.
+
 ### Speech is an action, not a method (added in M14)
 
 `LocalAction` gained a fourth kind, `{ kind: "speak" }`, beside `notify`. It is an **action the

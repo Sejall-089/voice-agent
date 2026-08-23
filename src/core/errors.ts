@@ -86,3 +86,65 @@ export function calendarAuthError(reason: CalendarAuthReason): CalendarAuthError
       );
   }
 }
+
+// The four ways the speech engine can fail (M14).
+//
+// Named rather than generic, for M13's reason: "I can't find the engine" and "the engine ran
+// and produced nothing" are different facts with different fixes, and both differ again from a
+// real crash. What is deliberately NOT here is a reason derived from parsing the engine's
+// stderr. M13's lesson was that error CLASSIFICATION is ordinary logic and must be tested — but
+// testing it means having real captured output to test against, and hand-authoring stderr
+// strings from an engine nobody has run yet would repeat M10's mistake of writing a fixture
+// from an assumption. So every reason below is decided by something certain (a spawn failure,
+// an exit code, a timer, the bytes actually on disk), and the engine's own words are surfaced
+// verbatim instead of being interpreted. scripts/tts-recon.mjs now captures real stderr for the
+// common failures; when that lands, this can get more specific with evidence behind it.
+export type SpeechEngineReason =
+  | "missing-binary" // the exe path is wrong — by far the most likely setup mistake
+  | "failed" // it ran and exited non-zero; its own stderr is the explanation
+  | "timeout"
+  | "no-audio"; // exited 0 and produced nothing usable — see M11 on trusting success
+
+export class SpeechEngineError extends UserFixableError {
+  constructor(
+    public readonly reason: SpeechEngineReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SpeechEngineError";
+  }
+}
+
+export function speechEngineError(
+  reason: SpeechEngineReason,
+  detail: string,
+): SpeechEngineError {
+  switch (reason) {
+    case "missing-binary":
+      return new SpeechEngineError(
+        reason,
+        `I couldn't run the speech engine at ${detail} — check PIPER_EXE_PATH in .env.`,
+      );
+    case "failed":
+      // The engine's own words, verbatim, plus the one thing worth checking. Not a diagnosis:
+      // we do not yet know what its stderr looks like, and guessing would send someone to fix
+      // the wrong thing (exactly what M13's blanket "403 means revoked" did).
+      return new SpeechEngineError(
+        reason,
+        `The speech engine failed: ${detail}. Check PIPER_MODEL_PATH points at a .onnx voice.`,
+      );
+    case "timeout":
+      return new SpeechEngineError(
+        reason,
+        `The speech engine didn't finish within ${detail} and was stopped.`,
+      );
+    case "no-audio":
+      // M11's rule, in a new place: an operation that reports success is not proof it did
+      // anything. Notion could save nothing and say it worked; a synthesizer can exit 0 and
+      // leave an empty file, and playing silence would look exactly like the app ignoring you.
+      return new SpeechEngineError(
+        reason,
+        `The speech engine reported success but produced no audio (${detail}).`,
+      );
+  }
+}

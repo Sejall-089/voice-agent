@@ -329,6 +329,8 @@ async function main() {
       `    default env   ${rawMs ?? "-"}ms   ${raw.wav}\n` +
       `    PYTHONUTF8=1  ${utf8Ms ?? "-"}ms   ${utf8.wav}`,
   );
+  await captureFailureText();
+
   if (rawMs !== null && utf8Ms !== null && Math.abs(rawMs - utf8Ms) > 150) {
     console.log(
       `  → The two differ, so the garbling WAS an encoding fault. Spawn piper with ` +
@@ -338,6 +340,35 @@ async function main() {
     console.log(
       `  → No real difference, so the encoding hypothesis is WRONG and the mojibake ` +
         `diagnosis in core/speech.ts needs revisiting. Play both before concluding.`,
+    );
+  }
+}
+
+// Q7 — WHAT DOES IT ACTUALLY SAY WHEN IT FAILS?
+//
+// PiperSynthesizer classifies failures only by things it can be certain of: a spawn error, an
+// exit code, a timer, the bytes on disk. It deliberately does NOT interpret stderr, because
+// nobody has seen this engine's stderr yet, and a classifier written from imagined output is
+// M10's hand-authored fixture all over again — which shipped a selector that had never matched
+// anything and passed every test.
+//
+// This prints the real thing for the two failures most likely to happen during setup. Paste the
+// output into core/errors.ts's note, and only THEN is it worth teaching the classifier to tell
+// "wrong voice file" from "wrong flag" — with evidence behind it.
+async function captureFailureText() {
+  console.log(`\nQ7 real failure output (paste these into core/errors.ts):`);
+
+  const cases = [
+    ["a voice file that does not exist", ["-m", join(OUT_DIR, "no-such-voice.onnx"), "-f", join(OUT_DIR, "q7.wav")]],
+    ["a flag this build may not accept", ["--definitely-not-a-flag"]],
+  ];
+
+  for (const [label, args] of cases) {
+    const result = await run(args, "Anything.", 20_000);
+    console.log(
+      `\n  ${label}\n` +
+        `    exit ${result.code ?? result.error ?? "-"}\n` +
+        `    stderr: ${result.stderr ? result.stderr.split(/\r?\n/).filter(Boolean).slice(-4).join("\n            ") : "(nothing)"}`,
     );
   }
 }

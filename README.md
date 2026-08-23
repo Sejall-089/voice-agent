@@ -171,8 +171,8 @@ rather than at each hotkey. Nothing is lost when it's cut off, because the full 
 screen — speech is the disposable channel.
 
 What exists today: the transform, the store, `elaborate`, `readSchedule`'s spoken form, the
-planner wiring, the queue and barge-in machine, and the fake engine that guards it, with 97
-tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+planner wiring, the queue and barge-in machine, the fake engine that guards it, and the Piper
+wrapper — with 114 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
 wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
 audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
 and §6's `speakResult`.
