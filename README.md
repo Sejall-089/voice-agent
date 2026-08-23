@@ -151,8 +151,14 @@ generic version would read attendees' email addresses out loud, character by cha
 they become a count — *"You have 5 things coming up. First up, Wed 26 Aug, 3 to 4 PM, One, with
 2 guests. Want me to read the rest?"* The screen still names every guest in full.
 
+Dates and times are rewritten for the ear in the same place — "Wed 26 Aug, 3:00–4:00 PM" is said
+as "Wednesday 26 August, 3 to 4 PM". The abbreviations are read as ordinary words otherwise
+("wed", "aug"), and the en dash is worse than that: recon caught Piper receiving it as mojibake
+and voicing the mis-decoded bytes, so nothing but ASCII reaches the engine until the wrapper's
+encoding is proven.
+
 What exists today: the transform, the store, `elaborate`, and `readSchedule`'s spoken form, with
-42 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
+52 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
 wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
 audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
 and §6's `speakResult`.

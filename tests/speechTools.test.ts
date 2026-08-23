@@ -175,7 +175,7 @@ describe("readSchedule.speakResult", () => {
     );
 
     expect(spoken.text).toBe(
-      "You have 5 things coming up. First up, Wed 26 Aug, 3:00–4:00 PM, One. " +
+      "You have 5 things coming up. First up, Wednesday 26 August, 3 to 4 PM, One. " +
         "Want me to read the rest?",
     );
   });
@@ -200,6 +200,20 @@ describe("readSchedule.speakResult", () => {
     );
   });
 
+  it("says the time instead of reading it, and lets no dash reach the engine", () => {
+    // The recon finding this exists for: the en dash in "3:00–4:00 PM" did not become "to",
+    // it arrived at Piper as mojibake and came back as garbled non-English sounds.
+    const spoken = speak(["One", "Two"].map((title) => event({ title })));
+    const said = `${spoken.text} ${spoken.remainder ?? ""}`;
+
+    expect(said).toContain("3 to 4 PM");
+    expect(said).not.toContain("–");
+    expect(said).not.toContain("—");
+    // And the abbreviations, which are read as words: "wed", "aug".
+    expect(said).toContain("Wednesday 26 August");
+    expect(said).not.toContain("Wed 26 Aug");
+  });
+
   it("holds every event except the one it read", () => {
     const spoken = speak(["One", "Two", "Three"].map((title) => event({ title })));
 
@@ -211,7 +225,7 @@ describe("readSchedule.speakResult", () => {
   it("does not offer a rest that does not exist", () => {
     const spoken = speak([event({ title: "Only one" })]);
 
-    expect(spoken.text).toBe("One thing coming up. Wed 26 Aug, 3:00–4:00 PM, Only one.");
+    expect(spoken.text).toBe("One thing coming up. Wednesday 26 August, 3 to 4 PM, Only one.");
     expect(spoken.remainder).toBeNull();
   });
 

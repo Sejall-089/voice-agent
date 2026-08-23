@@ -94,13 +94,17 @@ export const readScheduleTool: Tool = {
   },
 };
 
-// One formatSchedule line as a person would say it: "Wed 26 Aug, 3:00–4:00 PM, Design review,
-// with 2 guests."
+// One formatSchedule line as a person would SAY it: the written
+// "• Wed 26 Aug, 3:00–4:00 PM — Design review — with alex@example.com and sam@example.com"
+// becomes "Wednesday 26 August, 3 to 4 PM, Design review, with 2 guests."
 //
-// This parses output produced a few lines above it, which is a coupling worth naming. It is
-// kept to ONE pattern — the " — with " tail — and that tail is only believed when it actually
-// contains an address, so a meeting whose TITLE happens to contain the same words is spoken
-// whole rather than mangled.
+// Only the GUEST LIST is this tool's business. The date, the time range and the bullet are all
+// handled by core/speech.ts's generic cleaner, because `createEvent`'s narration and confirm
+// dialog carry exactly the same written date and needed exactly the same fix — a schedule is
+// not a special case, it was just the first place the problem was noticed.
+//
+// The one pattern read here fails SAFE: a " — with " tail is only believed when it actually
+// contains an address, so a meeting TITLED "Catch up — with the design team" is spoken whole.
 function spokenEvent(line: string): string {
   const tail = / — with (.+)$/.exec(line);
   if (tail === null || tail[1] === undefined || !tail[1].includes("@")) {

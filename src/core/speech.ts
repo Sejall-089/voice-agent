@@ -180,8 +180,16 @@ function flatten(text: string): string {
 }
 
 // The actual cleaning, and the reason a strict fake can catch a bug here: everything removed
-// below is something a phonemizer either voices as a word ("asterisk", "hash") or silently
-// drops, and both outcomes are wrong in a demo.
+// or rewritten below is something a phonemizer either voices as a word ("asterisk", "hash"),
+// silently drops, or — the dashes and curly quotes — GARBLES, because the bytes are being
+// mis-decoded somewhere in the engine's stdin path (see the dash rule).
+//
+// Dates and times are rewritten here rather than by the tool that produced them. That was the
+// other way round for one commit: `calendar/format.ts` had its own `speakableWhen`, and
+// `readSchedule` had to split its formatted line apart to apply it. Recon killed that design by
+// showing the problem was not calendar-shaped at all — `createEvent`'s narration and its confirm
+// dialog run the same `formatWhen` output through the same engine, and would have been garbled
+// in exactly the same way while only the schedule listing was fixed. One cleaner, every path.
 function speakable(line: string): string {
   return (
     line
@@ -194,10 +202,62 @@ function speakable(line: string): string {
       .replace(/\bhttps?:\/\/([^\s/]+)(\/\S*)?/gi, (_all, host: string) =>
         String(host).replace(/^www\./i, ""),
       )
-      // A SPACED dash is a written pause; a comma is how it is said. Unspaced dashes are left
-      // alone on purpose — "3:00–4:00 PM" means "3 to 4", and a comma there would be a lie.
-      // What a phonemizer actually does with that en dash is an open recon question.
+      // "Wed 26 Aug" is read as "wed twenty six aug" — two of those are ordinary English words
+      // and neither is the one meant. Anchored to the full weekday-day-month shape `formatDay`
+      // emits, which is what makes it safe to apply to arbitrary text: a bare "Sun" or "Mar" in
+      // a sentence is left alone, because "the Sun is out" must not become "the Sunday is out".
+      .replace(
+        /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\b/g,
+        (all, day: string, date: string, month: string) => {
+          const weekday = WEEKDAYS[day];
+          const name = MONTHS[month];
+          return weekday === undefined || name === undefined ? all : `${weekday} ${date} ${name}`;
+        },
+      )
+      // A RANGE is said "to" — the one context where a dash's meaning is unambiguous, and so
+      // the only one that gets a word rather than a comma.
+      //
+      // All three rules below match the EN dash (–) and deliberately not the em dash (—),
+      // because calendar/format.ts uses the two for different jobs and the distinction turns
+      // out to be load-bearing: `formatWhen` joins the ends of a range with an en dash, while
+      // `formatSchedule` separates a time from its title, and a title from its guests, with an
+      // em dash. Matching both turned "3 to 4 PM — Design review" into "3 to 4 PM to Design
+      // review". An em dash is a field separator here, so it falls through to the comma rule.
+      .replace(
+        /(\d{1,2}(?::\d{2})?(?:\s*[AP]M)?)\s*–\s*(\d{1,2}(?::\d{2})?\s*[AP]M)/g,
+        "$1 to $2",
+      )
+      // "3:00" is said "three", not "three oh oh". Half past keeps its minutes.
+      .replace(/\b(\d{1,2}):00\b/g, "$1")
+      // The other two range shapes `formatWhen` produces: a dash straight after a meridiem
+      // (a meeting crossing midnight) or after a day and month (a multi-day all-day event).
+      .replace(/\b([AP]M)\s*–\s*/g, "$1 to ")
+      .replace(
+        /(\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December))\s*–\s*/g,
+        "$1 to ",
+      )
+      // Parentheses are not voiced; a comma is how the aside is actually said.
+      .replace(/\s*\(([^)]*)\)/g, ", $1")
+      // A SPACED dash is a written pause; a comma is how it is said.
       .replace(/\s+[–—-]\s+/g, ", ")
+      // And every REMAINING en or em dash, which the rules above leave behind. This was
+      // originally the opposite rule — unspaced dashes were KEPT, on the theory that
+      // "3:00–4:00 PM" would be voiced as "3 to 4". Recon proved that false in a way worth
+      // recording: Piper does not mispronounce the character, it receives it as MOJIBAKE and
+      // says the pieces. U+2013 is the bytes E2 80 93, and read as Windows-1252 that is
+      // "â" + "€" + a quote — which is exactly the "a circumflex, euros" heard on the probe.
+      // The encoding is the synthesizer's own bug to fix (spawn with PYTHONUTF8=1 and prove
+      // it); this line is the belt to those braces, because a producer that forgets is
+      // otherwise one character away from garbling a whole utterance.
+      .replace(/[–—]/g, ", ")
+      // The rest of the typographic punctuation this codebase and the model can emit, mapped to
+      // ASCII for the same reason. NOT letters: mangling a name like "José" is worse than
+      // risking its pronunciation, and the encoding fix is what actually solves that.
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, "")
+      .replace(/ /g, " ")
+      // The ellipsis every `narrate` string ends with ("Adding ... to your calendar…").
+      .replace(/…/g, ".")
       // Emphasis, code ticks, and stray hashes (including "#design-team", which reads better
       // as "design team" than as "hash design team").
       .replace(/[*_`#]/g, "")
@@ -205,15 +265,41 @@ function speakable(line: string): string {
       .replace(/\p{Extended_Pictographic}/gu, " ")
       // Straight quotes around a title add nothing spoken and can be voiced as "quote".
       .replace(/["]/g, "")
-      // The ellipsis every `narrate` string ends with ("Adding ... to your calendar…"). A stop
-      // is what it means out loud, and how a phonemizer voices the single character is exactly
-      // the sort of thing recon has not answered yet.
-      .replace(/…/g, ".")
       .replace(/\s+/g, " ")
       .replace(/\s+([,.?!])/g, "$1")
+      .replace(/(,\s*){2,}/g, ", ")
+      .replace(/^[,\s]+/, "")
       .trim()
   );
 }
+
+const WEEKDAYS: Record<string, string> = {
+  Mon: "Monday",
+  Tue: "Tuesday",
+  Wed: "Wednesday",
+  Thu: "Thursday",
+  Fri: "Friday",
+  Sat: "Saturday",
+  Sun: "Sunday",
+};
+
+// "Sep" and "Sept" are both real Intl en-GB output depending on the ICU version in the runtime,
+// so both are listed rather than assuming this machine's.
+const MONTHS: Record<string, string> = {
+  Jan: "January",
+  Feb: "February",
+  Mar: "March",
+  Apr: "April",
+  May: "May",
+  Jun: "June",
+  Jul: "July",
+  Aug: "August",
+  Sep: "September",
+  Sept: "September",
+  Oct: "October",
+  Nov: "November",
+  Dec: "December",
+};
 
 // Give a fragment a terminal stop, so joined items are spoken as separate sentences instead of
 // running together into one breathless line.

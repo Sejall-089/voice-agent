@@ -3,10 +3,11 @@ import {
   MAX_SPOKEN_CHARS,
   MAX_SPOKEN_ITEMS,
   toSpokenConfirm,
+  toSpokenLine,
   toSpokenNarration,
   toSpokenResult,
 } from "../src/core/speech.ts";
-import { formatSchedule } from "../src/core/calendar/format.ts";
+import { formatSchedule, formatWhen } from "../src/core/calendar/format.ts";
 import type { CalendarEvent } from "../src/core/types.ts";
 
 // M14 task 1. The transform between what the screen shows and what the app says.
@@ -66,6 +67,25 @@ describe("toSpokenResult — plain prose", () => {
     );
   });
 
+  it("turns a stray dash into a comma rather than letting it reach the engine", () => {
+    // Recon's most expensive finding. This was originally the opposite rule — unspaced dashes
+    // were KEPT, on the theory that "3:00–4:00 PM" would be voiced as "3 to 4". It is not:
+    // Piper receives U+2013 as mojibake (bytes E2 80 93, read as Windows-1252: "â" + "€") and
+    // says the pieces. A range that means "to" now says so at the producer, where the meaning
+    // is known (calendar/format.ts's speakableWhen); everywhere else a comma is the safe read.
+    expect(toSpokenResult("Standup 9:00–9:15 AM").text).toBe("Standup 9 to 9:15 AM.");
+    expect(toSpokenResult("A — B").text).toBe("A, B.");
+  });
+
+  it("leaves letters alone, accents included", () => {
+    // Deliberately NOT stripped: mangling a real name is worse than risking its pronunciation,
+    // and the actual fix for non-ASCII is the synthesizer's encoding (spawn with PYTHONUTF8=1
+    // and prove it), not silent deletion here.
+    expect(toSpokenResult("Remembered: manager = José").text).toBe(
+      "Remembered: manager = José.",
+    );
+  });
+
   it("never speaks an empty utterance for empty input", () => {
     expect(toSpokenResult("   \n\n  ")).toEqual({ text: "", remainder: null });
   });
@@ -105,7 +125,7 @@ describe("toSpokenResult — a list", () => {
   it("reads the first few events and offers the count of the rest", () => {
     const spoken = toSpokenResult(schedule(10));
 
-    expect(spoken.text).toContain("Wed 26 Aug, 3:00–4:00 PM, Event one.");
+    expect(spoken.text).toContain("Wednesday 26 August, 3 to 4 PM, Event one.");
     expect(spoken.text).toContain(`Plus ${10 - MAX_SPOKEN_ITEMS} more. Want me to read them?`);
   });
 
@@ -137,7 +157,7 @@ describe("toSpokenNarration", () => {
     const narration = 'Adding "Design review" on Wed 26 Aug, 3:00–4:00 PM to your calendar…';
 
     expect(toSpokenNarration(narration)).toEqual({
-      text: "Adding Design review on Wed 26 Aug, 3:00–4:00 PM to your calendar.",
+      text: "Adding Design review on Wednesday 26 August, 3 to 4 PM to your calendar.",
       remainder: null,
     });
   });
@@ -229,4 +249,65 @@ describe("every output is speakable", () => {
       }
     });
   }
+});
+
+// The dates and times, said rather than written. Every input is REAL formatWhen output, so this
+// cannot drift from what the screen actually shows.
+//
+// This lives here rather than beside formatWhen for a reason worth keeping: it was written there
+// first, as a calendar-specific `speakableWhen`, and that was wrong. `createEvent`'s narration
+// and its confirm dialog carry the same written date through the same engine, so fixing only the
+// schedule listing would have left the two places that matter MOST still garbled. One cleaner,
+// every path.
+describe("dates and times, spoken", () => {
+  it("says a same-day range as a range", () => {
+    expect(toSpokenLine(formatWhen(event(), ZONE))).toBe("Wednesday 26 August, 3 to 4 PM.");
+  });
+
+  it("keeps both meridiems when they differ", () => {
+    const lunch = event({
+      start: "2026-08-26T11:00:00+05:30",
+      end: "2026-08-26T13:00:00+05:30",
+    });
+
+    expect(toSpokenLine(formatWhen(lunch, ZONE))).toBe("Wednesday 26 August, 11 AM to 1 PM.");
+  });
+
+  it("keeps the minutes when there are any, across midnight", () => {
+    const late = event({
+      start: "2026-08-26T23:30:00+05:30",
+      end: "2026-08-27T00:30:00+05:30",
+    });
+
+    expect(toSpokenLine(formatWhen(late, ZONE))).toBe(
+      "Wednesday 26 August, 11:30 PM to Thursday 27 August, 12:30 AM.",
+    );
+  });
+
+  it("says an all-day event without the parentheses", () => {
+    const allDay = event({ allDay: true, start: "2026-08-26", end: "2026-08-26" });
+
+    expect(toSpokenLine(formatWhen(allDay, ZONE))).toBe("Wednesday 26 August, all day.");
+  });
+
+  it("says a multi-day all-day event as a range", () => {
+    const holiday = event({ allDay: true, start: "2026-08-26", end: "2026-08-27" });
+
+    expect(toSpokenLine(formatWhen(holiday, ZONE))).toBe(
+      "Wednesday 26 August to Thursday 27 August, all day.",
+    );
+  });
+
+  it("expands the abbreviation only in a real date, never in a sentence", () => {
+    // The rule is anchored to the whole weekday-day-month shape formatDay emits. A bare "Sun"
+    // or "Mar" in ordinary text is a word, and turning "the Sun is out" into "the Sunday is
+    // out" would be a worse bug than the one this fixes.
+    expect(toSpokenLine("The Sun is out and Mar is here")).toBe("The Sun is out and Mar is here.");
+    expect(toSpokenLine("Sat 1 Mar")).toBe("Saturday 1 March.");
+  });
+
+  it("leaves what the SCREEN shows completely alone", () => {
+    // Two representations, one source: this is a derivation, not a rewrite.
+    expect(formatWhen(event(), ZONE)).toBe("Wed 26 Aug, 3:00–4:00 PM");
+  });
 });

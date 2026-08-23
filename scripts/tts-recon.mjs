@@ -289,7 +289,7 @@ async function main() {
   console.log(
     `\nQ5 needs ears. Play these and write down what you hear:\n` +
       ["bullet", "markdown", "ellipsis", "en_dash"]
-        .map((n) => `    ${by(n)?.wav}`)
+        .map((n) => `    ${by(n)?.result.wav ?? "(not written)"}`)
         .join("\n") +
       `\n  The first three should confirm WHY core/speech.ts strips them. The fourth decides ` +
       `whether "3:00–4:00 PM" survives as spoken text: if it is not voiced as "three to four", ` +
