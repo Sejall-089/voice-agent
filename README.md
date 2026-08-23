@@ -35,6 +35,11 @@ can now act *inside* another app, where most actions have no undo at all: `safe`
 run; `caution` runs but **says what it is about to do first**; `dangerous` stops for an explicit
 yes, every time.
 
+Since **M13** a tier can also depend on the *arguments* rather than only on which tool was picked
+— a calendar event with guests emails them the moment it is created, while the same event without
+guests touches nobody. When that classifier can't reach an answer it **escalates**: "we couldn't
+tell" resolves to *ask*, never to *go ahead*.
+
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for diagrams and [`spec.md`](spec.md) for the decisions.
 
 ---
@@ -275,7 +280,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (242 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (257 tests): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, and jsdom

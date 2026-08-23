@@ -477,7 +477,8 @@ Given the user's instruction and captured context, run exactly this sequence:
    logged action (`ActionLog.getLast()`), scoped strictly to resolving a correction or
    pronoun in the CURRENT instruction ("no, I meant..."). This is not conversation
    history — it's one bounded fact, and it's still exactly one tool call per
-   instruction; the planner never chains actions on its own.
+   instruction; the planner never chains actions on its own. **The current local time**
+   goes in too (M13) — see "The clock in the prompt" below.
 2. **LLM picks a tool** — call the configured provider (§3, `LLM_PROVIDER`) with
    tool-calling. Expect a `tool_call`:
    `{ name, input }`. The model may also decline (return only text).
@@ -487,8 +488,12 @@ Given the user's instruction and captured context, run exactly this sequence:
    (e.g. "the team", "my dashboard", "the usual tone"), call `memory.resolve()`
    (§7) to replace it with a concrete value. If a required reference can't be
    resolved, ask the user (via showInput) or refuse gracefully.
-5. **Validate** — all required args present and concrete? What is the tool's `risk`
-   tier (§6)?
+5. **Validate** — all required args present and concrete?
+5b. **Resolve the tier** — what does *this* call cost (§6)? Usually the constant the tool
+   declares; for a tool with a `RiskPolicy` it is worked out from the resolved arguments,
+   and may read the world to do it. Resolved **once** and reused by both gates below —
+   asking twice would let the two answers disagree, which is a hole in the gate rather
+   than a slow path.
 6. **Gate on the tier** — two steps, both driven by the tier alone (M10):
    - **6a. Narrate** — a `caution` tool announces what it is about to do, via
      `executeAction({ kind: "notify" })`, *before* the handler runs. It is not asked,
@@ -504,6 +509,33 @@ Given the user's instruction and captured context, run exactly this sequence:
 Key rule: **the LLM proposes, the planner disposes.** Nothing `dangerous` runs
 without the registry check + validation + confirm gate. This separation is the most
 important design decision in the app.
+
+### The clock in the prompt (added in M13)
+
+Through M12 the prompt carried **no current date or time at all**, and nothing missed it:
+every tool operated on text the user had already selected or on a page already open, so
+the model never had to know what day it was. Calendar breaks that. A calendar tool takes an
+exact instant, and the thing that turns "tomorrow at 3" into one is the **model**, at the
+planning layer — which it cannot do if it does not know what today is.
+
+So `renderRequest` (`core/llm/prompt.ts`) now opens with a standing fact:
+
+```
+Current time: 2026-08-23T15:18:29+05:30 (Sunday, Asia/Kolkata)
+```
+
+The **offset** is the load-bearing part. Without it "15:00" is not a point in time, and a
+zone name alone would leave the model doing timezone arithmetic in its head. The weekday is
+there for "next Tuesday".
+
+This is the user's **local** zone — what they mean when they say "3pm". It is not
+necessarily the calendar's own zone, which is read from the calendar itself and used for
+*display* (§6c, `CalendarSurface.calendarTimeZone`). They are usually the same and must not
+be assumed to be.
+
+`now` and `zone` are **defaulted arguments**, following `DraftStore.get(now = Date.now())`:
+production passes nothing and gets the real clock; tests pass a fixed instant and get a
+deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ---
 
@@ -575,6 +607,48 @@ Two things make this more than a rename:
   be identified is treated as dangerous. Here that lives one level down, in `gmailScript.ts` —
   a control that matches zero elements *or more than one* is never clicked at all. If we cannot
   say which button this is, we do not press it.
+
+### Argument-dependent tiers (added in M13)
+
+Through M12 a tier was a property of the **tool**: `sendReply` was `dangerous` whether the
+reply was one line or ten, because sending is sending. Calendar breaks that, for a specific
+structural reason worth stating rather than assuming.
+
+Gmail could gate on `sendReply` alone because drafting and sending are **separate moments** —
+so `draftReply`/`reviseDraft` stayed `caution` and only the send needed a confirm. A calendar
+event has no equivalent later step: attendees are emailed the instant it is **created or
+moved**. There is no "send" left to gate. So the same tool is routine when the event is yours
+alone and high-stakes when it puts a meeting invite in someone else's inbox, and the only
+thing separating the two is the **arguments of that particular call**.
+
+A tool's `risk` may therefore be either a plain tier (still the common case — every tool
+built before M13 is untouched) or a `RiskPolicy`:
+
+```ts
+interface RiskPolicy<Args, Deps> {
+  readonly tiers: readonly Risk[];              // every tier this could ever return
+  resolve(args: Args, deps: Deps): Risk | Promise<Risk>;
+}
+```
+
+Three things make this safe rather than a loophole:
+
+- **`tiers` is declared up front.** Registry-wide invariants are statements about the whole
+  menu — "anything that *can* be dangerous has a `confirmSummary`" — and they have to be
+  answerable **without calling anything**. Discovering tiers at runtime would make them
+  uncheckable. `tests/risk.test.ts` reads `declaredTiers()` for exactly this reason, and
+  `createEvent`/`moveEvent` are the first tools that need **both** `narrate` *and*
+  `confirmSummary`, because either tier is reachable.
+- **Escalate, never de-escalate.** If `resolve` throws — calendar unreachable, token expired,
+  event vanished — or returns a tier it never declared, the planner takes the **worst** tier
+  declared. A classifier that fails must not be able to talk the planner *out* of a gate: the
+  failure mode of "we could not tell" has to be "ask", not "go ahead". In practice the
+  escalation lands on `dangerous`, `confirmSummary` then fails on the same broken read, and
+  the planner refuses outright — fail-closed at both steps.
+- **`resolve` may do SAFE work only.** It runs *before* any gate has fired, so it must never
+  change the world it is classifying — the same rule `confirmSummary` got in M10 and
+  `narrate` got in M11, widened for the same reason: `moveEvent` has to look up whether the
+  event it would move has guests, and that fact lives in the calendar, not in the arguments.
 
 ### `confirmSummary` (added in M5, widened in M10)
 

@@ -9,7 +9,7 @@ import type {
   OSShell,
 } from "../main/shell/OSShell.ts";
 import type { DraftStore } from "./draft.ts";
-import type { Risk } from "./risk.ts";
+import type { ToolRisk } from "./risk.ts";
 
 export type { CapturedContext, LocalAction };
 
@@ -198,7 +198,12 @@ export interface Tool extends ToolSchema {
   // `irreversible: boolean` — see that file for why a boolean stopped being enough once tools
   // could act inside another app's GUI. The planner reads it generically: it never knows which
   // tool it is gating.
-  risk: Risk;
+  //
+  // Usually a plain tier, exactly as it has been since M10. M13 widened it to allow a
+  // `RiskPolicy` — a tool whose cost depends on the ARGUMENTS of the particular call rather
+  // than on the tool itself (a calendar event with guests emails them; the same event without
+  // guests touches nobody). See core/risk.ts for why calendar needed this and Gmail did not.
+  risk: ToolRisk<ToolInput, ToolDeps>;
   handler: ToolHandler;
   // Whether the planner should run this tool's args through memory's reference resolution.
   // Defaults to true. Memory-WRITING tools set this false: their args are literals to store

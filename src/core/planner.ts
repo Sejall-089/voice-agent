@@ -5,7 +5,7 @@ import { UnavailableSender } from "./senders/SlackSender.ts";
 import { UnavailableGmail } from "./gmail/UnavailableGmail.ts";
 import { UnavailableNotion } from "./notion/UnavailableNotion.ts";
 import { InMemoryDraftStore } from "./draft.ts";
-import { needsConfirm, needsNarration } from "./risk.ts";
+import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
 import type { DraftStore } from "./draft.ts";
 import type {
   ActionLog,
@@ -110,6 +110,20 @@ export class Planner {
       draft: this.draft,
     };
 
+    // 6. What does THIS call cost? Through M12 the answer was a constant the tool carried, and
+    //    the two gates below each read it straight off `tool.risk`. M13 made the tier able to
+    //    depend on the arguments (a calendar event with guests emails them; the same event
+    //    without guests touches nobody), so it is worked out here instead — after memory
+    //    resolution and validation, and with `deps`, because a resolver may have to READ the
+    //    world to classify the action (moveEvent has to look up whether the event it would move
+    //    has guests). Same rule as the two gates it feeds: SAFE work only.
+    //
+    //    Resolved ONCE and reused by both gates on purpose. Asking twice would let the two
+    //    answers disagree — narrating an action and then not confirming it — which is a hole in
+    //    the gate rather than a slow path. A resolver that fails escalates rather than
+    //    de-escalates; see resolveRisk in core/risk.ts.
+    const tier = await resolveRisk(tool.risk, args, deps);
+
     // 6a. Narration gate — a `caution` tool runs on its own, but must SAY what it is about to
     //     do first (core/risk.ts). Before M10 nothing needed this, because nothing acted inside
     //     another app; opening someone's reply box has no undo, so the announcement is the
@@ -121,7 +135,7 @@ export class Planner {
     //     action's concrete facts (which Notion page this would write to) live in the app
     //     being acted on, not in the model's arguments. Same failure handling as the confirm
     //     gate below: if the tool cannot even say what it is about to do, nothing runs.
-    if (needsNarration(tool.risk) && tool.narrate) {
+    if (needsNarration(tier) && tool.narrate) {
       let narration: string;
       try {
         narration = await tool.narrate(args, deps);
@@ -132,12 +146,12 @@ export class Planner {
       await this.shell.executeAction({ kind: "notify", payload: narration });
     }
 
-    // 6b. Confirm gate — `dangerous` tools must pass shell.confirm() before running.
+    // 6b. Confirm gate — a call that resolved to `dangerous` must pass shell.confirm() first.
     //    The summary is built from the RESOLVED args (step 4 ran above) and may READ the world
     //    through deps, so the user always approves the concrete action ("Send to #design-team?",
     //    the actual text sitting in the reply box), never the vague one they typed. Generic: the
     //    planner asks the tool how to describe itself; it never knows which tool.
-    if (needsConfirm(tool.risk)) {
+    if (needsConfirm(tier)) {
       let summary: string;
       try {
         summary = tool.confirmSummary

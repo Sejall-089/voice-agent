@@ -20,15 +20,67 @@ export const CHOOSE_SYSTEM = [
   "ONLY to resolve a correction or a pronoun reference in the CURRENT instruction ('no, I",
   "meant...', 'actually...', 'that's wrong'). Otherwise ignore it and treat the current",
   "instruction as an independent request.",
+  "You are told the current local time. When a tool asks for an exact time, use it to turn what",
+  "the user said ('tomorrow at 3', 'next Tuesday') into a concrete one — never guess a date.",
 ].join(" ");
 
+// The user's local zone, resolved from the runtime. Reading it here rather than in `/core`'s
+// callers keeps it a defaulted argument everywhere it is used, so tests stay deterministic.
+function localZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+// "2026-08-23T15:18:29+05:30 (Sunday, Asia/Kolkata)".
+//
+// M13. Until now the prompt carried no clock at all, which was fine while every tool operated
+// on text the user had already selected — nothing needed to know what day it was. A calendar
+// tool takes an exact instant, and the model is the thing that turns "tomorrow at 3" into one,
+// so it has to be told. The OFFSET is the load-bearing part: without it "15:00" is not a point
+// in time, and the zone name alone would make the model do timezone arithmetic in its head.
+//
+// This is the user's LOCAL zone — what they mean when they say "3pm" — which is not necessarily
+// the calendar's own zone (that one is read from the calendar and used for DISPLAY; see
+// CalendarSurface.calendarTimeZone).
+export function renderNow(now: number, zone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone,
+    weekday: "long",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "longOffset",
+  }).formatToParts(new Date(now));
+
+  const get = (type: string): string =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  // "GMT+05:30" → "+05:30"; plain "GMT" (i.e. UTC) → "+00:00".
+  const offset = get("timeZoneName").replace(/^GMT/, "") || "+00:00";
+  const date = `${get("year")}-${get("month")}-${get("day")}`;
+  const time = `${get("hour")}:${get("minute")}:${get("second")}`;
+
+  return `${date}T${time}${offset} (${get("weekday")}, ${zone})`;
+}
+
 // Serialize the instruction + captured context (+ previous turn, if any) into the user message.
+//
+// `now` and `zone` are DEFAULTED arguments rather than reads inside the body, following
+// `DraftStore.get(now = Date.now())`: production passes nothing and gets the real clock, tests
+// pass a fixed instant and get a deterministic prompt.
 export function renderRequest(
   instruction: string,
   context: CapturedContext,
   previousTurn: ActionLogEntry | null,
+  now: number = Date.now(),
+  zone: string = localZone(),
 ): string {
   const parts: string[] = [];
+  // First, as a standing fact about the world rather than as part of the request.
+  parts.push(`Current time: ${renderNow(now, zone)}\n`);
   if (previousTurn) {
     parts.push(`${renderPreviousTurn(previousTurn)}\n`);
   }
