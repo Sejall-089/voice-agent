@@ -302,6 +302,59 @@ describe("moveEvent", () => {
     expect(shell.confirmMessages[0]).toContain("4:00–5:00 PM");
   });
 
+  // The live bug, reported verbatim: "move the test one meeting to 8pm" searched Google for
+  // `the test one meeting` and found nothing, because the event is called "test one". Google's
+  // `q=` ANDs its terms, so the two words added to make an English sentence became two more
+  // things the event had to contain.
+  it("finds an event when the request is phrased as a sentence", async () => {
+    const calendar = new FakeCalendar({ events: [sampleEvent({ title: "test one" })] });
+    const { planner: p } = planner(calendar, {
+      name: "moveEvent",
+      input: { event: "the test one meeting", newStart: "2026-08-26T20:00:00+05:30" },
+    });
+
+    const outcome = await p.run("move the test one meeting to 8pm");
+
+    expect(outcome.status).toBe("ok");
+    expect(calendar.moved).toHaveLength(1);
+    expect(calendar.moved[0]?.start).toBe("2026-08-26T20:00:00+05:30");
+  });
+
+  it("tries the exact phrasing first, and stops there when it works", async () => {
+    // An event genuinely called "Team meeting" must be found by asking for "team meeting" —
+    // the loosening must never get a chance to strip a word that is part of the real title.
+    const calendar = new FakeCalendar({ events: [sampleEvent({ title: "Team meeting" })] });
+    const { planner: p } = planner(calendar, {
+      name: "moveEvent",
+      input: { event: "team meeting", newStart: "2026-08-26T20:00:00+05:30" },
+    });
+
+    const outcome = await p.run("move team meeting to 8");
+
+    expect(outcome.status).toBe("ok");
+    // The loosened term was never even asked for — "meeting" is part of this title, and
+    // stripping it would have searched for something the user did not mean.
+    expect(new Set(calendar.queries)).toEqual(new Set(["team meeting"]));
+    expect(calendar.moved).toHaveLength(1);
+  });
+
+  it("says what it actually searched for when it still finds nothing", async () => {
+    const calendar = new FakeCalendar({ events: [sampleEvent({ title: "test one" })] });
+    const { planner: p } = planner(calendar, {
+      name: "moveEvent",
+      input: { event: "the retro meeting", newStart: "2026-08-26T20:00:00+05:30" },
+    });
+
+    const outcome = await p.run("move the retro meeting to 8");
+
+    expect(outcome.status).toBe("refused");
+    // Both attempts named. "I couldn't find X" while having quietly searched for something
+    // else is what makes this class of bug unfindable from the outside.
+    expect(outcome.result).toContain('"the retro meeting"');
+    expect(outcome.result).toContain('"retro"');
+    expect(calendar.moved).toHaveLength(0);
+  });
+
   it("refuses when nothing matches, rather than picking something", async () => {
     const calendar = new FakeCalendar({ events: [sampleEvent()] });
     const { planner: p } = planner(calendar, {

@@ -29,6 +29,9 @@ export class FakeCalendar implements CalendarSurface {
   public readonly calls: string[] = [];
   public created: EventDraft[] = [];
   public moved: { id: string; start: string; end: string }[] = [];
+  // Every search term actually sent, in order. What the app asks Google for is not the same
+  // thing as what the user said, and the gap between them was a real bug.
+  public readonly queries: string[] = [];
 
   private events: CalendarEvent[];
   private readonly zone: string;
@@ -87,16 +90,30 @@ export class FakeCalendar implements CalendarSurface {
 
   findEvent(query: string, _from: string, _to: string): Promise<CalendarEvent[]> {
     this.note("findEvent");
+    this.queries.push(query);
     try {
       this.guard();
     } catch (error) {
       return Promise.reject(error);
     }
-    // Deliberately dumb substring matching. The real implementation asks Google to search; what
-    // matters for the tools is only how many came back, never how they were found.
-    const needle = query.trim().toLowerCase();
+    // Mirrors the ONE thing about Google's `q=` that the tools actually depend on, learned
+    // from a live run rather than guessed: every term must appear, so extra words can only
+    // ever reduce the matches. A substring match was the original stand-in here, and it hid
+    // the filler-word bug completely — "the test one meeting" and "test one" both failed to
+    // match "test one" under substring rules for different reasons, so the difference the fix
+    // turns on was invisible.
+    const terms = query
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length > 0);
+    if (terms.length === 0) return Promise.resolve([]);
+
     return Promise.resolve(
-      this.events.filter((event) => event.title.toLowerCase().includes(needle)),
+      this.events.filter((event) => {
+        const haystack = `${event.title} ${event.attendees.join(" ")}`.toLowerCase();
+        return terms.every((term) => haystack.includes(term));
+      }),
     );
   }
 

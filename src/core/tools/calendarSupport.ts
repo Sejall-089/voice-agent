@@ -17,6 +17,46 @@ const DAY_MS = 86_400_000;
 export const SEARCH_BACK_MS = DAY_MS;
 export const SEARCH_FORWARD_MS = 90 * DAY_MS;
 
+// Words that are how people TALK about an event rather than part of what it is called.
+//
+// Google's `q=` requires EVERY term to appear somewhere on the event — confirmed live, and it
+// is the whole reason this exists. "move the test one meeting to 8pm" searched for
+// `the test one meeting` and found nothing, because the event is called "test one": the two
+// words the user added to make an English sentence were treated as two more things to match.
+const FILLER = new Set([
+  // Determiners and possessives — almost never in a title, always in a spoken reference.
+  "the", "a", "an", "my", "our", "your", "their", "his", "her",
+  "this", "that", "these", "those",
+  // Generic nouns for "an entry on a calendar". A real title uses a SPECIFIC word ("standup",
+  // "review", "1:1"); these are what people say when they mean "the thing itself".
+  "meeting", "meetings", "event", "events", "appointment", "appointments",
+  "invite", "invitation", "thing",
+  // Connectives that survive into a spoken reference ("the meeting with alex").
+  "with", "about", "for",
+]);
+
+// A second, looser search term — or `null` when there is nothing to loosen.
+//
+// SAFETY COMES FROM WHEN THIS RUNS, not from the word list being perfect. It is only ever
+// tried after an exact search found NOTHING, so a genuinely-titled "Team meeting" is matched
+// on the first attempt and never reaches this function. That is what makes it safe to strip
+// words like "meeting" at all: the only alternative at this point is refusing outright, and
+// dropping terms can only ever find MORE, given `q=` ANDs them.
+//
+// Never returns an empty term. "move the meeting to 4" strips down to nothing, and searching
+// for nothing would match the whole calendar — so it gives up and lets the refusal stand.
+export function withoutFillerWords(query: string): string | null {
+  const kept = query
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .filter((word) => !FILLER.has(word.toLowerCase().replace(/[^a-z0-9:]/gi, "")));
+
+  if (kept.length === 0) return null;
+
+  const narrowed = kept.join(" ");
+  return narrowed === query.trim() ? null : narrowed;
+}
+
 export function requiredString(input: ToolInput, key: string): string {
   const value = input[key];
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -95,11 +135,33 @@ export async function resolveTargetEvent(
   const from = new Date(now - SEARCH_BACK_MS).toISOString();
   const to = new Date(now + SEARCH_FORWARD_MS).toISOString();
 
-  const matches = await deps.calendar.findEvent(query, from, to);
+  // Exact phrasing first, so an event genuinely called "Team meeting" is found by asking for
+  // "team meeting" and never goes near the loosening below.
+  let matches = await deps.calendar.findEvent(query, from, to);
+  let searched = query;
+
+  // Nothing matched. Before refusing, try again without the words that are how the request was
+  // PHRASED rather than what the event is CALLED. Strictly a broadening — `q=` ANDs its terms,
+  // so fewer terms can only ever return more — and it costs one extra read on a path that was
+  // otherwise about to give up entirely.
+  if (matches.length === 0) {
+    const narrowed = withoutFillerWords(query);
+    if (narrowed !== null) {
+      const retry = await deps.calendar.findEvent(narrowed, from, to);
+      if (retry.length > 0) {
+        matches = retry;
+        searched = narrowed;
+      }
+    }
+  }
 
   if (matches.length === 0) {
+    const narrowed = withoutFillerWords(query);
+    // Say what was actually looked for, both times. "I couldn't find X" when the app quietly
+    // searched for something else is the kind of message that makes a bug unfindable.
+    const alsoTried = narrowed === null ? "" : ` (or "${narrowed}")`;
     throw new UserFixableError(
-      `I couldn't find an event matching "${query}" in the next 90 days.`,
+      `I couldn't find an event matching "${query}"${alsoTried} in the next 90 days.`,
     );
   }
   if (matches.length > 1) {
@@ -108,8 +170,10 @@ export async function resolveTargetEvent(
       .slice(0, 5)
       .map((event) => `• ${describeEvent(event, zone)}`)
       .join("\n");
+    // Names the term that ACTUALLY produced these, which may be the loosened one — otherwise
+    // the list looks unrelated to what the user hears themselves being quoted.
     throw new UserFixableError(
-      `"${query}" matches ${matches.length} events — tell me which one:\n${listed}`,
+      `"${searched}" matches ${matches.length} events — tell me which one:\n${listed}`,
     );
   }
 

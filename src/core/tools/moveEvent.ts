@@ -18,8 +18,10 @@ export const moveEventTool: Tool = {
   name: "moveEvent",
   description:
     "Change the date or time of an event already on the user's calendar. Use this when they " +
-    "ask to move, reschedule, push, or shift something. Pass `event` as the user described it " +
-    "('the design review', 'my 3pm') and `newStart` as an exact ISO 8601 timestamp with an " +
+    "ask to move, reschedule, push, or shift something. Pass `event` as just the NAME of the " +
+    "event, as it would appear on the calendar — leave out words the user only said to make a " +
+    "sentence. 'move the design review meeting to 4' means `event` is \"design review\", not " +
+    "\"the design review meeting\". Pass `newStart` as an exact ISO 8601 timestamp with an " +
     "offset, worked out from the current time you were given. Leave `newEnd` out unless they " +
     "said the event should also become longer or shorter — its current length is kept " +
     "otherwise. If the event has guests they are emailed about the change, and the user is " +
@@ -29,7 +31,9 @@ export const moveEventTool: Tool = {
     properties: {
       event: {
         type: "string",
-        description: "Which event to move, in the user's own words (e.g. 'the design review').",
+        description:
+          "The event's name as it would appear on the calendar, without filler words — " +
+          "'design review', not 'the design review meeting'.",
       },
       newStart: {
         type: "string",
