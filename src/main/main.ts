@@ -5,7 +5,11 @@ import { WindowsShell } from "./shell/WindowsShell.ts";
 import { VoiceSession } from "./shell/VoiceSession.ts";
 import { DictationSession } from "./shell/DictationSession.ts";
 import { WindowsInputInjector } from "./shell/WindowsInputInjector.ts";
-import { combineInstructionBusy, createOnDictateHotkey, dictationIsBusy } from "./dictate.ts";
+import {
+  combineInstructionBusy,
+  createOnDictateHotkey,
+  dictationIsBusy,
+} from "./dictate.ts";
 import { createRunInstruction } from "./runInstruction.ts";
 import { Planner } from "../core/planner.ts";
 import { buildRegistry } from "../core/registry.ts";
@@ -19,7 +23,11 @@ import { UnavailableGmail } from "../core/gmail/UnavailableGmail.ts";
 import { ChromeNotion } from "../core/notion/ChromeNotion.ts";
 import { UnavailableNotion } from "../core/notion/UnavailableNotion.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
-import type { GmailSurface, NotionSurface, Transcriber } from "../core/types.ts";
+import type {
+  GmailSurface,
+  NotionSurface,
+  Transcriber,
+} from "../core/types.ts";
 
 // ONE hotkey (M8). It opens the command bar AND starts listening, so you decide whether
 // to speak or type *after* the bar is up rather than before. Enter submits either way.
@@ -37,9 +45,14 @@ const HOTKEYS = [
 
 // The SEPARATE dictation hotkey (M12) — deliberately not part of the HOTKEYS list above and
 // deliberately not Space-based, so the two negotiations can never collide with each other.
-// Tap to start listening, tap again to stop and type the transcript into whatever window
-// currently has focus, in ANY app — see DictationSession.ts for why this is a toggle rather
-// than reusing the instruction bar's "Enter submits" shape.
+// Tap to start listening, press Enter to stop and type the transcript into whatever window
+// currently has focus, in ANY app — see DictationSession.ts for why this is a two-phase
+// begin()/finish() flow rather than the instruction bar's own toggle shape.
+//
+// Ctrl+M is tried first: a genuine 2-key combo, added after live use flagged the original
+// 3-4 key fallbacks as too slow to reach for repeatedly. No conflict found in Chrome, VS
+// Code, Word, or Excel — the one asterisk is it sits one letter from the instruction bar's
+// own Ctrl+Alt+M fallback, which is a coincidence worth noting, not a technical clash.
 //
 // Ctrl+Alt+V and Alt+Shift+D were both considered and deliberately excluded, not merely
 // deprioritized: Ctrl+Alt+V is Excel's Paste Special, and Alt+Shift+D is Word's insert-date
@@ -47,8 +60,12 @@ const HOTKEYS = [
 // neither belongs on this list even as a last resort. Ctrl+Alt+J is the third candidate: it
 // has no default binding in Word/Excel, and in Chrome/VS Code it is unused (Chrome's own
 // download/console shortcuts are Ctrl+J and Ctrl+Shift+J, one modifier short of this).
-const DICTATE_HOTKEYS = ["CommandOrControl+Shift+Alt+D", "CommandOrControl+Alt+D", "CommandOrControl+Alt+J"];
-
+const DICTATE_HOTKEYS = [
+  "CommandOrControl+M",
+  "CommandOrControl+Shift+Alt+D",
+  "CommandOrControl+Alt+D",
+  "CommandOrControl+Alt+J",
+];
 let commandBar: BrowserWindow | null = null;
 // Held at module scope so will-quit (below) can release the persistent host process —
 // app.whenReady()'s own closure ends long before the app actually quits.
@@ -104,9 +121,11 @@ app.whenReady().then(() => {
 
   // Voice capture runs in the renderer, so the window needs the media permission. Grant
   // ONLY that one — everything else stays denied by default.
-  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
-    callback(permission === "media");
-  });
+  session.defaultSession.setPermissionRequestHandler(
+    (_contents, permission, callback) => {
+      callback(permission === "media");
+    },
+  );
 
   // Clicking away dismisses the bar. The shell decides (and cleans up the in-flight
   // capture); main.ts just forwards the event.
@@ -117,7 +136,9 @@ app.whenReady().then(() => {
   //
   // The DB path is decided HERE and injected — /core never asks electron where it lives.
   const llm = createLLMClient();
-  const memory = new SqliteMemory(createDatabase(join(app.getPath("userData"), "memory.db")));
+  const memory = new SqliteMemory(
+    createDatabase(join(app.getPath("userData"), "memory.db")),
+  );
   seedIfEmpty(memory);
   // Secrets are read HERE, in composition — /core never touches process.env. Never log the URL.
   const sender = new SlackSender(process.env["SLACK_WEBHOOK_URL"]);
@@ -126,7 +147,10 @@ app.whenReady().then(() => {
   // currently gate on the same CHROME_DEBUG_URL — one debug Chrome, two app surfaces in it.
   const gmail = createGmail();
   const notion = createNotion();
-  const tools = buildRegistry({ gmail: gmail !== null, notion: notion !== null });
+  const tools = buildRegistry({
+    gmail: gmail !== null,
+    notion: notion !== null,
+  });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
   const draft = new InMemoryDraftStore();
@@ -159,7 +183,9 @@ app.whenReady().then(() => {
   const injector = transcriber ? new WindowsInputInjector() : null;
   inputInjector = injector;
   const dictation =
-    transcriber && injector ? new DictationSession(shell, transcriber, injector) : null;
+    transcriber && injector
+      ? new DictationSession(shell, transcriber, injector)
+      : null;
 
   // One hotkey: open the bar and start listening at the same moment.
   const onHotkey = (): void => {
@@ -168,7 +194,9 @@ app.whenReady().then(() => {
     // whatever the user is dictating into) — shell.showInput() calling window.focus() mid-
     // dictation would defeat the entire point. See dictate.ts for the reverse guard.
     if (dictationIsBusy(dictation)) {
-      console.log("[main] instruction hotkey ignored - dictation is in progress");
+      console.log(
+        "[main] instruction hotkey ignored - dictation is in progress",
+      );
       return;
     }
     void (async () => {
@@ -178,7 +206,8 @@ app.whenReady().then(() => {
       const text = await typed;
       // Nothing typed means you dictated, and Enter was the "stop talking" gesture. If you
       // typed (or dismissed the bar), the session was already abandoned and answers "".
-      const instruction = text.trim().length > 0 ? text : ((await voice?.finish()) ?? "");
+      const instruction =
+        text.trim().length > 0 ? text : ((await voice?.finish()) ?? "");
 
       await runInstruction(instruction);
     })();
@@ -193,7 +222,10 @@ app.whenReady().then(() => {
   // just while voice happens to still be recording — or the bar's own Enter-to-submit and
   // dictation's Enter-to-finish could both fire from one keypress.
   const dictateHotkey = dictation
-    ? registerDictateHotkey(shell, createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell)))
+    ? registerDictateHotkey(
+        shell,
+        createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell)),
+      )
     : null;
 
   // Typing, or dismissing the bar, silently discards the recording. Both are "I did not
@@ -218,14 +250,19 @@ app.whenReady().then(() => {
 
 // Claim the first combo the OS will actually grant. Returns null if every candidate is
 // taken — the app still runs, and the log says exactly why nothing responds.
-function registerHotkey(shell: WindowsShell, onTrigger: () => void): string | null {
+function registerHotkey(
+  shell: WindowsShell,
+  onTrigger: () => void,
+): string | null {
   const configured = process.env["HOTKEY"];
   const candidates = configured ? [configured] : HOTKEYS;
 
   for (const combo of candidates) {
     if (shell.registerHotkey(combo, onTrigger)) {
       if (combo !== candidates[0]) {
-        console.log(`[main] hotkey fell back to ${combo} - earlier choices were taken`);
+        console.log(
+          `[main] hotkey fell back to ${combo} - earlier choices were taken`,
+        );
       }
       return combo;
     }
@@ -241,14 +278,19 @@ function registerHotkey(shell: WindowsShell, onTrigger: () => void): string | nu
 // Same shape as registerHotkey, for the SEPARATE dictation combo (M12) — a distinct
 // candidate list and env override (DICTATE_HOTKEY) so the two negotiations can never
 // collide with each other on the OS.
-function registerDictateHotkey(shell: WindowsShell, onTrigger: () => void): string | null {
+function registerDictateHotkey(
+  shell: WindowsShell,
+  onTrigger: () => void,
+): string | null {
   const configured = process.env["DICTATE_HOTKEY"];
   const candidates = configured ? [configured] : DICTATE_HOTKEYS;
 
   for (const combo of candidates) {
     if (shell.registerHotkey(combo, onTrigger)) {
       if (combo !== candidates[0]) {
-        console.log(`[main] dictation hotkey fell back to ${combo} - earlier choices were taken`);
+        console.log(
+          `[main] dictation hotkey fell back to ${combo} - earlier choices were taken`,
+        );
       }
       return combo;
     }
@@ -268,7 +310,9 @@ function createTranscriber(): Transcriber | null {
   const exePath = process.env["WHISPER_EXE_PATH"];
   const modelPath = process.env["WHISPER_MODEL_PATH"];
   if (!exePath || !modelPath) {
-    console.log("[main] voice disabled - WHISPER_EXE_PATH / WHISPER_MODEL_PATH not set");
+    console.log(
+      "[main] voice disabled - WHISPER_EXE_PATH / WHISPER_MODEL_PATH not set",
+    );
     return null;
   }
   return new WhisperCppTranscriber({
@@ -306,7 +350,10 @@ function createNotion(): NotionSurface | null {
 // arrive via the remember tool.
 function seedIfEmpty(memory: SqliteMemory): void {
   if (memory.query("").length > 0) return;
-  memory.write("tone", "concise, warm, and direct", { confidence: 0.9, source: "seed" });
+  memory.write("tone", "concise, warm, and direct", {
+    confidence: 0.9,
+    source: "seed",
+  });
   memory.write("target:dashboard", "https://github.com/dashboard", {
     confidence: 0.9,
     source: "seed",

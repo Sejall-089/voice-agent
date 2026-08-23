@@ -42,8 +42,13 @@ const TYPE_TIMEOUT_MS = 20_000; // covers even a very long transcript's worth of
 // Same convention as ChromeNotion's FOCUS_SETTLE_MS/KEY_SETTLE_MS: named constants because
 // these are exactly the kind of number that may need tuning after real live use, not
 // literals buried in a loop.
-const CHUNK_SIZE_CHARS = 25;
-const CHUNK_DELAY_MS = 8;
+const CHUNK_SIZE_CHARS = 1;
+// 40ms, not 8ms: live testing found that faster gaps between chunks could trip Windows'
+// own key-repeat handling — KEYEVENTF_UNICODE events carry no real virtual-key code
+// (wVk=0), and a rapid-enough stream of them was observed to cause genuine OS-level
+// character repetition ("mmmmmm", "IIIIIIII") on longer dictations, not an app rendering
+// issue. Confirmed fixed at this value on a previously-corrupted long sentence.
+const CHUNK_DELAY_MS = 40;
 
 // PowerShell script, held as one string. Built once; the ${} placeholders below are filled
 // with the TS constants above so there is exactly one source of truth for the tunables.
@@ -174,8 +179,10 @@ export class WindowsInputInjector implements InputInjector {
   private child: ChildProcessWithoutNullStreams | null = null;
   private ready: Promise<void> | null = null;
   private buffer = "";
-  private readonly waiters: { onLine: (line: string) => void; onExit: (error: Error) => void }[] =
-    [];
+  private readonly waiters: {
+    onLine: (line: string) => void;
+    onExit: (error: Error) => void;
+  }[] = [];
   private disposed = false;
 
   // Lazy: the host process is spawned on first use, not at construction, so building a
@@ -187,7 +194,14 @@ export class WindowsInputInjector implements InputInjector {
     this.ready = new Promise<void>((resolve, reject) => {
       const child = spawn(
         "powershell.exe",
-        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-"],
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "-",
+        ],
         { stdio: "pipe", windowsHide: true },
       );
       this.child = child;
@@ -292,11 +306,14 @@ export class WindowsInputInjector implements InputInjector {
 
     const match = /^FG (-?\d+) (\S*)$/.exec(line);
     if (!match) {
-      throw new Error(`The input host returned an unreadable foreground reply: ${line}`);
+      throw new Error(
+        `The input host returned an unreadable foreground reply: ${line}`,
+      );
     }
     const [, handleText, titleB64] = match;
     const handle = Number(handleText);
-    const title = titleB64 && titleB64.length > 0 ? decodeBase64Utf16(titleB64) : null;
+    const title =
+      titleB64 && titleB64.length > 0 ? decodeBase64Utf16(titleB64) : null;
     return { handle, title: title && title.length > 0 ? title : null };
   }
 

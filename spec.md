@@ -330,15 +330,20 @@ instruction misfire wastes a planner run; a dictation misfire types characters i
 live document with no undo.
 
 ```
-DICTATE_HOTKEYS = [Ctrl+Shift+Alt+D, Ctrl+Alt+D, Ctrl+Alt+J]   (DICTATE_HOTKEY in .env overrides)
+DICTATE_HOTKEYS = [Ctrl+M, Ctrl+Shift+Alt+D, Ctrl+Alt+D, Ctrl+Alt+J]   (DICTATE_HOTKEY in .env overrides)
 ```
 Negotiated exactly like the instruction hotkey list (§4a, §9's M8) — first free combo wins,
 logged. Deliberately NOT Space-based, so the two negotiations can never collide with each
 other on the OS. `Ctrl+Alt+V` (Excel's Paste Special) and `Alt+Shift+D` (Word's insert-date
 field) were considered and excluded outright, not merely deprioritized — both are real,
 common bindings in exactly the apps dictation is most likely used in. `Ctrl+Alt+J` is the
-third candidate: no default binding in Word/Excel, and unused in Chrome/VS Code (Chrome's own
-download/console shortcuts are `Ctrl+J`/`Ctrl+Shift+J`, one modifier short of this).
+last-resort candidate: no default binding in Word/Excel, and unused in Chrome/VS Code
+(Chrome's own download/console shortcuts are `Ctrl+J`/`Ctrl+Shift+J`, one modifier short of
+this). `Ctrl+M` was promoted to first choice in M12.2 (§9), a genuine 2-key combo added after
+live use flagged the 3-4 key fallbacks as too slow to reach for repeatedly — no conflict found
+in Chrome, VS Code, Word, or Excel; it happens to sit one letter from the instruction bar's
+own `Ctrl+Alt+M` fallback (§4a, §9's M8), which is a coincidence worth noting, not a
+technical clash (the two hotkey lists are negotiated independently and can never collide).
 
 **The gesture is `begin()`/`finish()`, matching `VoiceSession` exactly — Enter stops it, not
 the same hotkey.** M12 originally shipped a same-hotkey TOGGLE, rejecting the instruction
@@ -353,7 +358,7 @@ for Escape, which has the identical focus problem. So `DictationSession`
 
 ```
 idle ──begin()──► recording ──finish()──► transcribing ──► inserting ──► idle
-         │              └──cap (DEFAULT_MAX_RECORDING_MS = 30s)──► stopped ──finish()──►┘
+         │              └──cap (DEFAULT_MAX_RECORDING_MS = 90s)──► stopped ──finish()──►┘
          └──abandon()──► idle (silent, mirrors VoiceSession)
 ```
 
@@ -372,12 +377,17 @@ fails (rare — Enter/Return is not a common global-shortcut target), it is logg
 there is no in-app fallback: that recording can only be cancelled with Escape, not finished,
 until whatever is holding the key releases it.
 
-The 30s cap is a SAFETY CEILING for a forgotten Enter, not a typical session length —
-dictation's normal ending is pressing Enter, and unlike the instruction bar's 90s cap (which
-sits behind a visible, focused bar the whole time), a dictation take runs silently in the
-background with nothing on screen to prompt you back to it. It is a named, tunable constant
-(`DEFAULT_MAX_RECORDING_MS`, same convention as `ChromeNotion`'s `FOCUS_SETTLE_MS`/
-`KEY_SETTLE_MS`) flagged as a value real live use may need to adjust, not a literal.
+The cap is a SAFETY CEILING for a forgotten Enter, not a typical session length — dictation's
+normal ending is pressing Enter, and a dictation take runs silently in the background with
+nothing on screen to prompt you back to it, unlike the instruction bar's 90s cap which sits
+behind a visible, focused bar the whole time. `DEFAULT_MAX_RECORDING_MS` was raised from 30s
+to **90s** in M12.2 (§9) after live use showed 30s cutting off genuinely longer dictated
+thoughts mid-sentence with no warning — it now matches the instruction bar's own cap length.
+A `WARNING_BEFORE_CAP_MS` (10s) narration fires before the cap itself, so a long dictation is
+never cut off blind. Both are named, tunable constants (same convention as `ChromeNotion`'s
+`FOCUS_SETTLE_MS`/`KEY_SETTLE_MS`) — the cap-reached narration derives its wording from
+`maxRecordingMs` rather than a literal, precisely so raising this constant again later can't
+silently leave the message announcing the wrong duration.
 
 Shares WindowsShell's existing `voiceState` field and `showVoiceState`/`hasUnsubmittedAudio`/
 `pinnedAgainstBlur` plumbing with `VoiceSession` rather than adding a second parallel "busy"
@@ -414,7 +424,13 @@ whole-value replacement — destructive exactly where dictation must not be), an
 channel (§4). Text is chunked (`CHUNK_SIZE_CHARS`/`CHUNK_DELAY_MS`, named and tunable) into
 small `SendInput` bursts rather than one giant call — apps doing per-keystroke work
 (autocomplete, an IDE's own input handling) have been observed to drop or reorder events
-under a single large burst.
+under a single large burst. **Revised in M12.2 (§9)** after live testing surfaced genuine
+OS-level character repetition ("mmmmmm", "IIIIIIII") on longer dictations at the original
+25-chars/8ms pacing — not an app rendering issue. `KEYEVENTF_UNICODE` events carry no real
+virtual-key code (`wVk = 0`), and a fast enough stream of them was tripping Windows' own
+key-repeat handling. `CHUNK_SIZE_CHARS`/`CHUNK_DELAY_MS` are now `1`/`40ms` — one character
+per `SendInput` call, confirmed to fix a previously-corrupted long sentence — at the direct
+cost of a longer dictation now visibly taking longer to type out.
 
 **Focus is checked twice: at trigger time, and again immediately before typing.** The
 foreground window (handle + title) is captured when recording begins — before anything is
@@ -825,11 +841,28 @@ Post-v0:
       (`combineInstructionBusy`) to cover the instruction bar's whole open lifetime, not just
       while its voice sub-capture is recording — necessary now that Enter is a trigger both
       flows can reach for. See §4c and §9's M12.1 for the tradeoff this brings.
+- [x] **M12.2 — Live-testing fixes: hotkey, cap length, a double-finish race, and chunk
+      timing.** Four fixes from further live use, none changing the design of §4c: `Ctrl+M`
+      promoted to the first dictation-hotkey candidate (a genuine 2-key combo, faster to
+      reach for than the 3-4 key fallbacks); `DEFAULT_MAX_RECORDING_MS` raised 30s → 90s
+      (30s was cutting off genuinely longer dictated thoughts with no warning), plus a 10s
+      pre-cap warning narration; `finish()` now claims the session (`enter("transcribing")`)
+      *before* its first `await`, closing a real race where Enter's global callback firing
+      twice for one physical press let two concurrent `finish()` calls both pass the top-of-
+      method guard and race into typing — the interleaved-character corruption this produced
+      live is exactly what the fix targets; `WindowsInputInjector`'s chunking tightened from
+      `25 chars/8ms` to `1 char/40ms` after live testing found the faster pacing tripping
+      Windows' own key-repeat handling into genuine OS-level character repetition
+      (`KEYEVENTF_UNICODE` events carry no real virtual-key code, so a fast enough stream of
+      them is not the same as real typing) — at the direct cost of longer dictations now
+      visibly taking longer to type.
 
 **v0 status: complete.** 242 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
-M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by M12.1 (against `MockShell`, fake Gmail/Notion
-tabs, jsdom fixtures, and a `MockInputInjector` standing in for real `SendInput`; no browser,
-inbox, Notion account, or OS keystroke is ever touched by the test suite). The eval harness
+M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by M12.1 (M12.2 added no new tests — all four
+fixes are covered by existing coverage, adjusted where a fix changed an assertion's shape;
+see §9's M12.2 for specifics) (against `MockShell`, fake Gmail/Notion tabs, jsdom fixtures,
+and a `MockInputInjector` standing in for real `SendInput`; no browser, inbox, Notion account,
+or OS keystroke is ever touched by the test suite). The eval harness
 (`npm run eval`, `tests/eval/`) runs the memory story as one continuous scenario — cold memory
 refuses →
 teaching fixes it → a correction versions it → recall reveals it — plus the seven demo tasks
@@ -1043,6 +1076,58 @@ right in practice, versus being surprising the first few times a normal Enter pr
 gets swallowed while dictation happens to be running; and everything M12's own "not yet
 proven" list already named that this change doesn't touch (real keystroke delivery, the
 elevated-window refusal, chunk timing, the 30s cap's length).
+
+### M12.2 — four live-testing fixes, no new tests
+
+Unlike every prior dictation milestone, this one shipped from LIVE use directly rather than
+being planned and reviewed first — all four fixes below were made, then run against the
+existing suite, which caught one real regression from the fourth fix before it landed (see
+below). None of the four change §4c's design; they are constant tweaks and one race-condition
+fix inside it.
+
+**1. `Ctrl+M` promoted to the first dictation-hotkey candidate.** Live use flagged the
+original `Ctrl+Shift+Alt+D`/`Ctrl+Alt+D`/`Ctrl+Alt+J` candidates as slower to reach for
+repeatedly than a genuine 2-key combo. No conflict found in Chrome, VS Code, Word, or Excel.
+Coincidentally adjacent to the instruction bar's own `Ctrl+Alt+M` fallback (§9's M8) — the two
+hotkey lists are negotiated independently by `registerHotkey`/`registerDictateHotkey` and can
+never collide with each other, so this is a naming coincidence, not a technical risk.
+
+**2. The cap raised 30s → 90s, plus a 10s pre-cap warning.** 30s was cutting off genuinely
+longer dictated thoughts mid-sentence with no warning beforehand. The cap-reached narration
+(`stopAtCap()`) was ALSO fixed in the same pass to derive its wording from `this.maxRecordingMs`
+rather than the literal string `"30s"` it still had immediately after the constant changed —
+without that, the message would have kept announcing the wrong duration indefinitely,
+regardless of what `DEFAULT_MAX_RECORDING_MS` was actually set to.
+
+**3. A double-`finish()` race, fixed by claiming the session before the first `await`.** Live
+testing produced dictated text with interleaved, duplicated letters. The cause: Enter's global
+callback firing twice for one physical press (an observed Windows/Electron quirk) meant two
+concurrent `finish()` calls could both pass the top-of-method idle/stopped guard before either
+had changed `this.state` — both then raced independently through transcription and typing into
+the same window. The fix moves the state transition (`this.enter("transcribing")`) to
+immediately after that guard, before the first `await`, making the guard-check-and-claim
+atomic — the same "flip state before awaiting" discipline `VoiceSession.begin()` and
+`DictationSession.begin()` already use for the identical class of problem. **Caught by the
+existing suite, not a new test:** the fix's first draft left a second, now-redundant
+`this.enter("transcribing")` call later in the same method (inherited from before the fix),
+which double-emitted the "transcribing" state and failed
+`tests/DictationSession.test.ts`'s "passes through recording -> transcribing -> inserting in
+order" test — proof the existing coverage was doing its job, not evidence a new test was
+needed.
+
+**4. Chunking tightened from `25 chars/8ms` to `1 char/40ms`.** Live testing on longer
+dictations produced genuine OS-level character repetition ("mmmmmm", "IIIIIIII") — confirmed
+NOT an app-side rendering artifact. `KEYEVENTF_UNICODE` events carry no real virtual-key code
+(`wVk = 0`), and the original pacing was fast enough to trip Windows' own key-repeat handling.
+Confirmed fixed at `1`/`40ms` on a previously-corrupted long sentence. The direct cost,
+undisputed and not yet reconsidered: a long dictation now visibly takes longer to type out
+than it did before.
+
+**NOT proven, and only further live use can prove it:** whether `1 char/40ms` is the right
+trade point, or whether some intermediate chunk size/delay could recover typing speed without
+reintroducing the repetition; whether the double-`finish()` race has any OTHER trigger besides
+Enter's observed double-fire; and whether `Ctrl+M`'s adjacency to the instruction bar's
+`Ctrl+Alt+M` ever causes real-world confusion even though the two are technically independent.
 
 ### M7 voice — what is proved, and what still needs a microphone
 

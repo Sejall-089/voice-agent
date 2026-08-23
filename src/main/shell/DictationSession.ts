@@ -33,15 +33,15 @@ import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
 //
 // No electron import — same discipline as VoiceSession — so this runs headless under vitest.
 
-const DEFAULT_MAX_RECORDING_MS = 30_000; // a SAFETY CEILING for a forgotten Enter, not a
-// typical session length: dictation's normal ending is pressing Enter, and 30s is short
-// enough on purpose — unlike the instruction bar's 90s cap, a dictation take runs silently
-// in the background with no bar to look at, so a stray hotkey press that is never followed
-// up should not hold someone's microphone open for a minute and a half. Flagged in the M12
-// plan as a value that may need adjusting after real live use — hence a named, tunable
-// constant rather than a literal.
+const DEFAULT_MAX_RECORDING_MS = 90_000; // Raised from 30s after live use: the original
+// value assumed dictation would always be a short phrase, but real use showed people
+// dictate genuinely longer thoughts, and 30s cut speech off mid-sentence with no warning
+// beforehand. Now matches the instruction bar's own 90s cap — still a SAFETY CEILING for a
+// forgotten Enter press, not a target length; the normal ending is still pressing Enter.
 const DEFAULT_MIN_CLIP_MS = 300; // shorter than this is a stray keypress, not speech
-
+const WARNING_BEFORE_CAP_MS = 10_000; // how long before the cap to give a heads-up, so a
+// long dictation never gets cut off mid-sentence blind — see the note above on why the cap
+// was raised to 90s in the first place.
 const NOTHING_HEARD = "I didn't catch that — nothing was typed.";
 
 export interface DictationSessionOptions {
@@ -63,6 +63,7 @@ export interface DictationShell extends VoiceShell {
 export class DictationSession {
   private state: VoiceState = "idle";
   private capTimer: ReturnType<typeof setTimeout> | null = null;
+  private warningTimer: ReturnType<typeof setTimeout> | null = null;
   // Audio captured by the 30s cap, held until the next tap (or abandon()).
   private heldClip: AudioClip | null = null;
   // Where focus was when recording began — re-checked right before typing, so a focus
@@ -108,7 +109,21 @@ export class DictationSession {
     this.shell.narrate(
       `Dictating into — ${this.target?.title ?? "the focused window"} — press Enter when done, Esc to cancel.`,
     );
-    this.capTimer = setTimeout(() => void this.stopAtCap(), this.maxRecordingMs);
+    this.capTimer = setTimeout(
+      () => void this.stopAtCap(),
+      this.maxRecordingMs,
+    );
+    const warningDelay = Math.max(
+      0,
+      this.maxRecordingMs - WARNING_BEFORE_CAP_MS,
+    );
+    this.warningTimer = setTimeout(() => {
+      if (this.is("recording")) {
+        this.shell.narrate(
+          "10 seconds left — wrap up, or recording will pause automatically.",
+        );
+      }
+    }, warningDelay);
 
     try {
       await this.shell.startRecording();
@@ -126,7 +141,16 @@ export class DictationSession {
   async finish(): Promise<void> {
     if (!this.is("recording") && !this.is("stopped")) return;
 
-    const clip = this.is("stopped") ? this.heldClip : await this.stopRecording();
+    // Claim this session BEFORE the first await, not after — otherwise a second finish() call
+    // arriving while this one is mid-flight (Enter firing its global callback twice for one
+    // physical press is a real Windows/Electron quirk) passes the guard above too, since
+    // neither call has changed the state yet. Both would then race independently through
+    // transcription and typing into the same window — exactly the interleaved, duplicated-
+    // letters corruption seen live. Moving this up makes the guard-check-and-claim atomic.
+    const wasStopped = this.is("stopped");
+    this.enter("transcribing");
+
+    const clip = wasStopped ? this.heldClip : await this.stopRecording();
     this.heldClip = null;
     if (!clip) return;
 
@@ -135,7 +159,6 @@ export class DictationSession {
       return;
     }
 
-    this.enter("transcribing");
     let transcript: string;
     try {
       transcript = await this.transcriber.transcribe(clip);
@@ -160,7 +183,9 @@ export class DictationSession {
       current = null;
     }
     if (!this.focusUnchanged(current)) {
-      this.giveUp(`Focus moved before I could type that — nothing was typed. You said: "${text}"`);
+      this.giveUp(
+        `Focus moved before I could type that — nothing was typed. You said: "${text}"`,
+      );
       return;
     }
 
@@ -200,17 +225,23 @@ export class DictationSession {
     }
   }
 
-  // The 30s cap: release the microphone, keep the audio, act on neither. Mirrors
-  // VoiceSession's stopAtCap() exactly, for the same reason — holding the mic open is the
-  // actual harm; spending whisper CPU (or typing) on a take the user has not asked to finish
-  // yet would be worse.
+  // The cap: release the microphone, keep the audio, act on neither. Mirrors VoiceSession's
+  // stopAtCap() exactly, for the same reason — holding the mic open is the actual harm;
+  // spending whisper CPU (or typing) on a take the user has not asked to finish yet would be
+  // worse.
   private async stopAtCap(): Promise<void> {
     if (!this.is("recording")) return;
     const clip = await this.stopRecording();
     if (!clip) return;
     this.heldClip = clip;
     this.enter("stopped");
-    this.shell.narrate("Recording paused at 30s — press Enter to type it, or Esc to discard.");
+    // Derived from maxRecordingMs, not a literal — this drifted out of sync with the actual
+    // cap once DEFAULT_MAX_RECORDING_MS changed from 30s to 90s and would have kept
+    // announcing the old duration regardless of what was actually configured.
+    const seconds = Math.round(this.maxRecordingMs / 1000);
+    this.shell.narrate(
+      `Recording paused at ${seconds}s — press Enter to type it, or Esc to discard.`,
+    );
   }
 
   private async stopRecording(): Promise<AudioClip | null> {
@@ -231,6 +262,10 @@ export class DictationSession {
     if (this.capTimer !== null) {
       clearTimeout(this.capTimer);
       this.capTimer = null;
+    }
+    if (this.warningTimer !== null) {
+      clearTimeout(this.warningTimer);
+      this.warningTimer = null;
     }
     this.state = state;
     this.shell.showVoiceState(state, detail);

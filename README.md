@@ -74,7 +74,7 @@ It never guesses.
 
 ---
 
-## System-wide dictation (M12, M12.1)
+## System-wide dictation (M12, M12.1, M12.2)
 
 Not one of the tasks above — it never touches the planner, the registry, or memory. Hold
 nothing: tap the **dictation hotkey** (separate from the instruction hotkey) to start
@@ -218,16 +218,21 @@ No extra setup beyond voice above — dictation shares the exact same `WHISPER_E
 | Tap the dictation hotkey | Starts listening — narrates which window it will type into, and that Enter finishes it |
 | **Enter** | Stops, transcribes, and types the transcript at that window's cursor |
 | **Esc**, or click away | Discards the recording. Nothing is typed |
-| Wait **30 s** | Mic released, audio kept — **Enter** still types it. (A safety ceiling for a forgotten Enter, not a normal session — the usual way to finish is pressing Enter.) |
+| Wait **~80 s** (10s before the 90s cap) | A "wrap up" warning — the recording is about to pause automatically |
+| Wait **90 s** | Mic released, audio kept — **Enter** still types it. (A safety ceiling for a forgotten Enter, not a normal session — the usual way to finish is pressing Enter. Raised from 30s after live use showed it cutting off longer dictated thoughts.) |
 
 **While a recording is live, Enter is captured system-wide** — it stops dictation instead of
 reaching whatever app has focus for its normal purpose (submitting a form, a newline), until
 the recording ends one way or another. That's inherent to "Enter finishes it, no matter what
 has focus," not a bug.
 
-The app claims the first free combo from `Ctrl+Shift+Alt+D` → `Ctrl+Alt+D` → `Ctrl+Alt+J` and
-logs which one won — pin your own with `DICTATE_HOTKEY` in `.env`. `Ctrl+Alt+V` (Excel's Paste
-Special) and `Alt+Shift+D` (Word's insert-date field) are deliberately not on that list at all.
+The app claims the first free combo from `Ctrl+M` → `Ctrl+Shift+Alt+D` → `Ctrl+Alt+D` →
+`Ctrl+Alt+J` and logs which one won — pin your own with `DICTATE_HOTKEY` in `.env`.
+`Ctrl+Alt+V` (Excel's Paste Special) and `Alt+Shift+D` (Word's insert-date field) are
+deliberately not on that list at all. `Ctrl+M` was promoted to first choice after live use —
+a real 2-key combo, faster to reach for than the others; it happens to sit next to the
+instruction bar's own `Ctrl+Alt+M` fallback, which is a naming coincidence, not a conflict —
+the two hotkeys are negotiated completely independently.
 
 It's a **separate** hotkey rather than reusing the instruction bar's one (M8), because the two
 want opposite focus behaviour: the instruction bar steals focus on purpose (you're talking to
@@ -398,6 +403,26 @@ but became a real one once Enter became a trigger both flows reach for. **Not ye
 whether capturing Enter system-wide for a recording's duration feels right in daily use, and
 whether the global "Return" registration itself ever collides with something else that already
 owns it (logged, but never hit).
+
+**M12.2 — four fixes straight from live use, no new tests needed.** Unlike every earlier
+dictation milestone, these landed from testing directly rather than being planned first: a
+faster `Ctrl+M` hotkey candidate; the cap raised 30s → 90s (30s was cutting off longer
+dictated thoughts) plus a 10s pre-cap warning, with the cap-reached message now deriving its
+wording from the actual configured length instead of a literal `"30s"` that would otherwise
+have silently gone stale; a real double-`finish()` race fixed by claiming the session
+(`enter("transcribing")`) before the first `await` — Enter's global callback firing twice for
+one physical press had let two concurrent `finish()` calls both pass the guard and race into
+typing, producing genuinely interleaved, duplicated-letter text; and `WindowsInputInjector`'s
+chunking tightened from 25 chars/8ms to **1 char/40ms** after live testing produced real
+OS-level character repetition ("mmmmmm") at the faster pacing — `KEYEVENTF_UNICODE` events
+carry no virtual-key code, so a fast enough stream of them can trip Windows' own key-repeat
+handling. That last fix has a real, undisputed cost: longer dictations now visibly take longer
+to type out. The existing test suite (no new tests) caught one regression from the race-
+condition fix before it shipped — a leftover, now-duplicate state transition that double-
+emitted "transcribing" and failed an existing ordering assertion — proof the coverage from
+M12/M12.1 was still doing its job. **Not yet proven:** whether 1 char/40ms is the right
+trade point or something less costly would still fix the repetition, and whether the
+double-`finish()` race has any trigger besides Enter's observed double-fire.
 
 ---
 
