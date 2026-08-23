@@ -806,6 +806,16 @@ receives `deps` at all.
 - **Default-deny on which event.** `moveEvent` matching zero events, or more than one, refuses
   and names the candidates. The same rule `gmailScript.ts` applies to buttons, one level up:
   if we cannot say *which* one, we do not touch any of them.
+- **The search term is the event's NAME, not the sentence it was said in.** Google's `q=` ANDs
+  its terms, so every extra word is another thing the event must contain — "the test one
+  meeting" finds nothing when the event is called "test one". Two defences, because the tool
+  description alone is not one: the description asks the model for the name with filler left
+  out, and `resolveTargetEvent` searches the **exact phrasing first**, retrying without filler
+  words only when that found nothing. The order is the design — an event genuinely called
+  "Team meeting" matches on the first attempt and never reaches the loosening, so a word like
+  "meeting" is only ever stripped at the point where the alternative is refusing outright.
+  Since `q=` ANDs, dropping terms can only find *more*, never something different, which is
+  why the filler list does not have to be perfect. It never searches for an empty term.
 - **Two events it declines to move.** A **recurring** instance (instance-or-series is a real
   choice with a real wrong answer — Google's own UI asks) and an **all-day** event. Both refuse
   by name rather than guessing.
@@ -1280,7 +1290,7 @@ Enter's observed double-fire; and whether `Ctrl+M`'s adjacency to the instructio
 
 ### M13 — proven vs. live-only
 
-**Proven deterministically (62 new tests), against fakes:** the three tools through the real
+**Proven deterministically (71 new tests), against fakes:** the three tools through the real
 planner; the argument-dependent tier mechanism, including that a resolver which throws or
 returns an undeclared tier **escalates** rather than de-escalates, and that the tier is resolved
 **exactly once** per run; every refusal (no match, several matches, recurring, all-day, all-day
@@ -1315,10 +1325,19 @@ request *shaping*, which only a real API can verify, and wrong for error *classi
 is ordinary logic that happened to live in the same file. That logic is now tested (13 tests,
 including the real captured 403 body); the shaping still isn't, because it still can't be.
 
-**NOT proven — only further live use against a real Google account can:** that `q=` search
-matches events the way a person describes them out loud —
-the single most likely source of a real bug, since the whole default-deny refusal rests on the
-match count being sensible; that `sendUpdates=all` actually emails guests when we say it will;
+**The third live bug was the one predicted above: `q=` search.** "move the test one meeting to
+8pm" searched for `the test one meeting` and found nothing; "move test one to 8pm" worked. The
+cause was in how the term was built, not in Google's search — and it had two halves, because
+the tool description had *told* the model to pass the user's own phrasing, article included.
+Fixed by asking for the name in the description AND by retrying without filler words after an
+exact search misses. `FakeCalendar` had hidden it: substring matching made both the working and
+the failing phrasings behave identically, so the difference the fix turns on was invisible. It
+now mirrors `q=`'s AND-of-terms semantics.
+
+**NOT proven — only further live use against a real Google account can:** whether the filler
+list is right for the way this user actually speaks (it is deliberately conservative — only
+obviously-generic nouns, since anything specific is more likely to be a real title word); that
+`sendUpdates=all` actually emails guests when we say it will;
 that the "unverified app" interstitial and the "Testing"-status 7-day expiry behave as
 documented; and whether the model reliably turns spoken relative times into correct ISO instants
 now that it has a clock — the prompt change is proven to render, not proven to work.

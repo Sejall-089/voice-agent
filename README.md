@@ -236,8 +236,13 @@ webviews — that's their policy, not a preference here.
   refresh tokens after a week. Set it to **"In production"** on the consent screen — an
   unverified app can still be used by its own owner, and the tokens stop expiring.
 
+**Finding the event to move** is by name, not by the sentence you said it in: Google's search
+requires every word to appear, so "the test one meeting" won't match an event called "test one".
+It tries your exact phrasing first, then retries without filler words — so a real "Team meeting"
+still matches directly, and "meeting" is only ever dropped when the alternative is giving up.
+
 **What it refuses to do**, each rather than guessing: move an event when the description matches
-none or several (it lists the candidates); move a **repeating** event (instance-or-series is a
+none or several (it lists the candidates, and tells you both terms it searched for); move a **repeating** event (instance-or-series is a
 real choice — Google's own UI asks, so this doesn't pretend to know); move or create an
 **all-day** event; invite someone whose email address it doesn't have. That last one matters
 more than it looks — silently dropping "the design team" would take the guest count to zero and
@@ -335,7 +340,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (336 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (345 tests): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -485,7 +490,7 @@ trade point or something less costly would still fix the repetition, and whether
 double-`finish()` race has any trigger besides Enter's observed double-fire.
 
 **M13 — proven against fakes, not yet live.** The three calendar tools, the argument-dependent
-risk tier, and the OAuth refresh logic are all covered deterministically (62 tests): every
+risk tier, and the OAuth refresh logic are all covered deterministically (71 tests): every
 refusal, the escalate-never-de-escalate rule, resolve-the-tier-exactly-once, declining a
 `dangerous` create provably creating nothing, and — the one that decides every tier —
 that Google listing you as an attendee on your own event maps to **zero** guests. Two bugs
@@ -511,10 +516,19 @@ The lesson is narrower than "test everything". Leaving that file untested was ri
 ordinary logic that happened to live in the same file. That logic is tested now; the shaping
 still isn't, because it still can't be.
 
-**Still not proven:** whether Google's free-text search matches events the way a person
-describes them out loud — the whole refuse-rather-than-guess behaviour rests on that match count
-being sensible — and whether the model reliably turns "tomorrow at 3" into a correct ISO instant
-now that the prompt carries a clock. That change is proven to *render*, not proven to *work*.
+**A third live bug, and it was the one predicted.** "move the test one meeting to 8pm" found
+nothing; "move test one to 8pm" worked. Google's `q=` ANDs its search terms, so the two words
+added to make an English sentence became two more things the event had to contain — and the
+tool description had *told* the model to pass the user's own phrasing, article and all. Now the
+description asks for the event's name, and the search tries the exact phrasing first, retrying
+without filler words only when that misses. That order matters: an event genuinely called "Team
+meeting" matches on the first attempt, so "meeting" is only ever stripped when the alternative
+is refusing outright. `FakeCalendar` had hidden it by matching on substrings, which made the
+working and failing phrasings behave identically; it now mirrors the real AND-of-terms rule.
+
+**Still not proven:** whether the filler list matches how this user actually speaks, and whether
+the model reliably turns "tomorrow at 3" into a correct ISO instant now that the prompt carries
+a clock. That change is proven to *render*, not proven to *work*.
 
 ---
 
