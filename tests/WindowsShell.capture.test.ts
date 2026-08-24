@@ -855,3 +855,34 @@ describe("WindowsShell — the confirm-pending flag (M14 §8)", () => {
     expect(shell.isConfirmPending()).toBe(false);
   });
 });
+
+describe("WindowsShell — silencing (M14 step 7)", () => {
+  it("stops speech on Escape, without needing the instruction hotkey", () => {
+    // Live use found the only way to interrupt speech was the instruction hotkey, which also
+    // opens the bar and the microphone — so "just be quiet" left a bar to dismiss afterwards.
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    const speaker = fakeSpeaker();
+    shell.attachSpeech(speaker);
+    win.show(); // Escape is only ours while the bar is up
+
+    fireEscape();
+
+    expect(speaker.calls).toContain("stop");
+  });
+
+  it("drops speech still queued about a confirm once it has been answered", async () => {
+    // The other half of the stale-narration fix. By the time the dialog is answered, anything
+    // still waiting to be said about it is describing a decision already made.
+    const win = makeWindow();
+    const shell = new WindowsShell(win as never);
+    const speaker = fakeSpeaker();
+    shell.attachSpeech(speaker);
+    win.show();
+    dialogShowMessageBox.mockImplementation(() => Promise.resolve({ response: 1 }));
+
+    await shell.confirm("Send this invite to alex@example.com?");
+
+    expect(speaker.calls).toContain("stop");
+  });
+});

@@ -95,7 +95,14 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
 
   private registerEscape(): void {
     if (this.escapeRegistered) return;
-    this.escapeRegistered = globalShortcut.register("Escape", () => this.hide());
+    this.escapeRegistered = globalShortcut.register("Escape", () => {
+      // Escape means "never mind" everywhere else in this app, and live use found the only way
+      // to interrupt speech was the instruction hotkey — which also opens the bar and the
+      // microphone, so "just be quiet" left you with a bar to dismiss afterwards. This gives
+      // that gesture a key of its own without changing what the hotkey does.
+      this.stopSpeaking();
+      this.hide();
+    });
     if (!this.escapeRegistered) {
       // Rare (something else already owns global Escape) — the renderer's own keydown
       // listener remains as a fallback whenever the bar happens to have focus.
@@ -527,6 +534,12 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       // In the finally, not after the await: a dialog that THREW must not leave the hotkeys
       // blocked forever with nothing on screen to answer.
       this.confirmPending = false;
+      // The question has been answered, so anything still queued about it is describing a
+      // decision the user has already made. Live use heard the app refer to a dialog cancelled
+      // five seconds earlier, because a ~5s synthesis had the summary still waiting behind it.
+      // Safe to do here and not a moment later: the handler's own result is spoken AFTER this
+      // returns, so nothing that matters is dropped.
+      this.stopSpeaking();
       // Re-arm only if the bar is still on screen — it normally is (confirm always follows
       // a still-open bar), but don't force it back open if something else already hid it.
       if (this.window.isVisible()) this.registerEscape();

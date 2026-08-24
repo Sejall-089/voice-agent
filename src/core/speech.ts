@@ -203,15 +203,31 @@ function speakable(line: string): string {
         String(host).replace(/^www\./i, ""),
       )
       // "Wed 26 Aug" is read as "wed twenty six aug" — two of those are ordinary English words
-      // and neither is the one meant. Anchored to the full weekday-day-month shape `formatDay`
-      // emits, which is what makes it safe to apply to arbitrary text: a bare "Sun" or "Mar" in
-      // a sentence is left alone, because "the Sun is out" must not become "the Sunday is out".
+      // and neither is the one meant.
+      //
+      // TWO rules, not one match of the whole date, and that is the fix for a live bug rather
+      // than a stylistic choice. The original required the whole weekday-day-month shape with
+      // single spaces, and it silently stopped matching in the real app because ELECTRON'S ICU
+      // formats this date differently from NODE'S: "Wed, 26 Aug" against "Wed 26 Aug". The
+      // tests ran under node and passed while the app said "wed" and "aug" out loud. Anchoring
+      // each half separately means a change to the separator can no longer take the whole rule
+      // down with it.
+      //
+      // Each half is still anchored to a NUMBER, which is what keeps this safe on arbitrary
+      // text: a weekday only expands when a day-of-month follows it, and a month only when one
+      // precedes it, so "the Sun is out" and "Mar is here" are left exactly alone.
       .replace(
-        /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\b/g,
-        (all, day: string, date: string, month: string) => {
+        /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+(?=\d{1,2}\b)/g,
+        (all, day: string) => {
           const weekday = WEEKDAYS[day];
+          return weekday === undefined ? all : `${weekday} `;
+        },
+      )
+      .replace(
+        /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\b/g,
+        (all, date: string, month: string) => {
           const name = MONTHS[month];
-          return weekday === undefined || name === undefined ? all : `${weekday} ${date} ${name}`;
+          return name === undefined ? all : `${date} ${name}`;
         },
       )
       // A RANGE is said "to" — the one context where a dash's meaning is unambiguous, and so

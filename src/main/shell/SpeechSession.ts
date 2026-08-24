@@ -34,15 +34,35 @@ import type { SpeechShell } from "./SpeechShell.ts";
 // unless asked" exists to prevent.
 const DEFAULT_MAX_QUEUED = 8;
 
+// How long an utterance may sit unsaid before it is dropped instead of spoken.
+//
+// This is a CORRECTNESS rule, not a performance workaround, and the difference matters. Speech
+// describes a moment: "there's a confirmation waiting" is true while the dialog is up and false
+// the instant it is answered. A queue that always drains eventually will happily announce a
+// state the world has already left — which is what live testing found, hearing the app refer to
+// a dialog that had been cancelled five seconds earlier.
+//
+// Latency is what makes it VISIBLE (the engine reloads its model on every invocation, measured
+// at roughly five seconds), but a faster engine would only shrink the window, not close it. The
+// fix for the latency is a persistent process, and that is a separate change; the fix for
+// saying stale things is to stop saying them.
+const DEFAULT_STALE_AFTER_MS = 8_000;
+
 export interface SpeechSessionOptions {
   maxQueued?: number;
+  staleAfterMs?: number;
+  // Injectable clock, the same seam DraftStore.get(now) and SpeechStore.take(now) already use,
+  // so the staleness rule is provable without a test that waits eight seconds.
+  now?: () => number;
   // Where a synthesis failure is reported. Injected rather than hardcoded because the honest
   // channel for "I cannot speak" is the screen, and only main.ts knows how to reach it.
   onFailure?: (message: string) => void;
 }
 
 export class SpeechSession {
-  private readonly queue: string[] = [];
+  // Each utterance remembers WHEN it was queued, so one that has been overtaken by events
+  // can be dropped instead of spoken. See DEFAULT_STALE_AFTER_MS above.
+  private readonly queue: { text: string; at: number }[] = [];
   private draining: Promise<void> | null = null;
   // Bumped by every stop(). Work already in flight compares the value it started with against
   // this one; a mismatch means "you were interrupted, throw it away". A boolean flag could not
@@ -55,6 +75,8 @@ export class SpeechSession {
   private reportedFailure = false;
 
   private readonly maxQueued: number;
+  private readonly staleAfterMs: number;
+  private readonly now: () => number;
   private readonly onFailure: (message: string) => void;
 
   constructor(
@@ -63,6 +85,8 @@ export class SpeechSession {
     options: SpeechSessionOptions = {},
   ) {
     this.maxQueued = options.maxQueued ?? DEFAULT_MAX_QUEUED;
+    this.staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
+    this.now = options.now ?? Date.now;
     this.onFailure =
       options.onFailure ??
       ((message) => console.error(`[SpeechSession] ${message}`));
@@ -79,7 +103,7 @@ export class SpeechSession {
   speak(text: string): void {
     if (text.trim().length === 0) return; // the engine exits non-zero on empty input
 
-    this.queue.push(text);
+    this.queue.push({ text, at: this.now() });
     while (this.queue.length > this.maxQueued) this.queue.shift();
 
     if (this.draining === null) {
@@ -107,8 +131,13 @@ export class SpeechSession {
   private async drain(): Promise<void> {
     while (this.queue.length > 0) {
       const mine = this.generation;
-      const text = this.queue.shift();
-      if (text === undefined) break;
+      const queued = this.queue.shift();
+      if (queued === undefined) break;
+
+      // Overtaken by events while it waited. Saying it now would describe a world that has
+      // already moved on, which is worse than saying nothing.
+      if (this.now() - queued.at > this.staleAfterMs) continue;
+      const text = queued.text;
 
       let wav: Uint8Array;
       try {

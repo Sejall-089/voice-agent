@@ -417,3 +417,32 @@ describe("FakeSynthesizer refuses what the real engine cannot take", () => {
     expect(fake.spoken).toEqual(["Done."]);
   });
 });
+
+describe("date abbreviations, whichever way the runtime writes them", () => {
+  // The bug this exists for: the expansion required the whole weekday-day-month shape with
+  // single spaces, and ELECTRON'S ICU writes "Wed, 26 Aug" where NODE'S writes "Wed 26 Aug".
+  // The tests ran under node and passed while the app said "wed" and "aug" out loud.
+  //
+  // So these inputs are LITERAL STRINGS, not formatWhen() output. A test that asks the runtime
+  // to produce its input can only ever prove the transform works on that runtime — which is
+  // exactly the hole the live pass fell through.
+  const BOTH = ["Wed 26 Aug", "Wed, 26 Aug"];
+
+  for (const written of BOTH) {
+    it(`expands ${JSON.stringify(written)}`, () => {
+      expect(toSpokenLine(written)).toBe("Wednesday 26 August.");
+    });
+  }
+
+  it("expands each half independently, so one odd separator cannot take both down", () => {
+    expect(toSpokenLine("Mon 3 Mar")).toBe("Monday 3 March.");
+    expect(toSpokenLine("Mon, 3 Mar")).toBe("Monday 3 March.");
+  });
+
+  it("still leaves a bare abbreviation in a sentence alone", () => {
+    // Each half is anchored to a NUMBER — a weekday only expands with a day after it, a month
+    // only with a day before it — which is what keeps this safe on arbitrary text.
+    expect(toSpokenLine("The Sun is out and Mar is here")).toBe("The Sun is out and Mar is here.");
+    expect(toSpokenLine("Sat by the window")).toBe("Sat by the window.");
+  });
+});

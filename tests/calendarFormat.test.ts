@@ -126,3 +126,19 @@ describe("formatSchedule", () => {
     expect(formatSchedule([], ZONE)).toBe("");
   });
 });
+
+describe("formatDay is the same shape on every runtime", () => {
+  it("never puts a comma after the weekday", () => {
+    // node's ICU renders "Wed 26 Aug" and electron's renders "Wed, 26 Aug" for the same
+    // instant. Everything downstream is written against a shape — the schedule line's " — "
+    // joins, the speech transform's date expansion — so letting it vary by runtime means the
+    // tests describe node while the user gets electron. That is exactly how "Wed" and "Aug"
+    // came to be read aloud as words in M14's live pass.
+    for (const written of [
+      formatWhen(event(), ZONE),
+      formatWhen(event({ allDay: true, start: "2026-08-26", end: "2026-08-26" }), ZONE),
+    ]) {
+      expect(written).not.toMatch(/^\w{3,4},/);
+    }
+  });
+});

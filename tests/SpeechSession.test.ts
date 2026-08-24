@@ -234,3 +234,62 @@ describe("the microphone is never open while the app is talking", () => {
     expect(shell.stopPlaybackCalls).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("SpeechSession — an utterance that has been overtaken by events", () => {
+  // Found live: a confirm dialog was cancelled, and roughly five seconds later the app said
+  // something about it. The summary had been sitting in the queue behind a ~5s synthesis the
+  // whole time. Latency made it visible; the actual defect is that speech describes a MOMENT,
+  // and a queue that always drains eventually will happily describe one that has passed.
+
+  function clocked(staleAfterMs: number) {
+    const shell = new MockShell({ context: NO_CONTEXT });
+    const synth = new FakeSynthesizer({ hold: true });
+    let now = 0;
+    const speech = new SpeechSession(shell, synth, {
+      staleAfterMs,
+      now: () => now,
+    });
+    return { shell, synth, speech, tick: (ms: number) => (now += ms) };
+  }
+
+  it("drops one that waited too long instead of saying it", async () => {
+    const { speech, synth, tick } = clocked(1000);
+
+    speech.speak("Said promptly.");
+    speech.speak("Overtaken by events.");
+    tick(5000); // the first utterance is still synthesizing while the world moves on
+
+    await releaseAll(speech, synth);
+
+    expect(synth.spoken).toEqual(["Said promptly."]);
+  });
+
+  it("keeps saying things afterwards — staleness drops one item, it does not stop the queue", async () => {
+    const { speech, synth, tick } = clocked(1000);
+
+    speech.speak("First.");
+    speech.speak("Stale.");
+    tick(5000);
+    await releaseAll(speech, synth);
+
+    speech.speak("Fresh.");
+    await releaseAll(speech, synth);
+
+    expect(synth.spoken).toEqual(["First.", "Fresh."]);
+    expect(speech.isSpeaking()).toBe(false);
+  });
+
+  it("measures from when it was QUEUED, not from when the queue reached it", async () => {
+    // The distinction that makes this work: something queued while the engine was busy has
+    // already been waiting, and the wait is exactly what makes it stale.
+    const { speech, synth, tick } = clocked(1000);
+
+    speech.speak("First.");
+    tick(2000);
+    speech.speak("Queued late, so still fresh.");
+
+    await releaseAll(speech, synth);
+
+    expect(synth.spoken).toEqual(["First.", "Queued late, so still fresh."]);
+  });
+});

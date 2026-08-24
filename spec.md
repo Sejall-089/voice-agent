@@ -779,6 +779,32 @@ have failed. Answering a confirm **by voice** remains deliberately out of scope:
 speech recognition on the one gate that must never be bypassed, and gets its own milestone with a
 fail-closed design or it does not happen.
 
+**Three things the live pass found, and what each one actually was.**
+
+*The runtime the tests run under is not the runtime the app runs under.* "Mon" and "Aug" were
+being read aloud as words. The date expansion required the whole weekday-day-month shape with
+single spaces — and **node's ICU writes `Wed 26 Aug` where electron's writes `Wed, 26 Aug`**,
+so the rule silently stopped matching in the app while every test passed. Fixed on both sides:
+`formatDay` normalises the comma away so the string has one shape everywhere, and the expansion
+is now two independently-anchored rules (a weekday expands when a day-number follows, a month
+when one precedes) so a separator change cannot take the whole thing down again. The tests for it
+use **literal strings covering both ICU forms** — a test that asks the runtime to produce its own
+input can only ever prove the transform works on that runtime.
+
+*Speech describes a moment, and a queue can outlive it.* The app was heard referring to a confirm
+dialog that had been cancelled five seconds earlier. Cold start is **~5s per utterance** (the
+engine reloads its model on every invocation, as its own docs warn), so utterances pile up and
+arrive after the world has moved on. Two fixes, both about correctness rather than speed: an
+utterance queued more than 8s ago is **dropped rather than said**, and answering a confirm
+**silences anything still queued about it**. The latency itself is a separate change — a
+persistent process or the engine's HTTP server mode — deliberately not done here, because a
+faster engine would only shrink this window rather than close it.
+
+*Stopping speech should not cost you a bar to dismiss.* The only interrupt was the instruction
+hotkey, which also opens the bar and the microphone, so "just be quiet" left something to clean
+up. **Escape now stops speech** as well as dismissing the bar — the gesture that already means
+"never mind" everywhere else in this app — and the hotkey's behaviour is unchanged.
+
 ### Speech is an action, not a method (added in M14)
 
 `LocalAction` gained a fourth kind, `{ kind: "speak" }`, beside `notify`. It is an **action the

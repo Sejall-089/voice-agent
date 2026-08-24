@@ -167,8 +167,8 @@ every refusal. Speech is an *action* it requests, not a method it calls, so a ma
 synthesizer accepts it and stays quiet, and the whole policy is testable with no audio device
 at all.
 
-**Talk over it and it stops.** Press either hotkey mid-sentence and the app goes quiet
-immediately — queue dropped, playback cut, anything the engine was still working on thrown
+**Talk over it and it stops.** Press **Escape** to just silence it, or either hotkey to
+interrupt and start giving a new instruction — the app goes quiet immediately — queue dropped, playback cut, anything the engine was still working on thrown
 away. That last part matters: audio synthesized just before you interrupted would otherwise
 arrive just after, and talk over the instruction you're already speaking. The microphone is
 never open while the app is talking, enforced where every path to the microphone passes through

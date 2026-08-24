@@ -81,12 +81,20 @@ function formatDay(value: string, timeZone: string): string {
   // push it a day in either direction depending on the offset's sign.
   const allDay = !value.includes("T");
   const at = allDay ? Date.parse(`${value}T00:00:00Z`) : Date.parse(value);
-  return new Intl.DateTimeFormat("en-GB", {
+  const written = new Intl.DateTimeFormat("en-GB", {
     timeZone: allDay ? "UTC" : timeZone,
     weekday: "short",
     day: "numeric",
     month: "short",
   }).format(new Date(at));
+
+  // Drop the comma some ICU builds put after the weekday, so this string has ONE shape
+  // everywhere. Not cosmetic: node renders "Wed 26 Aug" and electron renders "Wed, 26 Aug" for
+  // the same instant, and everything downstream — the schedule line's own " — " joins, the
+  // speech transform's date expansion — is written against a shape. Letting that shape vary by
+  // runtime means the tests describe node while the user hears electron, which is exactly how
+  // "Wed" and "Aug" ended up being read aloud as words in M14's live pass.
+  return written.replace(/^(\w{3,4}),/, "$1");
 }
 
 // "3:00 PM"
