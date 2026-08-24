@@ -29,7 +29,6 @@ import type {
   CalendarSurface,
   GmailSurface,
   NotionSurface,
-  SpeechSynthesizer,
   Transcriber,
 } from "../core/types.ts";
 
@@ -74,6 +73,9 @@ let commandBar: BrowserWindow | null = null;
 // Held at module scope so will-quit (below) can release the persistent host process —
 // app.whenReady()'s own closure ends long before the app actually quits.
 let inputInjector: WindowsInputInjector | null = null;
+// Same reason as inputInjector: will-quit's closure is separate from whenReady()'s, so the
+// warm Piper process (post-M14 cold-start fix) needs a module-scope handle to be released.
+let speechEngine: PiperSynthesizer | null = null;
 
 const WINDOW_WIDTH = 640;
 const WINDOW_HEIGHT = 640;
@@ -165,6 +167,7 @@ app.whenReady().then(() => {
   const calendar = createCalendar();
   // M14: same gate shape again — a capability the app cannot exercise is never offered.
   const synthesizer = createSynthesizer();
+  speechEngine = synthesizer;
   const tools = buildRegistry({
     gmail: gmail !== null,
     notion: notion !== null,
@@ -348,7 +351,7 @@ function createTranscriber(): Transcriber | null {
 // missing one disables one capability rather than breaking the app. Unset means the app simply
 // does not speak — no session is built, the `elaborate` tool is never offered, and every
 // `speak` action the planner emits is accepted and discarded.
-function createSynthesizer(): SpeechSynthesizer | null {
+function createSynthesizer(): PiperSynthesizer | null {
   const exePath = process.env["PIPER_EXE_PATH"];
   const modelPath = process.env["PIPER_MODEL_PATH"];
   if (!exePath || !modelPath) {
@@ -438,4 +441,7 @@ app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   // Release the persistent PowerShell input host (M12), or it outlives the app.
   inputInjector?.dispose();
+  // Release the warm Piper process (post-M14 cold-start fix), or the ONNX model host outlives
+  // the app the same way the input host would.
+  speechEngine?.dispose();
 });

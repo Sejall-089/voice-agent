@@ -175,15 +175,19 @@ never open while the app is talking, enforced where every path to the microphone
 rather than at each hotkey. Nothing is lost when it's cut off, because the full text is still on
 screen — speech is the disposable channel.
 
-**148 tests**, and `scripts/tts-recon.mjs` — which interrogates a real Piper binary rather than
+**156 tests**, and `scripts/tts-recon.mjs` — which interrogates a real Piper binary rather than
 guessing at it, the M11 "never hand-author a fixture" lesson applied to an audio engine. It is
 what established that the engine mis-decodes non-ASCII without `PYTHONUTF8=1`, applies no time
 normalisation of its own, and takes about five seconds to start.
 
-**Known, and deliberately not fixed here:** that ~5s cold start, because the engine reloads its
-voice on every invocation. A persistent process is the answer and needs its own measuring. It no
-longer makes the app say anything *wrong* — utterances that have been overtaken by events are
-dropped rather than spoken — but it does mean speech can lag a fast sequence of actions.
+**Fixed since:** that ~5s cold start. `PiperSynthesizer` now keeps one warm process alive
+(`--output-dir` streaming, not the HTTP server mode — recon ruled that out, it needs Flask and
+binds every interface by default) instead of spawning fresh per utterance. Measured through the
+shipped class: ~3–5s per call before, ~2.9s to load the model once, then 108–160ms per call after
+— about 20–30x. A crash mid-session (a line with nothing phonemizable kills the process, same as
+it always did) restarts on the next call rather than retrying the line that caused it. The
+archived rhasspy build (`PIPER_LEGACY_FLAGS=1`) keeps the original spawn-per-utterance path
+unchanged, since its support for `--output-dir` has never been confirmed against a real install.
 
 See `spec.md` §2, §3, §4d, and §6's `speakResult`.
 

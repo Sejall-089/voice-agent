@@ -792,13 +792,50 @@ use **literal strings covering both ICU forms** — a test that asks the runtime
 input can only ever prove the transform works on that runtime.
 
 *Speech describes a moment, and a queue can outlive it.* The app was heard referring to a confirm
-dialog that had been cancelled five seconds earlier. Cold start is **~5s per utterance** (the
-engine reloads its model on every invocation, as its own docs warn), so utterances pile up and
-arrive after the world has moved on. Two fixes, both about correctness rather than speed: an
+dialog that had been cancelled five seconds earlier. Cold start was **~3–5s per utterance** (the
+engine reloaded its model on every invocation, as its own docs warn), so utterances piled up and
+arrived after the world had moved on. Two fixes, both about correctness rather than speed: an
 utterance queued more than 8s ago is **dropped rather than said**, and answering a confirm
-**silences anything still queued about it**. The latency itself is a separate change — a
-persistent process or the engine's HTTP server mode — deliberately not done here, because a
-faster engine would only shrink this window rather than close it.
+**silences anything still queued about it**. Both stay in place even now that the latency itself
+is fixed (below) — a faster engine only shrinks this window, a queue can still outlive a moment.
+
+### The cold-start fix (post-M14)
+
+Reloading the model per utterance was a **named, deferred gap** at the end of M14, on the
+argument that fixing it required knowing which of two things the installed engine actually
+supported — a question deliberately left to recon rather than memory. It confirmed one candidate
+and ruled out the other: `piper1-gpl`'s HTTP server mode exists but needs Flask (not installed)
+and binds `0.0.0.0` by default, the wrong trade for a "nothing leaves the machine" app, so it was
+never wired up. The working answer is `--output-dir`, not `-f/--output_file` — a from-memory
+design would have reached for the flag it already knew (`-f` writes ALL stdin into one WAV);
+`--output-dir` is what actually keeps the model loaded across calls, writing one timestamped WAV
+per stdin line and announcing each with `INFO:__main__:Wrote <path>` on stderr once it closes.
+
+**Measured through the shipped class, not just the recon scripts**: ~3–5s per utterance before,
+~2.9s to load the model on the first call after, then **108–160ms per call after that** — roughly
+20–30x. `PiperSynthesizer` now holds one warm process (`ensureWarmProcess`), serializes calls
+through a promise chain so only one utterance is ever in flight on it, and parses `Wrote <path>`
+per-utterance rather than globally so a failure reports THIS call's last stderr line and not one
+left over from whichever call preceded it.
+
+A warm process fails in ways the old per-spawn path never had to consider, both found by running
+it rather than assumed: a blank line reaching stdin produces no output and no error, ever — a
+permanent hang rather than the old path's clean exit 1, which is why the empty-text guard in
+`synthesize()` is now load-bearing rather than a second lock on an already-locked door. And a
+line with nothing phonemizable (recon's `"..."`) crashes the process outright
+(`wave.Error: # channels not specified`) — not a new bug, the old per-spawn path exits 1 on the
+same input, but warm mode makes it fatal to the *session* instead of to one call. The fix is
+**restart, never retry**: the call that crashed the process rejects with the engine's own last
+line, and the *next* call gets a fresh process — retrying the same text would just crash the
+replacement too. `dispose()` releases the warm process (and its temp dir) on `will-quit`, the
+same pattern `WindowsInputInjector` already established for M12's persistent PowerShell host.
+
+`legacyFlags` — previously only a flag-spelling switch between the maintained and archived
+builds — now also selects **which strategy runs**: the maintained build gets the warm path, and
+`legacyFlags: true` keeps the original spawn-per-utterance path entirely, unchanged. Not a
+hedge — the archived rhasspy v1.2.0 build isn't installed anywhere this project can test, so
+whether it even supports `--output-dir` is unconfirmed, and replacing a working path with an
+unverified assumption would repeat the mistake recon exists to avoid.
 
 *Stopping speech should not cost you a bar to dismiss.* The only interrupt was the instruction
 hotkey, which also opens the bar and the microphone, so "just be quiet" left something to clean
