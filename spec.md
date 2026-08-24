@@ -58,7 +58,7 @@ Fuzzy human sentence  →  exact function call.
   the "insert text at cursor" primitive the Gmail/Notion CDP work always implied but never
   generalized past one browser tab. See §4c and §9's M12.
 
-**Added after v0 (M14, in progress):**
+**Added after v0 (M14):**
 - Voice output: the app SPEAKS its narration, confirms, and results instead of only showing
   them. Local synthesis only (Piper), behind a `SpeechSynthesizer` interface so a cloud voice
   is a later swap rather than a rewrite. The screen keeps exactly the text it shows today and

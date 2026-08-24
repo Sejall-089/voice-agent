@@ -39,22 +39,28 @@ flowchart TB
     end
 
     Whisper["whisper.cpp (local)<br/>speech → text · nothing leaves the machine"]
+    Piper["Piper (local)<br/>text → speech · nothing leaves the machine"]
     Chrome["Chrome (Gmail + Notion tabs)<br/>DevTools Protocol · one debug Chrome,<br/>two app surfaces in it"]
     LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
-    OS["OS &amp; target apps<br/>browser, clipboard"]
+    Calendar["Google Calendar<br/>REST API · read, create, move"]
+    OS["OS &amp; target apps<br/>browser, clipboard, any focused window"]
 
     User --> Shell
     Shell <--> OS
     Shell <--> Whisper
+    Shell --> Piper
     Core <--> LLM
     Core --> Slack
     Core <--> Chrome
+    Core <--> Calendar
 ```
 
-**Where voice sits:** entirely in the shell. It converts speech into the same string the
-command bar would have returned, and hands it to the same call site. The core never
-learns it exists — which is why voice changed no file in `/core` except adding one interface.
+**Where voice sits:** entirely in the shell, in BOTH directions. Input converts speech into the
+same string the command bar would have returned and hands it to the same call site; output
+(M14) takes text the core asked to have said and plays it. The core never learns either exists —
+it requests speech as an *action*, exactly as it requests a notification, and a machine with no
+synthesizer accepts that action and stays quiet.
 
 **Read it as:** you sit at the top; the stacked boxes are *your* app; the boxes on
 the right are things the app uses but does not own. The shell is the only part that
@@ -84,8 +90,17 @@ knows it's on Windows.
   (`CdpClient.ts`) and tab-selection logic (`tabs.ts`'s `pickTab`), pulled out of the
   Gmail-only code that first proved it in M10 once a second app (M11) needed the identical
   "don't guess which tab" rule.
-- **LLM / Slack / Chrome / OS** — rented reasoning, the external actions, and the things
-  the shell's hands touch.
+- **Calendar surface (M13)** — the first surface that is an API rather than a browser, behind
+  `CalendarSurface`. Not a change of principle: a calendar event is structured data with no live
+  draft box, so a DOM would buy nothing. It is also what forced risk tiers to depend on a call's
+  *arguments* — an event with guests emails them the instant it exists.
+- **Speech (M14)** — two interfaces, not one. `SpeechSynthesizer` (`core/types.ts`, beside
+  `Transcriber`) turns text into audio and is swappable — Piper now, a cloud voice later;
+  `SpeechShell` (`src/main/shell/`) plays it and can stop it. `SpeechSession` sits between them
+  holding the queue. What is said is *derived* from what is shown (`core/speech.ts`), never
+  authored twice — see §4d.
+- **LLM / Slack / Chrome / Calendar / OS** — rented reasoning, the external actions, and the
+  things the shell's hands touch.
 
 ---
 
@@ -333,6 +348,65 @@ happened.
 
 ---
 
+## 4d. Voice output — the same moment, said and shown (M14)
+
+The app speaks its narration, its confirm questions, and its results. Two things make that more
+than "call a TTS API".
+
+**Two representations, one source.** The screen keeps exactly the text it always showed; the
+spoken line is *derived* from it by pure code. Nobody authors the same message twice, so the two
+cannot drift when a tool's output changes.
+
+Why not one unified string: the confirm dialog settles it. That text is deliberately
+*exhaustive* — the whole draft, every attendee by name, never "and 2 others" — because it is the
+last thing between an instruction and something irreversible. Terseness there would be a safety
+regression, so speech gets its own shorter derivation and the dialog keeps its long one.
+
+```mermaid
+flowchart LR
+    Tool["Tool result<br/>narration · confirm · answer"]
+    Screen["Screen<br/>full text, unchanged"]
+    Derive["core/speech.ts<br/>flatten · strip markup · say dates<br/>and times as words · cap"]
+    Queue["SpeechSession<br/>one at a time"]
+    Engine["Piper<br/>text → WAV"]
+    Player["Renderer<br/>&lt;audio&gt;"]
+    Held["SpeechStore<br/>what was held back"]
+
+    Tool --> Screen
+    Tool --> Derive
+    Derive --> Queue
+    Derive -. "the rest" .-> Held
+    Queue --> Engine --> Player
+    Held -. "'read them out'" .-> Tool
+```
+
+**Speech is an ACTION the core requests**, not a method on `OSShell` — the same shape narration
+already had. A shell with no synthesizer accepts it and does nothing, so `/core` never learns
+whether there is a speaker, exactly as it never learns whether there is a microphone (§4a). The
+payoff: the whole speech *policy* is provable under `MockShell` with no audio device.
+
+**What the engine actually needs, all measured rather than assumed** (`scripts/tts-recon.mjs`):
+it mis-decodes non-ASCII unless spawned with `PYTHONUTF8=1`; it applies no time normalisation of
+its own, reading "3:00" as "three zero zero" and dropping a dash between times silently; it takes
+about five seconds to start because it reloads its voice every invocation. Every spoken date,
+time and range is therefore built by us, not by it.
+
+**Silence is a state, not a failure.** Nothing is lost when speech is cut off, because the full
+text is on screen — which is what makes barge-in safe rather than destructive. So:
+
+- either hotkey, or **Escape**, stops it instantly; the queue is dropped and work already in
+  flight is invalidated, so audio synthesized just before an interruption cannot arrive just
+  after it;
+- the microphone is never open while the app is talking, enforced in the shell's
+  `startRecording()` — the one chokepoint every path to the mic passes through — because
+  otherwise whisper transcribes the app's own voice into the user's instruction;
+- an utterance queued more than 8s ago is **dropped rather than said**: speech describes a
+  moment, and a queue that always drains eventually will happily announce one that has passed;
+- while a confirm dialog waits, **both hotkeys are blocked and say so** rather than starting a
+  second run over the top of an undecided one.
+
+---
+
 ## 5. Memory data model
 
 Two tables. `facts` carries the epistemic metadata (confidence, version, active) so
@@ -397,7 +471,8 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 
 - ~~Voice / speech-to-text on the front of the loop (whisper.cpp, local).~~ **Built in
   M7** — see §4a.
-- Generalize the single Slack action into MCP connectors (Teams, mail, calendar).
+- ~~Generalize the single Slack action into MCP connectors (Teams, mail, calendar).~~ **Calendar
+  landed in M13** as a direct API rather than MCP — same reasoning as Slack's webhook.
 - ~~A clipboard-only `compose` tool built on `core/compose.ts` being app-agnostic.~~
   **Refined by M11:** `compose.ts` itself stayed reply-shaped (a greeting and sign-off are
   wrong for most other targets); what's actually app-agnostic moved to

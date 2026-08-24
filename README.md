@@ -119,7 +119,7 @@ full design.
 
 ---
 
-## Voice output (M14 — in progress)
+## Voice output (M14)
 
 The app says its narration, confirms, and results out loud instead of only showing them. Local
 synthesis (Piper), no API key, for the same reason voice *input* is local — and **off is a real
@@ -175,12 +175,17 @@ never open while the app is talking, enforced where every path to the microphone
 rather than at each hotkey. Nothing is lost when it's cut off, because the full text is still on
 screen — speech is the disposable channel.
 
-What exists today: all of it, wired end to end — the transform, the store, `elaborate`,
-`readSchedule`'s spoken form, the planner wiring, the queue and barge-in machine, the Piper
-wrapper, and playback in the renderer — with 137 tests — plus `scripts/tts-recon.mjs`, which interrogates a real Piper binary before any
-wrapper is written to it (the M11 lesson about never hand-authoring a fixture, applied to an
-audio engine). Nothing speaks yet: no synthesizer, no playback, no wiring. See `spec.md` §2, §3,
-and §6's `speakResult`.
+**148 tests**, and `scripts/tts-recon.mjs` — which interrogates a real Piper binary rather than
+guessing at it, the M11 "never hand-author a fixture" lesson applied to an audio engine. It is
+what established that the engine mis-decodes non-ASCII without `PYTHONUTF8=1`, applies no time
+normalisation of its own, and takes about five seconds to start.
+
+**Known, and deliberately not fixed here:** that ~5s cold start, because the engine reloads its
+voice on every invocation. A persistent process is the answer and needs its own measuring. It no
+longer makes the app say anything *wrong* — utterances that have been overtaken by events are
+dropped rather than spoken — but it does mean speech can lag a fast sequence of actions.
+
+See `spec.md` §2, §3, §4d, and §6's `speakResult`.
 
 ---
 
@@ -336,6 +341,33 @@ immediately after.
 The provider lives behind the same `LLMClient` interface either way (`src/core/llm/` —
 `anthropic.ts` / `openai.ts` / shared `prompt.ts` / `factory.ts`), so switching is a one-line
 `.env` change, not a code change.
+
+### Setting up voice output (optional)
+
+Synthesis is **local** — nothing leaves the machine and there's no TTS API key. Unset means the
+app simply stays quiet; nothing else changes.
+
+1. **Binary** — either works, and the app spawns whatever `PIPER_EXE_PATH` points at:
+   `pip install piper-tts` (maintained; gives you `<venv>Scriptspiper.exe`), or the archived
+   [rhasspy/piper v1.2.0](https://github.com/rhasspy/piper/releases) Windows zip if you'd rather
+   not have Python involved. If the pip console shim isn't on your PATH, point `PIPER_EXE_PATH`
+   at `python` instead — the wrapper supports the `-m piper` module form.
+2. **Voice** — download one **once, ahead of time**:
+   `python -m piper.download_voices en_US-amy-medium`, then point `PIPER_MODEL_PATH` at the
+   `.onnx` file. Downloading up front is deliberate: a feature whose whole premise is "nothing
+   leaves the machine" must not make a network call on its first utterance.
+3. **Nothing else.** No permission prompt — playback goes through the same renderer window that
+   already owns the microphone.
+
+Both paths absolute. `PIPER_DATA_DIR` and `PIPER_LEGACY_FLAGS=1` are available if you need them
+(the archived build spells its flags `--model`/`--output_file` rather than `-m`/`-f`).
+
+Two keys worth knowing while it's talking: **Escape** silences it, and either hotkey interrupts
+it *and* starts listening for a new instruction.
+
+If it's set up but silent, the app tells you why on screen rather than failing quietly — a wrong
+`PIPER_EXE_PATH` names the path and the setting, and the engine's own error is passed through
+verbatim.
 
 ### Setting up dictation (optional)
 

@@ -22,6 +22,40 @@ truth for scope, stack, and decisions.
 - Secrets only from `.env`; never log the API key or webhook URL.
 - Unregistered requests → graceful refusal + `logMiss()`. Never invent a tool.
 
+## Testing discipline (learned the expensive way, M10-M14)
+
+Every milestone from M10 on has produced at least one live bug no fixture caught. These are the
+patterns behind them — each cost a real debugging session.
+
+- **"Only a live run can prove it" excuses request SHAPING, not error CLASSIFICATION.**
+  `GoogleCalendar.ts` shipped untested on that argument, and both bugs the first live run found
+  were in the half that was ordinary branching — the half deciding what a person gets *told* when
+  something breaks. Split the file's testable logic from its transport and test the logic.
+- **A fake must never be more lenient than the real thing.** `FakeCalendar` matched substrings
+  where Google ANDs its terms, so the bug it existed to catch was invisible under it. Write the
+  fake's rules INDEPENDENTLY of the code under test — checking a transform with the transform
+  only proves it agrees with itself. (M14's did this and caught a real bug before any live run.)
+- **The tests run under node; the app runs under electron. Their ICU differs.** node formats
+  `Wed 26 Aug`, electron formats `Wed, 26 Aug`. A rule anchored on the node shape silently did
+  nothing in the app while every test passed. Never let a test ask the runtime to produce its own
+  input — use literal strings covering every form the app might actually see.
+- **Anything living in `main.ts` has no test that could fail**, because importing it boots
+  electron. Extract handlers (`instructionHotkey.ts`, `dictate.ts`, `runInstruction.ts`) — a
+  guard that was designed, approved and then never built shipped missing precisely because it
+  lived where nothing could check for it.
+- **An operation reporting success is not proof it did anything.** Notion saved nothing and said
+  it worked; a synthesizer can exit 0 and produce an empty file. Verify by reading back.
+- **Recon before fixtures.** Interrogate the real thing — DOM, API, binary — and transcribe what
+  it does. `scripts/notion-recon.mjs` and `scripts/tts-recon.mjs` exist because a fixture written
+  from an assumption passes every test and matches nothing.
+
+## Scope added mid-milestone
+
+If something is added to a milestone's plan AFTER its build order is written, **fold it into the
+build order**. M14's confirm-gate guard was designed, explicitly approved, and never built — the
+build order was what got executed from, and the addendum had no route into the work. It shipped
+missing and a live test found it.
+
 ## When you finish a milestone
 - Run the test suite against MockShell.
 - Update `spec.md` if any decision changed.
