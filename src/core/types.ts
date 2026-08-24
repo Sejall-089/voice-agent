@@ -214,6 +214,106 @@ export interface CalendarSurface {
   moveEvent(id: string, start: string, end: string): Promise<CalendarEvent>;
 }
 
+// --- The screen (M15), behind an interface like GmailSurface / CalendarSurface ---
+
+// One display, in DIP (device-independent pixels) — the coordinate space the OS positions
+// windows in, and therefore the space a pointer overlay has to be placed in.
+//
+// NOTE WHAT IS DELIBERATELY ABSENT: `scaleFactor`. Recon measured this machine at 1280x720 DIP
+// with a scaleFactor of 1.5, capturing to 1920x1080 native pixels — and then the app DOWNSCALES
+// that to a 1568-long-edge frame before sending it. After that downscale the scale factor
+// describes nothing useful: the only mapping that matters is image-pixels → DIP, and it is
+// `display.width / shot.width`. A `scaleFactor` field sitting in this type would be an
+// invitation to write `x / scaleFactor`, which is right at native resolution and quietly wrong
+// at every size the app actually uses. It is left out so that bug cannot be spelled.
+export interface DisplayBounds {
+  id: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// One frame of one display, plus everything needed to map a point in it back onto the screen.
+export interface Screenshot {
+  // PNG, not JPEG. Recon measured the downscaled frame at 265 KB as PNG against 92 KB as
+  // JPEG(q80), and the bytes are not the constraint: the model is billed on pixel DIMENSIONS,
+  // both sizes fit one request comfortably, and JPEG's artefacts land precisely on the small UI
+  // text that a button's label has to be read from. Fidelity wins over a rounding error's worth
+  // of upload.
+  png: Uint8Array;
+  // The image's own pixel dimensions — the space the vision model answers in.
+  width: number;
+  height: number;
+  display: DisplayBounds;
+}
+
+// A rectangle in IMAGE pixels, as the vision model reports it.
+export interface ElementBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// A rectangle in SCREEN DIP, as the overlay needs it. Structurally identical to ElementBox and
+// deliberately a separate name: the entire class of bug this milestone expects is one of these
+// being passed where the other belongs, and two names make that visible at the call site.
+export interface ScreenRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PointerTarget {
+  rect: ScreenRect;
+  // What the app believes it is pointing at, shown beside the marker. The user's own check on
+  // the model's answer: if the label says "Send" and the marker is on "Discard", they can see
+  // that before clicking anything.
+  label: string;
+}
+
+// What the vision model came back with. Three outcomes, not one nullable box, for the same
+// reason ToolChoice has three: "here it is", "it isn't here", and "several things match" are
+// different facts, and collapsing them loses the one thing the user needs to hear.
+export type LocateResult =
+  | { kind: "found"; box: ElementBox; label: string }
+  | { kind: "ambiguous"; candidates: string[] }
+  | { kind: "notFound"; reason: string };
+
+// Where is this thing on screen? Behind an interface like `Transcriber` and `SpeechSynthesizer`,
+// and pointedly NOT a widening of `LLMClient`: that interface is about language (choose a tool,
+// complete some text), and this is a different job with a different return type and its own
+// model choice. Same reasoning that kept speech synthesis out of it.
+//
+// The implementation never decides an ACTION. It answers one bounded question and hands back a
+// rectangle that core/vision/locate.ts then validates and may refuse — the same shape as
+// gmailScript.ts resolving a control by role+name and declining when it cannot.
+export interface VisionLocator {
+  locate(shot: Screenshot, target: string): Promise<LocateResult>;
+}
+
+// Looking at the screen, and pointing at something on it. Implemented in `/main` (it needs
+// electron) but DECLARED here, because it is a dependency a tool reaches through `ToolDeps` —
+// the GmailSurface/NotionSurface/CalendarSurface shape, not the VoiceShell/SpeechShell one.
+//
+// The difference is worth stating: voice and speech never needed a contract inside `/core`
+// because `/core` never calls them — an utterance leaves as a fire-and-forget `LocalAction`.
+// Capture is a request/response; the tool needs the picture BACK. So it is a surface.
+export interface ScreenSurface {
+  // SAFE. One frame of the display the user is looking at. The app's OWN windows are excluded
+  // from it (Windows' WDA_EXCLUDEFROMCAPTURE, via setContentProtection) — verified by recon,
+  // which is what lets the capture happen lazily inside the handler while the command bar is
+  // sitting on screen in front of whatever is being asked about.
+  capture(): Promise<Screenshot>;
+  // REVERSIBLE. Draw the marker. It NEVER clicks, never moves the real cursor, and never
+  // takes focus — the whole premise of this milestone is that the human is the one who clicks.
+  point(target: PointerTarget): Promise<void>;
+  // Take it away. Safe to call when nothing is showing, and safe to call twice.
+  clearPointer(): void;
+}
+
 // --- Memory resolve seam (M1 no-op; M3 becomes SQLite-backed) ---
 
 export interface MemoryResolver {
@@ -273,6 +373,13 @@ export interface ToolDeps {
   // Scratch state owned by the planner (one per app run), handed down like `draft` — see
   // core/speechStore.ts for why it deliberately never reaches SQLite.
   speech: SpeechStore;
+  // M15. Looking at the screen, and pointing at it. Same "unavailable default" rule as every
+  // surface above: a tool can never reach a screen the app was not configured to look at.
+  screen: ScreenSurface;
+  // M15. Where is this thing? Gated separately from `screen` in principle — capturing a frame
+  // and sending one somewhere are different permissions — though in the running app both derive
+  // from the same explicit VISION_ENABLED opt-in in main.ts.
+  vision: VisionLocator;
   // What tier THIS call resolved to (core/risk.ts). `null` only inside a `RiskPolicy.resolve`,
   // which is the thing that decides it and therefore runs before it exists; by the time
   // `narrate`, `confirmSummary` or the handler sees it, it is always set.

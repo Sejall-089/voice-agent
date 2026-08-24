@@ -20,6 +20,9 @@ export interface InstructionHotkeyShell {
   isConfirmPending(): boolean;
   narrate(text: string): void;
   showInput(): Promise<string>;
+  // M15. Take down the pointing marker, if there is one. A no-op on an install with vision off,
+  // and on one where nothing has been pointed at.
+  clearPointer(): void;
 }
 
 export interface VoiceLike {
@@ -79,6 +82,12 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
     //    key is pressed, while the microphone takes 160-680ms to warm up, so the app goes
     //    quiet when you reach for it rather than when the mic is ready.
     speech?.stop();
+
+    // 4. And the marker goes with it (M15). A pointing overlay answers a question asked at a
+    //    moment; reaching for the hotkey is the clearest possible signal that the moment has
+    //    passed. Deliberately AFTER both guards above: a press that was ignored changed nothing,
+    //    and should not silently clear the answer to the question still on screen.
+    shell.clearPointer();
 
     void (async () => {
       const typed = shell.showInput(); // resolves on Enter/Escape with whatever was typed

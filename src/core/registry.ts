@@ -13,6 +13,7 @@ import { readScheduleTool } from "./tools/readSchedule.ts";
 import { createEventTool } from "./tools/createEvent.ts";
 import { moveEventTool } from "./tools/moveEvent.ts";
 import { elaborateTool } from "./tools/elaborate.ts";
+import { pointAtTool } from "./tools/pointAt.ts";
 
 // The closed-world menu of tools the app can do (spec.md §6). Adding a tool is additive:
 // a handler file plus an entry here. The planner never changes.
@@ -45,6 +46,15 @@ export const calendarTools: Tool[] = [readScheduleTool, createEventTool, moveEve
 // the menu the model chooses from.
 export const speechTools: Tool[] = [elaborateTool];
 
+// The vision tool (M15). Gated on the one capability in this app that is opt-in rather than
+// merely configured: VISION_ENABLED. Every other gate above asks "is there a thing to talk to?"
+// — a debug Chrome, a refresh token, a piper binary — and answers itself from config that exists
+// for no other purpose. This one cannot: the API key it would otherwise key off is very likely
+// already present for the planner, and its presence must never be read as permission to send a
+// picture of the user's screen anywhere. So main.ts requires an explicit flag, and an install
+// that has not set it is never even offered the tool.
+export const visionTools: Tool[] = [pointAtTool];
+
 export interface RegistryOptions {
   // Whether a Chrome to drive is actually configured.
   gmail: boolean;
@@ -57,6 +67,10 @@ export interface RegistryOptions {
   // Optional (defaults to not offered) — whether this install can speak (M14). Decided in
   // main.ts by the same "is it configured?" check the others use, on the piper paths.
   speech?: boolean;
+  // Optional (defaults to not offered) — whether this install may look at the screen (M15).
+  // True only when BOTH halves exist: something to capture with and something to ask. See
+  // `visionTools` above for why this one gate is an explicit opt-in rather than inferred config.
+  vision?: boolean;
 }
 
 // The menu for one app run.
@@ -72,15 +86,21 @@ export function buildRegistry(options: RegistryOptions): Tool[] {
   if (options.notion === true) tools.push(...notionTools);
   if (options.calendar === true) tools.push(...calendarTools);
   if (options.speech === true) tools.push(...speechTools);
+  if (options.vision === true) tools.push(...visionTools);
   return tools;
 }
 
 // Look up a tool by the name the LLM proposed. Returns undefined for unknown names,
 // which the planner treats as a hallucinated tool (graceful refusal).
 export function findTool(name: string): Tool | undefined {
-  return [...registry, ...gmailTools, ...notionTools, ...calendarTools, ...speechTools].find(
-    (tool) => tool.name === name,
-  );
+  return [
+    ...registry,
+    ...gmailTools,
+    ...notionTools,
+    ...calendarTools,
+    ...speechTools,
+    ...visionTools,
+  ].find((tool) => tool.name === name);
 }
 
 // The subset of each tool the LLM sees (name + description + input schema).

@@ -79,13 +79,40 @@ Fuzzy human sentence  →  exact function call.
   structurally — by role and accessible name for Gmail, by `data-block-id` and document
   order for Notion, whichever identity the app's own DOM actually exposes (M11 found Notion
   exposes no roles at all on body content — see §6b). The half that did NOT move in — and is
-  still explicitly out — is screenshot/vision-driven clicking anywhere on screen. The
+  still explicitly out — is screenshot/vision-driven **clicking** anywhere on screen. The
   distinction is the whole point: reading a page's real structure is checkable and
-  refusable; guessing from pixels is not. See §6a, §6b.
+  refusable; guessing from pixels is not. See §6a, §6b. **M15 split that remaining half
+  again** — see the next entry.
+- ~~Screenshot/vision-driven interaction with any app.~~ **The POINTING half moved into scope
+  in M15; the CLICKING half is still explicitly out, and is the part that matters.** M15 adds
+  `pointAt`: capture the screen, ask a vision model where the named control is, draw a marker
+  over it, and stop. The user clicks it. Nothing is ever clicked, typed, or dragged on their
+  behalf. The objection that kept this out was never "pixels are icky" — it was that an
+  unverifiable guess must not drive an irreversible action. Here the guess drives a
+  *suggestion* and a person is the executor, so the app can be wrong the way a colleague
+  pointing at your screen can be wrong. The refusability that the DOM path got for free from
+  role+name is manufactured deliberately instead (`core/vision/locate.ts`): a box that runs
+  off the frame, covers half the screen, or is too small to be a control is REFUSED rather
+  than drawn. See §4e and §6d.
+  - **This is the first capability that sends the user's screen off the machine**, and that
+    is a real departure recorded here rather than left implicit. Voice input and voice output
+    are both local by deliberate choice (§3) — "nothing leaves the machine" was load-bearing
+    for both. It is not for this one, and there is no local UI-grounding model in this stack
+    to make it so. What that bought instead: an explicit `VISION_ENABLED` opt-in rather than
+    the "is it configured?" gate every other capability uses, because `ANTHROPIC_API_KEY` is
+    usually already present for the planner and its presence must never be read as consent to
+    screen capture; a `caution` tier so every capture is announced as it happens; nothing
+    written to disk, logged, or kept after the run; and the app's own windows excluded from
+    the picture.
+- Auto-clicking anything the vision model identifies. Deliberately not built, and not a
+  stepping stone that M15 is halfway across — it is the thing M15 is the alternative to.
 - macOS or Linux shells (architect for them via the interface, implement Windows only).
 - More than one external connector.
 - Multi-step / autonomous agent loops.
-- Any UI beyond the command bar and a result popup.
+- Any UI beyond the command bar, a result popup, and (M15) the pointing overlay — a
+  transparent, click-through, always-on-top window that draws one highlight and dismisses
+  itself. It is the deliverable of that milestone rather than an expansion of the app's
+  chrome: it has no controls, cannot take focus, and cannot receive a click.
 - Auth systems, accounts, cloud sync.
 
 If a task seems to require anything in the OUT list, stop and flag it.
@@ -107,7 +134,9 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | Browser control (M10, extended M11)| **Chrome DevTools Protocol** over `ws`, hand-rolled (`core/browser/`) | One `CdpClient` (app-agnostic) attaches to a Chrome the user starts with `--remote-debugging-port` + a dedicated `--user-data-dir` (Chrome 136+ refuses the port on the default profile); `ChromeGmail` and `ChromeNotion` are the per-app layers on top. `ws` is pure JS — no second native rebuild. Not puppeteer: the element-resolution logic is the safety-critical part and stays in our own tested code. M11 added real CDP-level input (`Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`) alongside the `Input.insertText` M10 already used — Notion's editor ignores JS-dispatched `.click()`/`.focus()`/`execCommand()` (they report success but save nothing); only genuine device-level input registers. |
 | System-wide input (M12) | **`SendInput` + `KEYEVENTF_UNICODE`**, hand-rolled over a persistent PowerShell host process (`src/main/shell/WindowsInputInjector.ts`) | The one Windows primitive with a real success signal: it returns the count of keystrokes the OS actually accepted, so a short write (most often UIPI blocking an unelevated process from typing into an elevated window) is a thrown error, never a silently-swallowed partial type — the same discipline M11 learned the hard way when `execCommand()` reported success and saved nothing. UI Automation's `ValuePattern.SetValue` was considered and rejected: it has no insert-at-caret operation, only whole-value replacement, which is destructive exactly where dictation must not be. Clipboard + `Ctrl+V` was rejected too — `getContext()` already uses the clipboard as this app's own context-capture channel (§4), and routing dictation through it would race that. PowerShell (`Add-Type` compiling one P/Invoke declaration, once, at construction) rather than a native node module — same reasoning as whisper.cpp's spawned binary: this repo already rebuilds `better-sqlite3` twice per install, and a second native addon would double that fragility. |
 | Text to speech (M14)| **Piper**, local, via a spawned `piper.exe` | No cloud TTS, no API key, no new npm dependency — the same shape and the same reasoning as whisper.cpp above, and local for the same reason voice INPUT is. Behind `SpeechSynthesizer` (`core/types.ts`, beside `Transcriber`), so an ElevenLabs implementation is a later swap that touches nothing else. Rejected: SAPI / Chromium's `speechSynthesis` (zero install and trivial to stop mid-word, but the built-in Windows voices are the robotic ones — kept as the named fallback if Piper's setup friction proves worse than it looks), and Kokoro via `onnxruntime-node` (better still, but a second native addon, which this repo has now refused twice for the same reason). The maintained build is `OHF-Voice/piper1-gpl` (`pip install piper-tts`); the archived `rhasspy/piper` v1.2.0 zip is the no-Python option. The wrapper spawns a path from `.env`, so which one is installed is a README decision, not an architecture one. The voice model is downloaded ONCE, ahead of time — a "nothing leaves the machine" feature must not make a network call on its first utterance. **It receives non-ASCII input as mojibake, and this is now measured rather than inferred**: an en dash (U+2013, bytes `E2 80 93`) came back as spoken "â €" — the Windows-1252 reading of those bytes. Recon's Q6 synthesized the same sentence with and without `PYTHONUTF8=1` and only the second was intelligible, so `PiperSynthesizer` sets it (and `PYTHONIOENCODING`) **by default** rather than leaving it to composition: it is a property of the engine, not a choice, and a fact a caller can forget is a bug waiting to happen. `core/speech.ts` still maps typographic characters to ASCII, now as belt-and-braces rather than as the only defence. **The word conversions are a separate matter and remain load-bearing**: with the encoding fixed, `3:00–4:00 PM` is still read as disconnected digits with the dash dropped silently, so "to" has to be supplied by us — the engine applies no time normalisation of its own, and a colon is read digit by digit. Empty and whitespace-only input exit non-zero, so an empty utterance is an error to prevent, not a silence to tolerate. |
-| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10/M11, optional) `CHROME_DEBUG_URL` — one debug Chrome, both Gmail and Notion tools gate on it, and (M12, optional) `DICTATE_HOTKEY` — dictation itself needs no new secret, only the whisper config it already shares with voice, and (M14, optional) `PIPER_EXE_PATH`, `PIPER_MODEL_PATH` — unset means the app simply does not speak, the same way unset whisper paths mean it does not listen. |
+| Screen capture (M15)| **`desktopCapturer`** (electron), with `setContentProtection` on our own windows | Measured, not assumed — `scripts/screen-recon.mjs` runs under electron and answers eight questions before any of it was designed around. What it found: `thumbnailSize` is honoured EXACTLY in both directions (asking for the display's native pixel size returns exactly that; asking in DIP returns exactly that); `source.display_id` carries the same identifier as `Display.id`, so the source↔display join is real; one capture of a 1920x1080 display takes ~310ms and is 170 KB as PNG / 115 KB as JPEG(q80); `nativeImage.resize()` to a 1568 long edge costs 14ms and preserves the aspect ratio exactly. **The load-bearing finding is Q3**: `setContentProtection(true)` (Windows' `WDA_EXCLUDEFROMCAPTURE`) excludes one of our own windows from our OWN `desktopCapturer` call — measured at 98.4% of a probe window captured unprotected against 0.0% protected, taking effect on the very next frame with no lag. That is what makes LAZY capture viable: the screenshot is taken inside the `pointAt` handler, while the command bar is sitting open in front of whatever is being asked about, and the bar is simply not in the picture. Without it the fallback was to capture at hotkey-press time into planner-owned scratch state, which would photograph the screen on every instruction including the ones that never look at it. `Graphics.CopyFromScreen` over the existing PowerShell host was the alternative considered; a native addon was not, for the reason this repo has now refused one three times. |
+| Vision model (M15) | **Anthropic only**, `claude-opus-5` by default (`VISION_MODEL` overrides) | Behind a `VisionLocator` interface (`core/types.ts`, beside `Transcriber` and `SpeechSynthesizer`), so an OpenAI implementation is a later drop-in. Deliberately NOT a widening of `LLMClient`: that interface is about language, this is a different job with a different return type and its own model choice — the same reasoning that kept synthesis out of it. Anthropic-only regardless of `LLM_PROVIDER`, so a planner running on OpenAI still needs `ANTHROPIC_API_KEY` for this one capability. The image is downscaled to a **1568px long edge before it is sent**, and that is a correctness measure rather than an economy: the API resizes oversized images on its own, and a resize we did not perform is a scale factor we cannot know — every coordinate would come back in a pixel space we could only guess at. PNG rather than JPEG (265 KB vs 92 KB at that size) because the model is billed on pixel dimensions rather than bytes, and JPEG's artefacts land exactly on the small UI text a button's label has to be read from. |
+| Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10/M11, optional) `CHROME_DEBUG_URL` — one debug Chrome, both Gmail and Notion tools gate on it, and (M12, optional) `DICTATE_HOTKEY` — dictation itself needs no new secret, only the whisper config it already shares with voice, and (M14, optional) `PIPER_EXE_PATH`, `PIPER_MODEL_PATH` — unset means the app simply does not speak, the same way unset whisper paths mean it does not listen, and (M15, optional) `VISION_ENABLED`, `VISION_MODEL`. **`VISION_ENABLED` is the one gate in this app that is an explicit opt-in rather than inferred configuration**, and the asymmetry is deliberate: every other capability answers "is there a thing to talk to?" from a value set for no other purpose (a debug Chrome URL, a refresh token, a piper binary path), but the credential vision would otherwise key off — `ANTHROPIC_API_KEY` — is usually already there because the planner is using it. Reading its presence as permission would silently turn "I configured an LLM" into "I consented to screen capture", which are not the same decision. Unset means the tool is never on the menu, no `WindowsScreen` is constructed, and no screen is ever captured. |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
 interface (§4) so a Mac/Linux shell can be added later without touching the core.
@@ -908,6 +937,84 @@ belong on the menu the model chooses from (§8's rule about keeping the miss log
 
 ---
 
+### 4e. The screen (M15) — a surface, not a shell contract
+
+Voice input (§4a) and voice output (§4d) both got a *parallel shell contract* next door to
+`OSShell`, on the grounds that `/core` has no business knowing a microphone or a speaker exists.
+The screen does not follow that pattern, and the reason is worth stating because it looks like an
+inconsistency and is not.
+
+Speech reaches `/core` as a fire-and-forget `LocalAction`: the planner says "say this" and never
+hears back. Capture is a **request/response** — the `pointAt` handler needs the picture *back* —
+so the shape that fits is the one Gmail, Notion and Calendar already use: an interface declared
+in `core/types.ts`, injected through `ToolDeps`, with an `Unavailable*` default so a tool can
+never reach a screen this install was not configured for.
+
+```ts
+// core/types.ts, beside GmailSurface / NotionSurface / CalendarSurface
+export interface ScreenSurface {
+  capture(): Promise<Screenshot>;              // SAFE — our own windows are excluded
+  point(target: PointerTarget): Promise<void>; // draws only; never clicks, never moves the cursor
+  clearPointer(): void;                        // idempotent
+}
+
+export interface VisionLocator {
+  locate(shot: Screenshot, target: string): Promise<LocateResult>;
+}
+```
+
+`OSShell` is untouched. `MockShell` is untouched. Two interfaces rather than one, for the same
+reason `SpeechShell` and `SpeechSynthesizer` are two: they fail for different reasons and have
+different fixes — the screen can be un-capturable while the model is perfectly reachable, and the
+model can be unreachable while the screen is fine — so one class per surface means the message
+the user gets names the thing that is actually wrong.
+
+**Three pixel spaces are live at once, and only one ratio spans the two that matter.** This
+machine is 1280x720 DIP at `scaleFactor` 1.5, captured at 1920x1080 native, then downscaled to
+1568x882 before sending. The mapping `core/vision/geometry.ts` implements is:
+
+```
+display.width (DIP) / shot.width (image px)
+```
+
+At native resolution that ratio happens to equal `1 / scaleFactor`, which is exactly what makes
+`x / scaleFactor` so tempting — and it is correct right up until the downscale that every real
+request goes through. **`Screenshot.display` therefore carries no `scaleFactor` field at all**,
+so the wrong version cannot be spelled. The rounding rule matters too: edges are rounded and the
+extent derived from them, never position and size rounded independently, because
+`round(x) + round(w)` can land a pixel off `round(x + w)` and on a small control that is the
+difference between framing a button and clipping it.
+
+**The pointing overlay.** A transparent, frameless, `focusable: false` window covering one
+display, shown with `showInactive()` and `setAlwaysOnTop(true, "screen-saver")`. Three of its
+options are load-bearing rather than cosmetic:
+
+- **`setIgnoreMouseEvents(true, { forward: true })`** — the premise of the whole milestone. The
+  user clicks the thing we point at, so the marker must not be able to receive that click.
+  Without it the overlay eats the click and the app looks broken in the most confusing way
+  available.
+- **`setContentProtection(true)`** — so one marker is never in the screenshot taken for the next
+  question, by the same mechanism that keeps the command bar out of the first.
+- **`focusable: false`** — pointing at a control in another app must not take focus from it; a
+  text field the user was typing in has to keep receiving their keystrokes.
+
+It carries **no preload and no IPC**: the rect and label ride in the URL hash, so each `point()`
+is a fresh navigation and a stale marker cannot survive a reload. The 3px border is drawn
+*outside* the reported rect (content-box, deliberately) so the highlight frames the control
+rather than covering its own edge pixels — on a 20px toolbar icon an inset border would eat a
+third of the thing it is pointing at. Verified by drawing at a known rect and photographing the
+result: the drawn box landed within 2px of the request, with a see-through interior.
+
+It **dismisses itself after 10s**, and is cleared by Escape and by either hotkey. That is the
+same reasoning that makes `SpeechSession` drop utterances older than 8s rather than say them
+late: a marker answers a question asked at a moment, and one still pointing at a button that has
+since scrolled away is worse than none. There is deliberately **no "press Esc to dismiss" hint**
+on it — the bar owns the global Escape only while the bar itself is visible, and the expected
+next move (clicking the thing) blurs and hides the bar, releasing the key. A hint that stops
+working the moment the user does what the marker is for is worse than no hint.
+
+---
+
 ## 6a. The Gmail reply flow (M10)
 
 Scoped to **Gmail in Chrome**, deliberately and only. Two halves, split because they age
@@ -1091,6 +1198,85 @@ invitations.
 
 ---
 
+## 6d. The pointing flow (M15)
+
+One tool, `pointAt`, in the same registry as everything else. The LLM proposes it with a
+`target`; the planner disposes — registry check, validation, risk gate, execute, record.
+
+```
+"where's the send button?"
+  -> planner picks pointAt { target: "the send button" }
+  -> narrate: "Looking at your screen to find the send button…"   (caution tier, said first)
+  -> screen.capture()        1568x882 PNG, our own windows excluded
+  -> vision.locate()         one bounded question: WHERE is this?
+  -> checkLocation()         the deterministic gate — refuses, or hands back a box
+  -> toScreenRect()          image px -> screen DIP
+  -> screen.point()          the marker; the user clicks it themselves
+  -> "Pointing at \"Send\" — the top right of your screen."
+```
+
+**Why a tool and not a mode.** A separate hotkey was the alternative, and it was rejected: it
+would make the user decide *before* opening the bar which kind of request they were about to
+make — exactly what M8 collapsed away for typing-vs-speaking — and it would create a second path
+where a model decides something outside the registry.
+
+**"The model proposes, the code disposes" is intact, and here is the load-bearing part.** The
+vision model never selects an action. Tool selection is still the planner's text LLM choosing
+from a closed menu. The vision model answers one bounded question and hands back a rectangle
+that our own code then validates and may refuse — structurally the same as `gmailScript.ts`
+resolving a control by role + accessible name and declining when it cannot.
+
+**The deterministic gate** (`core/vision/locate.ts`) is this milestone's replacement for the
+checkability the DOM gave M10 for free. None of its rules prove an answer is *right*; all of them
+catch answers that are certainly *wrong*, and every one refuses rather than clamping toward a
+plausible-looking marker:
+
+| The answer | What it means | What happens |
+|---|---|---|
+| `notFound` | it isn't on screen | refuse, and repeat the model's own reason if it gave one |
+| `ambiguous` | several things match | refuse, and NAME them so the rephrase is one word |
+| box runs off the frame (>1% slack) | the model answered in some other coordinate space — most likely the native resolution we downscaled away from | refuse |
+| box > 50% of the frame | the hedge: it could not find the thing and boxed the whole window | refuse |
+| box < 64px² | it is pointing at nothing | refuse |
+| off-schema / no box / non-finite | we cannot act on it | refuse |
+
+The tolerance is not zero, deliberately: an element flush against the edge of the screen really
+is reported a pixel or two past it, and refusing to point at the window close button would be a
+silly way to be principled. Inside the tolerance the box is clamped — *after* the answer has
+already been judged credible, so clamping can never rescue a wrong one.
+
+**A refusal is `refused`, not a miss.** §8 defines the miss list as a ranked backlog of tools
+worth building, and "it isn't on your screen" is not a missing tool. It is thrown as a
+`UserFixableError`, so the planner shows the tool's own wording verbatim and logs `refused` —
+the same distinction M9 drew for a truncated model response.
+
+**Why `caution`.** Not `safe`: it draws, and it sends. Not `reversible`: `risk.ts` reserves that
+for things recoverable by mechanisms this app owns, and while `clearPointer()` un-draws the
+marker completely, a screenshot that has left the machine is not recoverable — the tier has to
+describe the worse half. Not `dangerous`: nothing reaches another person and nothing is written
+anywhere, and a yes/no dialog in front of every "where's the send button?" would make the one
+thing this is for unusable. So it narrates, and given the privacy posture the announcement is the
+*point* of the tier rather than a cost of it — narration is what stands in for the undo that does
+not exist.
+
+**`resolvesReferences: false`.** `target` is a literal description of something visible, not a
+reference to look up. Memory resolution exists to turn "my dashboard" into a URL; letting it near
+this argument would rewrite "my inbox" into `https://mail.google.com/…` and then hunt the screen
+for a URL. Same reasoning as the memory-writing tools, opposite direction.
+
+**The result sentence stands on its own.** "Pointing at "Send" — the top right of your screen"
+is derived from the same box the marker is drawn at, so the words and the highlight can never
+describe different places. That matters twice: the marker is the disposable channel and the text
+is the durable one (§4d), so the answer survives being spoken, missed, or timed out; and naming
+what the app *thinks* it found makes a marker sitting on "Discard" while the label says "Send"
+visible as a disagreement rather than trusted as an answer.
+
+**What is deliberately not here:** clicking, typing, dragging, scrolling to find something
+off-screen, or pointing at more than one thing. Also no retry-with-a-bigger-image on a refusal —
+a second guess after a rejected first one is a worse guess dressed up as diligence.
+
+---
+
 ## 7. Memory engine (core/memory/)
 
 Local SQLite via better-sqlite3. This is the v0 stand-in for / seed of the personal
@@ -1252,13 +1438,30 @@ Post-v0:
       (`KEYEVENTF_UNICODE` events carry no real virtual-key code, so a fast enough stream of
       them is not the same as real typing) — at the direct cost of longer dictations now
       visibly taking longer to type.
+- [x] **M15 — Vision guidance: point, don't click.** Splits the one remaining half of
+      screenshot-driven computer-use (§2) and moves in the safe side of it: capture the screen,
+      ask a vision model where the named control is, draw a marker over it, and let the USER
+      click. Adds `ScreenSurface` + `VisionLocator` (§4e) — surfaces injected through `ToolDeps`
+      like Gmail/Notion/Calendar, not shell contracts like the microphone, because capture is a
+      request/response; `core/vision/` (the pure geometry, the deterministic gate, the prompt and
+      its parser, the Anthropic transport); `src/main/screen/` (`WindowsScreen` +
+      `PointerOverlay`); one tool, `pointAt` (§6d); and a second renderer entry, `overlay.html`.
+      `OSShell`, `MockShell`, `preload.ts` and `CommandBar.tsx` are all untouched.
+      **Two things distinguish it from every milestone before it.** It is the first capability
+      that sends the user's screen off the machine, so it is the first gated on an explicit
+      `VISION_ENABLED` opt-in rather than on configuration that exists anyway. And it is the
+      first where the app acts on a model's *guess* about pixels — which is only acceptable
+      because the guess drives a suggestion and a person is the executor. See "M15 — proven vs.
+      live-only" below for what that leaves unverified, which is more than usual.
 
-**v0 status: complete.** 242 tests green (`npm test`) — 63 for v0, 24 added by M7, 37 by
-M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by M12.1 (M12.2 added no new tests — all four
-fixes are covered by existing coverage, adjusted where a fix changed an assertion's shape;
-see §9's M12.2 for specifics) (against `MockShell`, fake Gmail/Notion tabs, jsdom fixtures,
-and a `MockInputInjector` standing in for real `SendInput`; no browser, inbox, Notion account,
-or OS keystroke is ever touched by the test suite). The eval harness
+**v0 status: complete.** **584 tests green** (`npm test`) across 42 files. Through M12.1 that
+was 242 — 63 for v0, 24 added by M7, 37 by M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by
+M12.1 (M12.2 added no new tests — all four fixes are covered by existing coverage, adjusted
+where a fix changed an assertion's shape; see §9's M12.2 for specifics). M13 and M14 added 259
+between them, and M15 added 83. (Against `MockShell`, fake Gmail/Notion tabs, jsdom fixtures,
+a `MockInputInjector` standing in for real `SendInput`, and — from M15 — `FakeScreen` and
+`FakeVisionLocator`; no browser, inbox, Notion account, OS keystroke, screen capture, or
+outbound image is ever touched by the test suite.) The eval harness
 (`npm run eval`, `tests/eval/`) runs the memory story as one continuous scenario — cold memory
 refuses →
 teaching fixes it → a correction versions it → recall reveals it — plus the seven demo tasks
@@ -1304,6 +1507,62 @@ or `OpenAILLMClient` at startup (`src/core/llm/factory.ts`), both behind the sam
 been live-tested at all** — it's implemented against the same interface and typechecks,
 but its actual tool-calling behavior against a real key (including the correction-routing
 case above) is unverified until someone runs it live.
+
+### M15 — proven vs. live-only
+
+**Proven deterministically (84 new tests, no screen captured and no image sent anywhere).** The
+whole pointing flow runs under vitest against `FakeScreen` and `FakeVisionLocator`: the
+image-px→DIP mapping at four scale factors and three display origins including a negative one;
+every refusal in `core/vision/locate.ts` and the exact wording of each; the response parser
+against every malformed shape; the transport's failure classification for 400/401/403/429/5xx,
+a bare network error, and being thrown something that is not an `Error` at all; the tool's tier,
+its narration firing *before* the capture, memory being kept away from `target`, the registry
+gate, and the action log holding text and no image bytes.
+
+Two of those deserve naming, because they are the milestone's actual safety property rather than
+coverage for its own sake. **`screen.pointed` is asserted EMPTY on every refusal path** — an
+answer the gate does not trust must never become a marker, because the user clicks what we point
+at. And **the wrong-pixel-space case is tested explicitly**: coordinates for the 1920x1080
+capture arriving against the 1568x882 frame we actually sent is the likeliest real coordinate
+bug, and without the bounds check it is a confident marker in the wrong place with no symptom.
+
+**Proven by measurement rather than by test.** `scripts/screen-recon.mjs` answered the capture
+questions against the real API before any of it was designed around (§3's stack row has the
+numbers). The overlay was verified by drawing at a known rect and photographing the result: the
+drawn box landed within 2px of the request, with a see-through interior. That check caught two
+things — the 3px border being drawn outside the rect (correct, but accidental until it was
+measured and then made deliberate) and, first, a magenta detector loose enough to pick up desktop
+content and report a wildly misplaced marker. A loose measurement produces a confident wrong
+answer, which is the same failure mode the whole milestone is about.
+
+**Live-only, and not yet done — this is the honest part.** `scripts/vision-recon.mjs` is written
+and has **not been run**, because there is no `ANTHROPIC_API_KEY` in this `.env` (the planner
+runs on OpenAI). Until it has been:
+
+- **Whether the model declines when the thing is not on screen is UNKNOWN.** This is V2 in the
+  recon script and the single most important open question in the milestone. If it hallucinates a
+  plausible box rather than answering `notFound`, `core/vision/locate.ts` is the only thing
+  standing between that and a confident marker on the wrong control — and the checks there catch
+  *certainly* wrong answers, not *subtly* wrong ones. A box on the Discard button when the user
+  asked for Send passes every rule in that table.
+- **Whether it uses the `ambiguous` branch or silently picks one is UNKNOWN** (V3).
+- **How accurate the coordinates are, and what the 1568 downscale costs, is UNKNOWN** (V4). The
+  script writes an HTML file with the returned box drawn over the screenshot precisely so this
+  is looked at rather than asserted.
+- Latency and token cost per call are unmeasured. The "Thinking…" indicator covers the wait, but
+  nobody has seen how long it is.
+- Multi-monitor is unverified — this machine has one display, so `pickSource`'s
+  `display_id` join and `getDisplayMatching` for overlay placement have never run against a
+  second screen. The join is written to REFUSE rather than fall back to the first source when it
+  cannot be made confidently, which is the right default for something that fails silently, but
+  that path has never fired.
+- A UAC prompt or a locked session (recon Q7) has not been tried. `WindowsScreen` classifies an
+  empty thumbnail as `no-display` and says "try again once you're back at your desktop", which is
+  a guess about what that state produces, not a transcription of it.
+
+**`FakeVisionLocator` is honest about this.** It replays adversarial answers — the whole-screen
+hedge, native-resolution coordinates — as a stand-in for behaviour nobody has observed yet. That
+is a stated substitute for evidence, not evidence.
 
 ### M10 — proven vs. live-only
 

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pointer</title>
+    <!--
+      The pointing marker (M15).
+
+      Deliberately a plain page with no React, no preload and no IPC. Everything it needs arrives
+      in the URL hash, which means: no addition to the contextBridge surface, no new IPC channel,
+      and no way for a stale marker to survive a reload — each point() is a fresh navigation, so
+      the window cannot end up displaying a position from a previous question.
+
+      It is also, structurally, incapable of interacting with anything. The window is created with
+      setIgnoreMouseEvents(true, { forward: true }), so every click passes straight through to the
+      application underneath. That is the milestone's whole premise: the app points, the person
+      clicks.
+    -->
+    <style>
+      :root {
+        /* Magenta because it is the one hue almost nothing in an OS chrome uses, so the marker
+           never reads as part of the app it is drawn over. */
+        --marker: #ff2d95;
+        --ink: #12010a;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        /* Belt and braces with setIgnoreMouseEvents: nothing here is a click target. */
+        pointer-events: none;
+        user-select: none;
+        font: 600 13px/1.4 "Segoe UI", system-ui, sans-serif;
+      }
+
+      #marker {
+        position: absolute;
+        /* content-box, deliberately NOT border-box: the 3px border is drawn just OUTSIDE the
+           reported rectangle, so the highlight frames the control rather than covering its own
+           edge pixels. On a small target — a 20px-tall toolbar icon — an inset border would eat
+           a third of the thing it is pointing at. Measured: the drawn box is 3 DIP larger than
+           the rect on every side, which is intended and not drift. */
+        border: 3px solid var(--marker);
+        border-radius: 6px;
+        box-shadow:
+          0 0 0 2px rgba(255, 255, 255, 0.9),
+          0 0 18px 4px rgba(255, 45, 149, 0.55);
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+
+      /* Scaling the border rather than the box: a transform would move the outline off the
+         element it is framing, which is the one thing this must never do. */
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, 0.9),
+            0 0 18px 4px rgba(255, 45, 149, 0.55);
+        }
+        50% {
+          box-shadow:
+            0 0 0 2px rgba(255, 255, 255, 0.95),
+            0 0 26px 10px rgba(255, 45, 149, 0.28);
+        }
+      }
+
+      #label {
+        position: absolute;
+        max-width: 320px;
+        padding: 5px 10px;
+        border-radius: 6px;
+        background: var(--marker);
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #marker {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="marker" hidden></div>
+    <div id="label" hidden></div>
+
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.hash.slice(1));
+        var x = Number(params.get("x"));
+        var y = Number(params.get("y"));
+        var w = Number(params.get("w"));
+        var h = Number(params.get("h"));
+        var label = params.get("label") || "";
+
+        // Coordinates arrive already relative to this window's own origin — the main process did
+        // the display-origin subtraction, because it is the only side that knows which display
+        // this window was placed on.
+        if (![x, y, w, h].every(Number.isFinite)) return;
+
+        var marker = document.getElementById("marker");
+        marker.style.left = x + "px";
+        marker.style.top = y + "px";
+        marker.style.width = w + "px";
+        marker.style.height = h + "px";
+        marker.hidden = false;
+
+        var chip = document.getElementById("label");
+        chip.textContent = label;
+        chip.hidden = label.length === 0;
+
+        // No "press Esc to dismiss" hint, deliberately. The command bar owns the global Escape
+        // only while it is itself visible, and the expected next move — clicking the thing being
+        // pointed at — blurs and hides the bar, releasing the key. A hint that stops working the
+        // moment the user does what the marker is for is worse than no hint. The marker dismisses
+        // itself instead, and until then it is click-through and harmless.
+
+        // Place the caption where it can actually be read: above the marker normally, below it
+        // when the marker is near the top of the screen, and pulled back inside the viewport
+        // when it would otherwise run off the right edge. A label that is off-screen is the same
+        // as no label, and the label is how the user checks the app found the right thing.
+        function place(node, gap) {
+          var box = node.getBoundingClientRect();
+          var above = y - box.height - gap;
+          var top = above >= 0 ? above : y + h + gap;
+          var left = Math.max(4, Math.min(x, window.innerWidth - box.width - 4));
+          node.style.top = Math.max(4, Math.min(top, window.innerHeight - box.height - 4)) + "px";
+          node.style.left = left + "px";
+        }
+
+        place(chip, 8);
+      })();
+    </script>
+  </body>
+</html>

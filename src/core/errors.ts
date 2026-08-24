@@ -87,6 +87,153 @@ export function calendarAuthError(reason: CalendarAuthReason): CalendarAuthError
   }
 }
 
+// Why the app declined to point at something (M15).
+//
+// Not a malfunction and not a missing tool — the request was understood, vision ran, and the
+// answer was one we will not act on. Three reasons, kept apart for the reason every other
+// enum in this file is: "it isn't on your screen", "there are four of them", and "I got an
+// answer I don't trust" are different facts, and only the second one is fixed by the user
+// rephrasing.
+//
+// `untrustworthy` is the one that earns its keep. It is what a model hedging — boxing an entire
+// window, or answering in some other coordinate space — comes out as, and turning that into a
+// refusal instead of a marker is the single safety property of this milestone. Pointing
+// confidently at the wrong control is worse than admitting we cannot tell, because the user
+// clicks what we point at.
+export type PointingRefusal = "not-found" | "ambiguous" | "untrustworthy";
+
+export class ElementNotFoundError extends UserFixableError {
+  constructor(
+    public readonly refusal: PointingRefusal,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ElementNotFoundError";
+  }
+}
+
+// The ways looking at the screen can fail (M15).
+//
+// Split into two families on purpose, because they have two different fixes: `ScreenCaptureError`
+// is "I could not get a picture of your screen" (an OS-level problem), and `VisionError` is
+// "I got the picture but could not ask about it" (a configuration or service problem). Telling
+// someone to check their API key when the real problem was a locked session is M13's 403-means-
+// revoked mistake in a new costume.
+export type ScreenCaptureReason =
+  | "unavailable" // this build has no screen surface wired up at all
+  | "no-display" // the capture API returned nothing to photograph
+  | "failed"; // it threw; its own words are the explanation
+
+export class ScreenCaptureError extends UserFixableError {
+  constructor(
+    public readonly reason: ScreenCaptureReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ScreenCaptureError";
+  }
+}
+
+export function screenCaptureError(
+  reason: ScreenCaptureReason,
+  detail = "",
+): ScreenCaptureError {
+  switch (reason) {
+    case "unavailable":
+      return new ScreenCaptureError(
+        reason,
+        "I can't look at your screen — set VISION_ENABLED=1 in .env and restart me.",
+      );
+    case "no-display":
+      // The one case where "try again" is genuinely the right advice: a locked session or a
+      // secure desktop (UAC) is a transient state of the world, not a setting.
+      return new ScreenCaptureError(
+        reason,
+        "I couldn't get a picture of your screen. If the session was locked or a Windows " +
+          "security prompt was up, try again once you're back at your desktop.",
+      );
+    case "failed":
+      return new ScreenCaptureError(
+        reason,
+        `I couldn't capture your screen: ${detail}`,
+      );
+  }
+}
+
+// The ways the vision model can be un-callable, or come back with something unusable.
+//
+// `bad-response` is the one that matters most and the one a fixture cannot teach: it covers a
+// model that answered off-schema. It is a REFUSAL rather than a crash, because the honest
+// reading of "I got an answer I can't trust" is exactly the same as "I couldn't find it" — and
+// the alternative, pointing anyway, is the failure this whole milestone is designed around.
+export type VisionReason =
+  | "not-enabled" // VISION_ENABLED is unset — the capability was never turned on
+  | "no-key" // enabled, but there is no API key to call with
+  | "denied" // the key was rejected (401) or is not permitted (403)
+  | "rejected" // the request itself was refused (400) — too large, or a bad model name
+  | "rate-limited"
+  | "unreachable" // network, timeout, 5xx
+  | "bad-response"; // it answered, but not in a shape we can act on
+
+export class VisionError extends UserFixableError {
+  constructor(
+    public readonly reason: VisionReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "VisionError";
+  }
+}
+
+export function visionError(reason: VisionReason, detail = ""): VisionError {
+  switch (reason) {
+    case "not-enabled":
+      return new VisionError(
+        reason,
+        "Looking at your screen isn't turned on — set VISION_ENABLED=1 in .env and restart me.",
+      );
+    case "no-key":
+      // Deliberately specific about WHICH key. The planner may be running happily on
+      // OPENAI_API_KEY, so "the API key is missing" would read as obviously false.
+      return new VisionError(
+        reason,
+        "I need an Anthropic key to look at your screen — set ANTHROPIC_API_KEY in .env and " +
+          "restart me.",
+      );
+    case "denied":
+      return new VisionError(
+        reason,
+        `My Anthropic key was rejected when I tried to look at your screen: ${detail}`,
+      );
+    case "rejected":
+      // Anthropic's own words, verbatim, plus the two settings actually worth checking. NOT a
+      // diagnosis: a 400 from this call is most likely an oversized image or a model name that
+      // does not exist, but "most likely" is how M13's blanket "403 means revoked" sent someone
+      // round a loop that could never have worked.
+      return new VisionError(
+        reason,
+        `Anthropic rejected the request when I tried to look at your screen: ${detail}. ` +
+          "If this keeps happening, check VISION_MODEL in .env.",
+      );
+    case "rate-limited":
+      return new VisionError(
+        reason,
+        "I'm being rate-limited by Anthropic right now — give it a moment and ask again.",
+      );
+    case "unreachable":
+      return new VisionError(
+        reason,
+        `I couldn't reach Anthropic to look at your screen: ${detail}`,
+      );
+    case "bad-response":
+      return new VisionError(
+        reason,
+        `I looked at your screen but couldn't make sense of the answer (${detail}), so I'd ` +
+          "rather not point anywhere than point at the wrong thing.",
+      );
+  }
+}
+
 // The four ways the speech engine can fail (M14).
 //
 // Named rather than generic, for M13's reason: "I can't find the engine" and "the engine ran

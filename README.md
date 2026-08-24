@@ -193,6 +193,83 @@ See `spec.md` §2, §3, §4d, and §6's `speakResult`.
 
 ---
 
+## Vision guidance — point, don't click (M15)
+
+Ask **"where's the send button?"** and the app photographs your screen, works out where the
+thing you named is, and draws a marker over it. Then it stops. **You** click it.
+
+That last sentence is the whole design. Auto-clicking was the obvious alternative and it is
+deliberately not built — not as a stepping stone this is halfway across, but as the thing this is
+the alternative to. The objection to screenshot-driven control was never that pixels are
+distasteful; it was that an unverifiable guess must not drive an irreversible action. Point at
+the wrong button and you notice and ignore it. Click the wrong button and you have sent
+something.
+
+It works on **any application** — Notepad, Explorer, a game launcher, a PDF viewer — which is
+what makes it different from the Gmail and Notion tools. Those read a real DOM and resolve
+controls structurally; they are precise, and they work in exactly one app each. This one is
+approximate and works everywhere, and the approximation is only tolerable because a human is
+the executor.
+
+**It refuses more readily than it points.** The DOM tools get their safety for free: a control
+that can't be resolved by role and name is never clicked. There is no equivalent for pixels, so
+the checks are manufactured (`src/core/vision/locate.ts`) out of properties a wrong answer tends
+to violate — a box that runs off the frame means the model answered in some other coordinate
+space; a box covering half the screen is a model that couldn't find the thing and boxed the whole
+window rather than saying so; a box of eight pixels is pointing at nothing. Each of those is a
+refusal, never a nudge toward something plausible. So are "it isn't on your screen" and "there
+are three things matching that — which one?", the second of which names them so your rephrase is
+one word.
+
+```
+you:  where's the send button?
+app:  Looking at your screen to find the send button…      (said before it looks)
+app:  [marker drawn on the button]
+      Pointing at "Send" — the top right of your screen.
+```
+
+The sentence is worth as much as the marker. It's derived from the same box, so the two can
+never describe different places, and it names what the app *thinks* it found — a marker sitting
+on **Discard** while the label says **Send** is then visible as a disagreement rather than
+trusted as an answer. It also means the answer survives being spoken aloud, or being read after
+the marker has timed out.
+
+The marker is click-through (your click reaches the app underneath, which is the point),
+never takes focus, and dismisses itself after ten seconds or when you press Escape or the
+hotkey.
+
+### The privacy part, which is a real change
+
+Every other capability in this app is local on purpose. Whisper transcribes on your machine.
+Piper speaks on your machine. "Nothing leaves the machine" was load-bearing for both.
+
+**It is not true of this one.** A picture of whatever is on your screen is sent to Anthropic.
+There is no local UI-grounding model in this stack that would let it be otherwise, so rather than
+soften that, here is exactly what happens and what was done about it:
+
+- **It is off unless you turn it on.** `VISION_ENABLED=1`, and nothing else will do it. This is
+  the only capability here gated on an explicit flag rather than on "did you configure the thing
+  it needs?" — because the thing it needs (`ANTHROPIC_API_KEY`) is probably already set for the
+  planner, and treating that as consent would turn *"I configured an LLM"* into *"I agreed to
+  screen capture"*. With it unset, no capture machinery is even constructed.
+- **It says so, out loud, every time.** "Looking at your screen to find the send button…" is
+  narrated and spoken *before* the capture, not after. That is why the tool is `caution` rather
+  than `reversible`: the marker is trivially undoable, a screenshot that has left the machine is
+  not, and narration is what this app uses in place of an undo that doesn't exist.
+- **Only when you ask a question that needs it.** No continuous capture, no background polling.
+  `summarize this` captures nothing.
+- **Nothing is kept.** Never written to disk, never logged. The action log records the words you
+  used and the sentence you got back — no image bytes anywhere. The screenshot exists for the
+  few seconds of the request and is dropped.
+- **The app is never in the picture.** Its own windows are excluded from the capture at the OS
+  level, so the command bar isn't photographed sitting on top of what you were asking about.
+- **The startup log says which state you're in**, every run, so an install where this is quietly
+  on isn't a thing that can happen.
+
+See `spec.md` §2, §3, §4e, and §6d.
+
+---
+
 ## Running it
 
 ```bash
@@ -414,6 +491,56 @@ type, or Windows blocks the keystrokes outright (typically an unelevated app try
 into an elevated one — an admin terminal, say), nothing gets typed. You'll see the transcript
 you spoke instead of losing it silently.
 
+### Setting up vision guidance (optional)
+
+**Read the privacy section above before turning this on.** It's the one capability here that
+sends a picture of your screen off your machine.
+
+```env
+VISION_ENABLED=1
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+That's the whole setup — no binary to install, no model to download, nothing to start.
+
+Two things that catch people:
+
+- **`VISION_ENABLED=1` exactly.** Not `true`, not `yes`. It is a deliberate speed bump on the
+  one setting that changes what leaves your computer.
+- **`ANTHROPIC_API_KEY` is needed even if `LLM_PROVIDER=openai`.** The vision call is
+  Anthropic-only. If the flag is on and the key is missing, the app says so at startup and leaves
+  the capability off rather than offering a tool that could only ever refuse.
+
+`VISION_MODEL` overrides the model (default `claude-opus-5`).
+
+Every run prints which state you're in:
+
+```
+[main] vision guidance ON - 'where is X' captures the screen and sends it to Anthropic
+[main] vision guidance off - VISION_ENABLED not set (no screen is ever captured)
+```
+
+Then press the hotkey and ask for something on screen — *"where's the send button"*, *"point at
+the settings menu"*, *"show me how to attach a file"*.
+
+**Before trusting it on your setup**, run the recon scripts. They exist because a fixture written
+from an assumption passes every test and matches nothing, and the second one answers a question
+this milestone cannot answer without it — whether the model *declines* when the thing isn't
+there, or invents a plausible box:
+
+```bash
+npx electron scripts/screen-recon.mjs --keep --out screen-recon-out
+node scripts/vision-recon.mjs --image screen-recon-out/q2-full.png --target "the send button"
+```
+
+The first measures capture on *your* display (resolution, DPI, timing, and whether the app's own
+windows are really excluded). The second asks the real model for a box, an absent thing, and an
+ambiguous thing, and writes an HTML file with the returned box drawn over your screenshot — open
+it and see whether the rectangle is actually on the button. Both write pictures of your screen;
+`screen-recon` deletes them unless you pass `--keep`, and both output directories are gitignored.
+
+---
+
 > **Native-module note.** `better-sqlite3` needs a different binary for Node (tests) than for
 > Electron (the app). The `pretest` / `predev` scripts rebuild it automatically, so switching
 > between `npm test` and `npm run dev` costs one short rebuild. Nothing to do manually — except
@@ -452,7 +579,7 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (165 tests):** tool routing, the registry guard against hallucinated
+**Verified deterministically (584 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
@@ -631,6 +758,52 @@ working and failing phrasings behave identically; it now mirrors the real AND-of
 the model reliably turns "tomorrow at 3" into a correct ISO instant now that the prompt carries
 a clock. That change is proven to *render*, not proven to *work*.
 
+**M15 — the machinery is proven; the model's judgement is not, and that gap is bigger than
+usual.** 84 tests cover the whole pointing flow against `FakeScreen` and `FakeVisionLocator`
+with no screen captured and no image sent anywhere: the image-pixel→DIP mapping at four scale
+factors and three display origins including a negative one, every refusal and its exact wording,
+the response parser against every malformed shape, the transport's failure classification for
+400/401/403/429/5xx and a bare network error, and the tool's tier, narration order, registry
+gate, and log contents. The load-bearing assertion is that **`screen.pointed` is empty on every
+refusal path** — an answer the checks don't trust must never become a marker, because the user
+clicks what we point at.
+
+Two things were proven by measurement rather than by test. `scripts/screen-recon.mjs` answered
+the capture questions against the real API first: `setContentProtection` really does exclude the
+app's own windows from its own capture (98.4% of a probe window visible unprotected, 0.0%
+protected, effective on the very next frame), which is what makes it safe to photograph the
+screen while the command bar is open in front of it. And the overlay was checked by drawing at a
+known rect and photographing the result — the marker landed within 2px, interior see-through.
+That check earned its keep twice: it caught the highlight's border being drawn outside the rect
+(correct, but accidental until it was measured), and before that it caught *itself* — a colour
+filter loose enough to pick up desktop content and report a wildly misplaced marker. A loose
+measurement produces a confident wrong answer, which is precisely the failure this milestone is
+about.
+
+**What is NOT verified, and the first item is the important one.** `scripts/vision-recon.mjs` is
+written and **has not been run** — there's no `ANTHROPIC_API_KEY` in this `.env`, since the
+planner runs on OpenAI. So:
+
+- **Whether the model declines when the thing isn't on screen is unknown.** If it invents a
+  plausible box instead of answering `notFound`, the deterministic checks are the only thing
+  between that and a confident marker on the wrong control — and those catch *certainly* wrong
+  answers, not *subtly* wrong ones. A box on **Discard** when you asked for **Send** passes every
+  rule there is. This is the single most important open question in the milestone, and it is
+  probe V2 in that script.
+- Whether it uses the `ambiguous` branch or silently picks one (V3) is unknown.
+- Coordinate accuracy, and what the 1568px downscale costs, is unmeasured (V4) — the script
+  writes an HTML file with the returned box drawn over the screenshot so this gets *looked at*.
+- Latency and token cost per call are unmeasured.
+- **Multi-monitor is unverified** — this machine has one display. The source↔display join is
+  written to refuse rather than fall back when it can't be made confidently, which is the right
+  default for something that fails silently, but that path has never fired.
+- A UAC prompt or locked session is untried. The "try again once you're back at your desktop"
+  message is a guess about what that state produces, not a transcription of it.
+
+`FakeVisionLocator` replays adversarial answers — the whole-screen hedge, native-resolution
+coordinates — as a stand-in for behaviour nobody has observed yet. That's a stated substitute for
+evidence, not evidence.
+
 ---
 
 ## Scope
@@ -673,7 +846,17 @@ machinery M10/M11 needed even applies. It's the generalization the Gmail/Notion 
 always implied — real device-level input beats JS calls a target can silently ignore — played
 on the one surface Chrome's DevTools Protocol can't reach: everything that isn't Chrome.
 
-**Still not built:** screenshot/vision-driven clicking anywhere on screen, multi-step agent loops,
+**M15 added the half of screenshot-driven computer-use that doesn't click.** It's the first
+capability that acts on a model's *guess* about pixels rather than on something structurally
+resolvable — and the first that sends the user's screen off the machine, which is why it's the
+only one behind an explicit opt-in rather than behind "did you configure the thing it needs?".
+Both of those are only acceptable because of what it doesn't do: it draws a marker and stops, so
+a wrong answer costs you a glance rather than a click. The checkability that Gmail and Notion got
+free from the DOM had to be manufactured for pixels instead — a set of rules about what a
+*certainly wrong* answer looks like, every one of which refuses rather than nudges.
+
+**Still not built:** auto-clicking anything the vision model identifies (deliberately — see
+above), scrolling to find something off-screen, multi-step agent loops,
 more than one external connector, macOS/Linux, any email app but Gmail-in-Chrome, any page editor
 but Notion-in-Chrome (and only the Chrome tab, not the Notion desktop app), search/navigation
 within either app, and any dictation cleanup/rewrite pass (raw transcript only — see `spec.md`

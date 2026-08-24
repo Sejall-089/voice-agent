@@ -7,3 +7,9 @@ dist/
 
 # Recon output — generated WAVs from scripts/tts-recon.mjs, never committed.
 tts-recon-out/
+
+# Recon output — captured frames from scripts/screen-recon.mjs and the marked-up HTML from
+# scripts/vision-recon.mjs. These are PICTURES OF THE SCREEN: never committed, and the scripts
+# delete them by default (screen-recon keeps them only with --keep).
+screen-recon-out/
+vision-recon-out/

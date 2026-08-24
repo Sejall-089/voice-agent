@@ -5,6 +5,8 @@ import { UnavailableSender } from "./senders/SlackSender.ts";
 import { UnavailableGmail } from "./gmail/UnavailableGmail.ts";
 import { UnavailableNotion } from "./notion/UnavailableNotion.ts";
 import { UnavailableCalendar } from "./calendar/UnavailableCalendar.ts";
+import { UnavailableScreen } from "./vision/UnavailableScreen.ts";
+import { UnavailableVisionLocator } from "./vision/UnavailableVisionLocator.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
@@ -21,9 +23,11 @@ import type {
   MessageSender,
   NotionSurface,
   PlannerOutcome,
+  ScreenSurface,
   Tool,
   ToolDeps,
   ToolInput,
+  VisionLocator,
 } from "./types.ts";
 
 const REFUSAL = "I can't do that yet — I don't have a tool for that.";
@@ -59,6 +63,13 @@ export class Planner {
     // summary rather than the whole thing, so an "and the rest?" follow-up has something to
     // answer from. One per app run, in memory only.
     private readonly speech: SpeechStore = new InMemorySpeechStore(),
+    // M15. Two more surfaces, same rule as every one above: an unavailable default means a tool
+    // can never reach a screen — or a vision model — this install was not configured for. They
+    // are separate parameters rather than one bundle because they fail for different reasons and
+    // have different fixes: the screen can be un-capturable while the model is fine, and the
+    // model can be unreachable while the screen is perfectly capturable.
+    private readonly screen: ScreenSurface = new UnavailableScreen(),
+    private readonly vision: VisionLocator = new UnavailableVisionLocator(),
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -127,6 +138,8 @@ export class Planner {
       draft: this.draft,
       calendar: this.calendar,
       speech: this.speech,
+      screen: this.screen,
+      vision: this.vision,
       tier: null,
     };
 

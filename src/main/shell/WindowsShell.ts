@@ -58,6 +58,11 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // The speech queue (M14), or null on an install with no synthesizer configured. Held rather
   // than constructed here because it needs this shell to play through.
   private speech: Speaker | null = null;
+  // How to take the pointing marker away (M15), or null on an install with vision off. Held as a
+  // bare callback rather than the whole ScreenSurface because this is the only thing the shell
+  // has any business doing to it — the shell does not capture and does not point, it only knows
+  // that "never mind" should mean never mind for everything on screen at once.
+  private dismissPointer: (() => void) | null = null;
   // Whether a confirm dialog is on screen awaiting an answer (M14 §8). Set SYNCHRONOUSLY
   // before the dialog is created, so there is no instant in which it is visible and this is
   // still false — the gap a live tester would find first.
@@ -101,6 +106,10 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       // microphone, so "just be quiet" left you with a bar to dismiss afterwards. This gives
       // that gesture a key of its own without changing what the hotkey does.
       this.stopSpeaking();
+      // M15: and takes the pointing marker with it. "Never mind" has to mean everything on
+      // screen at once, or the gesture that dismisses the bar leaves a highlight floating over
+      // another app with no obvious way to be rid of it.
+      this.dismissPointer?.();
       this.hide();
     });
     if (!this.escapeRegistered) {
@@ -275,6 +284,21 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // THIS shell to play through — the same shape as onDismissed/onTypingStarted.
   attachSpeech(session: Speaker): void {
     this.speech = session;
+  }
+
+  // --- The pointing marker (M15) ---
+
+  // How to take the marker down, once main.ts has built something that can put one up. Set after
+  // construction for the same reason attachSpeech is: the shell is a dependency of the thing it
+  // is being handed, not the other way round.
+  attachPointer(dismiss: () => void): void {
+    this.dismissPointer = dismiss;
+  }
+
+  // Called by the hotkey handlers before a new instruction starts, so a marker never outlives
+  // the question it answered.
+  clearPointer(): void {
+    this.dismissPointer?.();
   }
 
   isSpeaking(): boolean {

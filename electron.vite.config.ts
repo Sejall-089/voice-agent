@@ -27,7 +27,15 @@ export default defineConfig({
     root: resolve("src/renderer"),
     build: {
       rollupOptions: {
-        input: resolve("src/renderer/index.html"),
+        // Two pages, not one (M15). `overlay.html` is the pointing marker — a separate top-level
+        // entry rather than a route inside the command bar, because it is a separate WINDOW with
+        // opposite requirements: transparent, click-through, never focused, and carrying no
+        // preload or bridge at all. It is plain HTML with no React, so it adds an entry here and
+        // nothing to the bundle.
+        input: {
+          index: resolve("src/renderer/index.html"),
+          overlay: resolve("src/renderer/overlay.html"),
+        },
       },
     },
     plugins: [react()],

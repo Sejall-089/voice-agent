@@ -26,6 +26,7 @@ function harness(options: { confirmPending?: boolean; dictating?: boolean; typed
       events.push("showInput");
       return Promise.resolve(options.typed ?? "");
     },
+    clearPointer: () => events.push("clearPointer"),
   };
   const voice = {
     begin: () => {
@@ -102,6 +103,18 @@ describe("the instruction hotkey while a confirm is waiting", () => {
     expect(CONFIRM_WAITING).toContain("—"); // the written form does have one
   });
 
+  it("leaves the pointing marker alone", async () => {
+    // M15, and the same reasoning as the barge-in above: a press that was IGNORED changed
+    // nothing, so it must not silently clear the answer still on screen. The marker is only
+    // dismissed by a press that actually starts something.
+    const { onHotkey, events } = harness({ confirmPending: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).not.toContain("clearPointer");
+  });
+
   it("does not cut off the confirm question it is answering about", async () => {
     // The barge-in stop must not fire on this path: the dialog's own question may still be
     // being read out, and silencing it to say "there's a confirmation waiting" is absurd.
@@ -160,12 +173,26 @@ describe("the instruction hotkey otherwise", () => {
     expect(events.indexOf("stop")).toBeLessThan(events.indexOf("mic"));
   });
 
+  it("takes down the pointing marker before the next question", async () => {
+    // A marker answers a question asked at a moment. Reaching for the hotkey is the clearest
+    // signal that the moment has passed, and a highlight left floating over another app while a
+    // new instruction runs is pointing at the answer to the wrong question.
+    const { onHotkey, events } = harness();
+
+    onHotkey();
+    await settle();
+
+    expect(events.indexOf("clearPointer")).toBeLessThan(events.indexOf("showInput"));
+  });
+
   it("stays out of the way while dictation is running", async () => {
     const { onHotkey, events } = harness({ dictating: true });
 
     onHotkey();
     await settle();
 
+    // Nothing at all — including no clearPointer. Dictation owns the screen and the microphone,
+    // and an ignored press must leave every one of them exactly as it found them.
     expect(events).toEqual([]);
   });
 });

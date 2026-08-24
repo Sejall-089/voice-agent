@@ -24,12 +24,18 @@ import { UnavailableNotion } from "../core/notion/UnavailableNotion.ts";
 import { GoogleCalendar } from "../core/calendar/GoogleCalendar.ts";
 import { GoogleCalendarAuth } from "../core/calendar/GoogleCalendarAuth.ts";
 import { UnavailableCalendar } from "../core/calendar/UnavailableCalendar.ts";
+import { WindowsScreen } from "./screen/WindowsScreen.ts";
+import { AnthropicMessages } from "../core/vision/AnthropicMessages.ts";
+import { AnthropicVisionLocator } from "../core/vision/AnthropicVisionLocator.ts";
+import { UnavailableScreen } from "../core/vision/UnavailableScreen.ts";
+import { UnavailableVisionLocator } from "../core/vision/UnavailableVisionLocator.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
 import type {
   CalendarSurface,
   GmailSurface,
   NotionSurface,
   Transcriber,
+  VisionLocator,
 } from "../core/types.ts";
 
 // ONE hotkey (M8). It opens the command bar AND starts listening, so you decide whether
@@ -76,6 +82,9 @@ let inputInjector: WindowsInputInjector | null = null;
 // Same reason as inputInjector: will-quit's closure is separate from whenReady()'s, so the
 // warm Piper process (post-M14 cold-start fix) needs a module-scope handle to be released.
 let speechEngine: PiperSynthesizer | null = null;
+// And again for the pointing overlay (M15): a transparent always-on-top window that would
+// otherwise outlive the app exactly as the input host and the Piper process both once did.
+let screenSurface: WindowsScreen | null = null;
 
 const WINDOW_WIDTH = 640;
 const WINDOW_HEIGHT = 640;
@@ -131,6 +140,18 @@ app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 app.whenReady().then(() => {
   commandBar = createCommandBar();
+
+  // M15. The bar is a 640x640 always-on-top window in the middle of the screen, and `pointAt`
+  // photographs the screen while it is open — so without this the app would hand the vision
+  // model a picture of its own UI sitting on top of whatever the user was asking about.
+  //
+  // WDA_EXCLUDEFROMCAPTURE via Electron: the window stays visible to the person and vanishes
+  // from capture APIs, including our own. scripts/screen-recon.mjs Q3 measured it at 98.4% of a
+  // probe window captured unprotected and 0.0% protected, taking effect on the very next frame.
+  // Set permanently rather than toggled around each capture, because a permanent setting has no
+  // window in which it can be observed in the wrong state.
+  commandBar.setContentProtection(true);
+
   const shell = new WindowsShell(commandBar);
 
   // Voice capture runs in the renderer, so the window needs the media permission. Grant
@@ -168,11 +189,24 @@ app.whenReady().then(() => {
   // M14: same gate shape again — a capability the app cannot exercise is never offered.
   const synthesizer = createSynthesizer();
   speechEngine = synthesizer;
+  // M15: the only gate here that is an explicit OPT-IN rather than inferred from config that
+  // exists anyway. Every other capability above answers "is there a thing to talk to?" from
+  // something set for no other purpose — a debug Chrome, a refresh token, a piper binary. This
+  // one cannot: ANTHROPIC_API_KEY is very likely already present for the planner, and its
+  // presence must never be read as permission to send a picture of the user's screen anywhere.
+  const vision = createVisionLocator();
+  // Built only when vision is on, so an install that never opted in has no capture machinery at
+  // all — "no screenshot is taken" is a property of the object graph, not of a branch somewhere.
+  const screenSurfaceOrNull = vision ? new WindowsScreen() : null;
+  screenSurface = screenSurfaceOrNull;
+  if (screenSurfaceOrNull) shell.attachPointer(() => screenSurfaceOrNull.clearPointer());
   const tools = buildRegistry({
     gmail: gmail !== null,
     notion: notion !== null,
     calendar: calendar !== null,
     speech: synthesizer !== null,
+    // Both halves, or neither. Pointing needs something to capture with AND something to ask.
+    vision: vision !== null && screenSurfaceOrNull !== null,
   });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
@@ -189,6 +223,9 @@ app.whenReady().then(() => {
     draft,
     notion ?? new UnavailableNotion(),
     calendar ?? new UnavailableCalendar(),
+    undefined, // speech store — the planner's own scratch state, no composition needed
+    screenSurfaceOrNull ?? new UnavailableScreen(),
+    vision ?? new UnavailableVisionLocator(),
   );
 
   // The speech queue, wired both ways: the session plays THROUGH the shell, and the shell
@@ -249,6 +286,8 @@ app.whenReady().then(() => {
         // Same reason as the instruction hotkey: dictation types into another app, and the
         // app talking over it is noise on top of a microphone the two already share.
         speech?.stop();
+        // And a leftover marker is noise on top of the window about to be typed into (M15).
+        shell.clearPointer();
         onDictate();
       })
     : null;
@@ -270,6 +309,14 @@ app.whenReady().then(() => {
     dictation
       ? `[main] dictation ready - ${dictateHotkey ?? "(no free hotkey)"} types into the focused window`
       : "[main] dictation disabled - voice is off (WHISPER_EXE_PATH / WHISPER_MODEL_PATH not set)",
+  );
+  // Said out loud at startup, every run, on purpose. This is the one capability that can send a
+  // picture of the user's screen off the machine, and an install where it is quietly on is
+  // exactly the situation the explicit opt-in exists to prevent.
+  console.log(
+    vision
+      ? "[main] vision guidance ON - 'where is X' captures the screen and sends it to Anthropic"
+      : "[main] vision guidance off - VISION_ENABLED not set (no screen is ever captured)",
   );
 });
 
@@ -371,6 +418,40 @@ function createSynthesizer(): PiperSynthesizer | null {
   });
 }
 
+// M15. Config is read HERE like every other capability, but the GATE is a different shape, and
+// deliberately so.
+//
+// Every other one asks "is there a thing to talk to?" and answers itself from config that exists
+// for no other purpose — a debug Chrome URL, a Google refresh token, a piper binary path. Vision
+// cannot be gated that way: the credential it would key off, ANTHROPIC_API_KEY, is very likely
+// already set because the planner is using it, and reading its presence as permission to
+// photograph the user's screen would turn "I configured an LLM" into "I consented to screen
+// capture". Those are not the same decision, so this one needs a flag of its own.
+//
+// Unset means the tool is never on the menu, no WindowsScreen is constructed, and no screen is
+// ever captured — the same "off is a real state" rule as voice and speech, on the capability
+// where it matters most.
+function createVisionLocator(): VisionLocator | null {
+  if (process.env["VISION_ENABLED"] !== "1") return null;
+
+  // Enabled but unusable is worth saying out loud at startup rather than discovering at the
+  // first "where's the send button?" — the app would otherwise offer a tool that can only refuse.
+  if (!process.env["ANTHROPIC_API_KEY"]) {
+    console.error(
+      "[main] VISION_ENABLED=1 but ANTHROPIC_API_KEY is not set - vision guidance stays off. " +
+        "The vision call is Anthropic-only (spec §3), independently of LLM_PROVIDER.",
+    );
+    return null;
+  }
+
+  // The key is read inside AnthropicMessages, from the environment, and never logged (spec §10).
+  const model = process.env["VISION_MODEL"];
+  return new AnthropicVisionLocator({
+    api: new AnthropicMessages(),
+    ...(model ? { model } : {}),
+  });
+}
+
 // Same shape as createTranscriber: config is read HERE, in composition, and a missing value
 // disables one capability rather than breaking the app. Chrome has to be started with
 // --remote-debugging-port AND a dedicated --user-data-dir (Chrome 136+ refuses the port on the
@@ -444,4 +525,7 @@ app.on("will-quit", () => {
   // Release the warm Piper process (post-M14 cold-start fix), or the ONNX model host outlives
   // the app the same way the input host would.
   speechEngine?.dispose();
+  // And the pointing overlay (M15) — a transparent always-on-top window is the most obnoxious
+  // possible thing to leave behind, because there is nothing visible to close it with.
+  screenSurface?.dispose();
 });

@@ -44,6 +44,8 @@ flowchart TB
     LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
     Calendar["Google Calendar<br/>REST API · read, create, move"]
+    Vision["Vision model (Anthropic)<br/>where is this control? · opt-in;<br/>the one thing that sees your screen"]
+    Screen["Screen capture + pointing overlay<br/>photograph · draw a marker · never click"]
     OS["OS &amp; target apps<br/>browser, clipboard, any focused window"]
 
     User --> Shell
@@ -54,6 +56,9 @@ flowchart TB
     Core --> Slack
     Core <--> Chrome
     Core <--> Calendar
+    Core <--> Vision
+    Shell --> Screen
+    Core <--> Screen
 ```
 
 **Where voice sits:** entirely in the shell, in BOTH directions. Input converts speech into the
@@ -61,6 +66,12 @@ same string the command bar would have returned and hands it to the same call si
 (M14) takes text the core asked to have said and plays it. The core never learns either exists —
 it requests speech as an *action*, exactly as it requests a notification, and a machine with no
 synthesizer accepts that action and stays quiet.
+
+**Where vision sits (M15):** the screen is a *surface* the core reaches through `ToolDeps`,
+not a shell contract like the microphone — because capture is a request/response and the
+`pointAt` handler needs the picture back, where speech is fire-and-forget. Note what the arrows
+say about privacy: `Whisper` and `Piper` never leave the machine, and `Vision` is the one box
+that receives a picture of your screen. It is off unless `VISION_ENABLED=1`.
 
 **Read it as:** you sit at the top; the stacked boxes are *your* app; the boxes on
 the right are things the app uses but does not own. The shell is the only part that
@@ -99,8 +110,15 @@ knows it's on Windows.
   `SpeechShell` (`src/main/shell/`) plays it and can stop it. `SpeechSession` sits between them
   holding the queue. What is said is *derived* from what is shown (`core/speech.ts`), never
   authored twice — see §4d.
-- **LLM / Slack / Chrome / Calendar / OS** — rented reasoning, the external actions, and the
-  things the shell's hands touch.
+- **Screen + vision (M15)** — two interfaces again, and split for the same reason speech's are:
+  they fail differently and have different fixes. `ScreenSurface` (`src/main/screen/`) takes the
+  picture and draws the marker; `VisionLocator` (`core/vision/`) answers *where is this*. Both
+  are *surfaces* injected through `ToolDeps`, not shell contracts like the microphone, because
+  the handler needs the picture back. Between them sits the part that matters:
+  `core/vision/locate.ts`, which refuses an answer it cannot trust rather than pointing at it.
+- **LLM / Slack / Chrome / Calendar / Vision / OS** — rented reasoning, the external actions, and
+  the things the shell's hands touch. Vision is the only one that is sent a picture of your
+  screen, and the only one behind an explicit opt-in rather than "did you configure it".
 
 ---
 
@@ -407,6 +425,55 @@ text is on screen — which is what makes barge-in safe rather than destructive.
 
 ---
 
+## 4e. Pointing — a guess a person checks (M15)
+
+Every other surface this app acts through resolves its target *structurally*: Gmail by role and
+accessible name, Notion by `data-block-id` and document order, the calendar by event id. That is
+what makes them refusable — a control that can't be identified is never touched.
+
+Pixels offer nothing equivalent, so M15 changes what the answer is allowed to *do* instead of
+pretending the identification is as good. It draws a marker. A person clicks.
+
+```
+"where's the send button?"
+        │
+        ▼
+   planner picks pointAt { target: "the send button" }
+        │
+        ├─ narrate ─────────► "Looking at your screen to find the send button…"
+        │                      (caution tier — said BEFORE the capture, not after)
+        ▼
+   screen.capture()          1568px long edge · our own windows excluded from it
+        │
+        ▼
+   vision.locate()           one bounded question: WHERE is this?
+        │                    the model never chooses an action
+        ▼
+   checkLocation()  ──────►  refuse: not on screen / several match / off the frame /
+        │                            half the screen / too small / off-schema
+        ▼                            (and `screen.point` is never called)
+   toScreenRect()            image px → screen DIP
+        │
+        ▼
+   screen.point()            click-through overlay · never takes focus · self-dismisses
+        │
+        ▼
+   "Pointing at \"Send\" — the top right of your screen."
+```
+
+**The tier is about the capture, not the marker.** `clearPointer()` un-draws the highlight
+completely, which would make it `reversible` — but a screenshot that has left the machine is not
+recoverable, and the tier has to describe the worse half. Hence `caution`, and hence the
+narration, which for this one capability is the *point* of the tier rather than a cost of it.
+
+**Three pixel spaces are live at once** — 1280×720 DIP, a 1920×1080 native capture, a 1568×882
+downscale — and only `display.width / shot.width` spans the two that matter. At native resolution
+that ratio equals `1 / scaleFactor`, which is what makes the wrong version so tempting; it is
+correct right up until the downscale every real request goes through. `Screenshot.display`
+carries no `scaleFactor` field so the wrong version cannot be written.
+
+---
+
 ## 5. Memory data model
 
 Two tables. `facts` carries the epistemic metadata (confidence, version, active) so
@@ -484,5 +551,10 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
   + accessible name, Notion (no roles on body content, confirmed live) by `data-block-id` and
   document order. Expect each new app to need its own recon pass, not a copy-paste.
 - Mac and Linux shells behind the same `OSShell` + `VoiceShell` interfaces.
+- ~~Screenshot-driven interaction with any app.~~ **Half of it built in M15** — the app points,
+  the user clicks (§4e). The other half, auto-clicking what the vision model identifies, is not a
+  next step on this path: it is the thing M15 is the alternative to. Building it would need a
+  fail-closed design for "the model was confidently wrong", which pointing sidesteps entirely by
+  keeping a person as the executor.
 - Multi-step plans and a real agent loop (the closed→open world jump).
 - Point the memory engine at the Postgres/Neon personal OS instead of local SQLite.
