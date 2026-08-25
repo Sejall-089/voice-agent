@@ -1,5 +1,5 @@
 import { screenCaptureError } from "../errors.ts";
-import type { ScreenSurface, Screenshot } from "../types.ts";
+import type { DisplayBounds, NativeRect, ScreenSurface, Screenshot } from "../types.ts";
 
 // The default `ScreenSurface` (M15) — the exact counterpart of `UnavailableSender`,
 // `UnavailableGmail`, `UnavailableNotion` and `UnavailableCalendar`.
@@ -22,5 +22,8 @@ export class UnavailableScreen implements ScreenSurface {
   }
   clearPointer(): void {
     // Nothing is showing, because nothing can be.
+  }
+  displayForNative(_rect: NativeRect): Promise<DisplayBounds> {
+    return Promise.reject(screenCaptureError("unavailable"));
   }
 }

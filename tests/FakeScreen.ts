@@ -1,4 +1,6 @@
 import type {
+  DisplayBounds,
+  NativeRect,
   PointerTarget,
   ScreenSurface,
   Screenshot,
@@ -73,4 +75,15 @@ export class FakeScreen implements ScreenSurface {
   clearPointer(): void {
     this.clears += 1;
   }
+
+  // Every rect lands on the one display these fixtures were measured on: 1280x720 DIP over
+  // 1920x1080 native, scaleFactor 1.5. Deliberately the SCALED display — a 1:1 fake would make
+  // the native→DIP conversion look like the identity function, which is the bug it is most
+  // likely to have.
+  displayForNative(rect: NativeRect): Promise<DisplayBounds> {
+    this.displayLookups.push(rect);
+    return Promise.resolve(this.shot.display);
+  }
+
+  public readonly displayLookups: NativeRect[] = [];
 }

@@ -1,28 +1,39 @@
-import { checkLocation } from "../vision/locate.ts";
-import { describePosition, toScreenRect } from "../vision/geometry.ts";
+import { toScreenRect } from "../screen/geometry.ts";
+import { readSettledWindow } from "../screen/pointing.ts";
+import { resolveChoice } from "../screen/resolve.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
-// M15: show the user where something is on their screen, so THEY can click it.
+// M16: show the user where something is on their screen, so THEY can click it.
 //
 // The one tool in the registry that acts on any application at all rather than on a specific
 // one, and the reason it is allowed to is that it does not act on them — it draws a marker over
-// them. spec §2 kept screenshot-driven control out of scope because "reading a page's real
-// structure is checkable and refusable; guessing from pixels is not". That objection is about a
-// guess DRIVING an irreversible action. Here the guess drives a suggestion and a person is the
-// executor, so the app can be wrong the way a colleague pointing at your screen can be wrong.
+// them. The guess drives a suggestion and a person is the executor, so the app can be wrong the
+// way a colleague pointing at your screen can be wrong.
 //
-// `risk: "caution"`, and the tier is about the CAPTURE, not the marker.
-//   * Not `safe`: it draws, and it sends.
+// WHAT M16 CHANGED, AND WHY IT IS THE WHOLE POINT. M15 shipped this on vision: a screenshot went
+// to a model and the model returned a bounding box. Live testing found it localizing the WRONG
+// CONTROL on real Windows chrome — one tab over on a tab label, ~208px onto a neighbouring
+// toolbar icon — which is not imprecision, it is the wrong answer given confidently. That made
+// this the single place in the codebase where "the LLM proposes, the planner disposes" was
+// broken: vision both proposed (which control) and disposed (where it is).
+//
+// Now UI Automation enumerates the window's controls with exact rects, code numbers them, and
+// the model's entire output surface is one integer. An integer cannot be off by 208 pixels. It
+// can be the WRONG integer — a semantic error, which is the error class models are good at, and
+// one the user can see in the label drawn beside the marker.
+//
+// A consequence worth stating plainly: NO SCREENSHOT IS TAKEN AND NOTHING IS SENT ANYWHERE
+// EXCEPT A LIST OF CONTROL NAMES. The candidate list is text. M15's whole privacy gate existed
+// because a picture of the user's screen left the machine; that no longer happens.
+//
+// `risk: "caution"`, and the tier is about READING ANOTHER WINDOW, not about the marker.
+//   * Not `safe`: it reads the contents of whatever the user was last looking at, and it draws.
 //   * Not `reversible`: `risk.ts` reserves that for things recoverable by mechanisms this app
-//     owns. The overlay qualifies — `clearPointer()` un-draws it completely — but a screenshot
-//     that has left the machine does not, and the tier has to describe the worst half.
+//     owns. The overlay qualifies — `clearPointer()` un-draws it — but the control names have
+//     already gone to a model by then, and the tier has to describe the worst half.
 //   * Not `dangerous`: nothing reaches another person, nothing is written anywhere, and a
 //     confirm dialog in front of every "where's the send button?" would make the capability
 //     unusable for the one thing it is for.
-// So it narrates. Given this is the first capability in the project that sends a picture of the
-// user's screen off their machine (spec §2), an announcement at the moment it happens is the
-// point of the tier rather than a cost of it — narration is what stands in for the undo that
-// does not exist.
 export const pointAtTool: Tool = {
   name: "pointAt",
   description:
@@ -50,38 +61,47 @@ export const pointAtTool: Tool = {
   // `target` is a literal description of something visible, not a reference to look up. Memory
   // resolution exists to turn "my dashboard" into a URL, and letting it near this argument would
   // rewrite "my inbox" into `https://mail.google.com/...` and then hunt the screen for a URL.
-  // Same reasoning as the memory-writing tools, different direction.
   resolvesReferences: false,
-  // Announced BEFORE the screen is captured. Deliberately says "look at your screen" in plain
-  // words rather than something softer: the whole gate on this capability is that the user knows
-  // when it is happening. SAFE — it reads nothing and captures nothing.
+  // Announced BEFORE the window is read. It no longer says "looking at your screen", because
+  // that would now be false in a specific and important way: nothing is photographed. What
+  // happens is that the controls of one window are read and their NAMES are sent. The narration
+  // says the true thing. SAFE — it reads nothing and enumerates nothing.
   narrate: (args: ToolInput): string => {
     const target = asTarget(args);
-    return `Looking at your screen to find ${target}…`;
+    return `Checking the controls on screen for ${target}…`;
   },
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const target = asTarget(input);
 
-    // Take the picture, ask about it, and let the deterministic gate decide whether the answer
-    // is one we will act on. Each step throws a UserFixableError of its own on failure — a
-    // screen that cannot be captured, a model that cannot be reached, an answer that cannot be
-    // trusted — and the planner shows each verbatim rather than wrapping it in "something went
-    // wrong". Three different problems with three different fixes.
-    const shot = await deps.screen.capture();
-    const answer = await deps.vision.locate(shot, target);
-    const located = checkLocation(answer, shot, target);
+    // 1. Read the window, waiting for its control list to stop moving first. Refuses on its own
+    //    terms when the tree is bare (`unreadable`) or still in motion (`unsettled`) — see
+    //    core/screen/pointing.ts.
+    const { window, candidates } = await readSettledWindow({
+      elements: deps.elements,
+      sleep: deps.sleep,
+    });
 
-    // Image pixels -> screen DIP. The one silent-failure step in the milestone: a wrong mapping
-    // does not throw, it points confidently at the wrong place. See core/vision/geometry.ts.
-    const rect = toScreenRect(located.box, shot);
-    await deps.screen.point({ rect, label: located.label });
+    // 2. Ask which one. The model sees names, control types and code-computed position phrases —
+    //    never a coordinate.
+    const choice = await deps.chooser.choose(candidates, target, window.windowTitle);
+
+    // 3. The deterministic gate. Out of range, "none of these", and two candidates the model
+    //    could not have told apart all refuse here rather than becoming a marker.
+    const chosen = resolveChoice(candidates, choice, target, window.windowTitle);
+
+    // 4. Native screen pixels → DIP. Exact, not estimated: the rect came from the OS. This is
+    //    still the one step that fails silently rather than loudly if it is wrong, which is why
+    //    `ScreenRect` is branded so nothing else can reach the overlay.
+    const display = await deps.screen.displayForNative(window.windowRect);
+    const rect = toScreenRect(chosen.rect, display);
+    await deps.screen.point({ rect, label: chosen.name });
 
     // The sentence stands on its own, because the marker is the disposable channel and the text
     // is the durable one (§4d). Spoken aloud, or read after the overlay has timed out, this
     // still tells the user where to look — and it names what the app THINKS it found, so a
     // marker sitting on "Discard" while the label says "Send" is visible as a disagreement
     // rather than trusted as an answer.
-    return `Pointing at "${located.label}" — ${describePosition(located.box, shot)}.`;
+    return `Pointing at "${chosen.name}" — ${chosen.position} of ${window.windowTitle}.`;
   },
 };
 

@@ -1,28 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { Planner } from "../src/core/planner.ts";
-import { buildRegistry, findTool } from "../src/core/registry.ts";
-import { pointAtTool } from "../src/core/tools/pointAt.ts";
+import { buildRegistry } from "../src/core/registry.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
-import { screenCaptureError, visionError } from "../src/core/errors.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import { FakeLLM } from "./FakeLLM.ts";
-import { FakeScreen, RECON_SHOT } from "./FakeScreen.ts";
-import { FakeVisionLocator, VISION } from "./FakeVisionLocator.ts";
+import { FakeScreen } from "./FakeScreen.ts";
+import { FakeElements, TREES } from "./FakeElements.ts";
+import { FakeChooser } from "./FakeChooser.ts";
+import { chooserError } from "../src/core/errors.ts";
 import type {
   CapturedContext,
-  LocateResult,
-  Memory,
-  ToolChoice,
-  ToolInput,
+  ElementChooser,
+  WindowElements,
 } from "../src/core/types.ts";
-
-// The pointing flow end to end through the planner (M15), against fakes: no screen is captured,
-// no image is sent anywhere, and no electron window is created.
-//
-// The assertion that appears in almost every case below is `screen.pointed` being EMPTY. That is
-// the milestone's one safety property written down: an answer the deterministic gate does not
-// trust must never become a marker, because the user clicks what we point at.
 
 const NO_CONTEXT: CapturedContext = {
   selectedText: null,
@@ -30,42 +21,53 @@ const NO_CONTEXT: CapturedContext = {
   activeWindowTitle: null,
 };
 
-const TARGET = "the send button";
+// THE WHOLE PIPELINE, END TO END, against fakes (M16.7).
+//
+// Every layer below has its own unit tests — enumeration and filtering (elements.test.ts), the
+// settle decision (settle.test.ts), the choose contract (choosePrompt.test.ts), the geometry
+// (screenGeometry.test.ts). This file exists because a wiring bug BETWEEN correctly-tested
+// layers is exactly what those miss: a refusal thrown in one and swallowed in another, a rect
+// converted with the wrong display, a step skipped entirely.
+//
+// So the assertions here are deliberately about the SEAMS. The three regression targets are
+// checked as final DIP rectangles rather than as candidate numbers, and every refusal path is
+// driven from the planner rather than from the function that raises it.
 
-function choice(target: string = TARGET): ToolChoice {
-  return { kind: "tool", name: "pointAt", input: { target } };
-}
+const TARGET = "the thing";
 
 interface Wiring {
-  answer?: LocateResult | LocateResult[];
-  visionFails?: Error;
-  screen?: FakeScreen;
-  memory?: Memory;
-  choice?: ToolChoice;
+  trees?: WindowElements[];
+  probeCounts?: number[];
+  chooser?: ElementChooser;
 }
 
 function setup(wiring: Wiring = {}) {
   const shell = new MockShell({ context: NO_CONTEXT });
   const log = new InMemoryActionLog();
-  const screen = wiring.screen ?? new FakeScreen();
-  const vision = wiring.visionFails
-    ? FakeVisionLocator.failing(wiring.visionFails)
-    : new FakeVisionLocator(wiring.answer ?? VISION["sendButton"]!);
-  const llm = new FakeLLM(wiring.choice ?? choice());
+  const screen = new FakeScreen();
+  const elements = new FakeElements({
+    trees: wiring.trees ?? [TREES["notepad"]!],
+    ...(wiring.probeCounts ? { probeCounts: wiring.probeCounts } : {}),
+  });
+  const chooser = wiring.chooser ?? FakeChooser.picking("File");
 
-  // Six `undefined`s, and they are load-bearing rather than lazy: `screen` and `vision` are the
-  // twelfth and thirteenth constructor parameters, so everything optional between the log and
-  // them has to be named to reach them. Written out once, here, instead of in every test.
-  //
-  // This is the cost of the deferred options-object refactor, honestly paid. It is not a silent
-  // hazard — the surfaces are structurally different types, so miscounting the gaps is a
-  // compile error rather than a calendar arriving where a screen belongs — but it is the
-  // clearest argument in the codebase for making that change next.
+  const llm = new FakeLLM({
+    kind: "tool",
+    name: "pointAt",
+    input: { target: TARGET },
+  });
+
+  // Thirteen `undefined`s to reach the M16 surfaces. The comment this replaces called six of
+  // them "the clearest argument in the codebase for making Planner take an options object" —
+  // M16 has now doubled it. Left positional deliberately rather than refactored mid-milestone:
+  // 33 construction sites across 17 files is not a change to make while wiring a pipeline.
+  // Logged as the next cleanup instead.
+  const sleeps: number[] = [];
   const planner = new Planner(
     llm,
     shell,
     buildRegistry({ gmail: false, vision: true }),
-    wiring.memory ?? new NoopMemoryResolver(),
+    new NoopMemoryResolver(),
     log,
     undefined, // sender
     undefined, // gmail
@@ -74,279 +76,279 @@ function setup(wiring: Wiring = {}) {
     undefined, // calendar
     undefined, // speech store
     screen,
-    vision,
+    undefined, // vision (M15, on its way out at M16.10)
+    elements,
+    chooser,
+    async (ms: number) => {
+      // Time is a dependency here, not a wall clock: the settle loop's delays are recorded and
+      // returned instantly, so a test covering a cold Chromium tree costs nothing to run.
+      sleeps.push(ms);
+    },
   );
-  return { shell, log, screen, vision, planner };
+
+  return { shell, log, screen, elements, chooser, planner, sleeps };
 }
 
-describe("pointing at something", () => {
-  it("captures, asks, and draws the marker where the answer says", async () => {
-    const { planner, screen, vision, shell } = setup();
-
-    const outcome = await planner.run("where's the send button?");
+// ---------------------------------------------------------------------------
+// THE THREE REGRESSION TARGETS, THROUGH THE FULL PIPELINE.
+//
+// M16.3 proved these resolve to one candidate at the right NATIVE rect. M16.5 proved the model
+// picks them. Neither says the two halves are joined correctly, or that the native → DIP
+// conversion is handed the right display on the way out. These do.
+//
+// The expected values are the DIP rectangles hand-computed in tests/screenGeometry.test.ts
+// against the 1.5x display, repeated here as literals so a regression anywhere along the chain
+// fails in the flow test too, not only in the unit that owns one link of it.
+// ---------------------------------------------------------------------------
+describe("the three controls M15 pointed at wrongly", () => {
+  it("points at Notepad's File menu — native 4,49 62x48 -> DIP 3,33 41x32", async () => {
+    const { screen, outcome } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.picking("File"),
+    });
 
     expect(outcome.status).toBe("ok");
-    expect(screen.captures).toBe(1);
-    // The captured frame and the user's own words both reached the model.
-    expect(vision.asked).toEqual([{ target: TARGET, shot: RECON_SHOT }]);
-    // Image pixels {1200,100,120,40} on a 1568x882 frame of a 1280x720 display, mapped to DIP.
-    // Hand-computed in tests/visionGeometry.test.ts — repeated here as a literal so a mapping
-    // regression fails in the flow test too, not only in the unit that owns it.
     expect(screen.pointed).toEqual([
-      { rect: { x: 980, y: 82, width: 98, height: 32 }, label: "Send" },
-    ]);
-    expect(outcome.result).toBe(`Pointing at "Send" — the top right of your screen.`);
-    expect(shell.results).toEqual([`Pointing at "Send" — the top right of your screen.`]);
-  });
-
-  it("announces that it is about to look, before it looks", async () => {
-    // `caution` narration, and here it is doing real work rather than ceremony: this is the
-    // first capability in the app that sends a picture of the user's screen off the machine, so
-    // the announcement is the thing that makes it observable at the moment it happens.
-    const { planner, shell } = setup();
-    await planner.run("where's the send button?");
-
-    expect(shell.actions).toEqual([
-      { kind: "notify", payload: `Looking at your screen to find ${TARGET}…` },
-    ]);
-    expect(shell.spoken[0]).toMatch(/Looking at your screen to find the send button/);
-    // Never a confirm dialog — a yes/no in front of every "where is X" would make the one thing
-    // this is for unusable.
-    expect(shell.confirmMessages).toEqual([]);
-  });
-
-  it("narrates even when the capture then fails, so the order is provable", async () => {
-    // If narration happened after the capture, a failed capture would leave the user with an
-    // error about a screenshot they were never told was being taken.
-    const screen = new FakeScreen({ failCapture: screenCaptureError("no-display") });
-    const { planner, shell } = setup({ screen });
-
-    await planner.run("where's the send button?");
-
-    expect(shell.actions).toEqual([
-      { kind: "notify", payload: `Looking at your screen to find ${TARGET}…` },
+      { rect: { x: 3, y: 33, width: 41, height: 32 }, label: "File" },
     ]);
   });
 
-  it("speaks the answer, so it works without looking at the marker", async () => {
-    const { planner, shell } = setup();
-    await planner.run("where's the send button?");
-    // The marker is the disposable channel; the sentence is the durable one (spec §4d).
-    expect(shell.spoken.some((line) => /top right of your screen/.test(line))).toBe(true);
-  });
-});
-
-describe("refusing rather than guessing", () => {
-  it("says so when the thing is not on screen, and points at nothing", async () => {
-    const { planner, screen, log, shell } = setup({ answer: VISION["notFound"]! });
-
-    const outcome = await planner.run("where's the send button?");
-
-    expect(screen.pointed).toEqual([]);
-    expect(outcome.status).toBe("refused");
-    expect(shell.results).toEqual([
-      `I couldn't find "the send button" on your screen — there's no browser window open.`,
-    ]);
-    // `refused`, not `no_tool`: spec §8 defines the miss list as a ranked backlog of tools worth
-    // building, and "it isn't on your screen" is not a missing tool. Same distinction M9 drew
-    // for a truncated model response.
-    expect(log.misses).toEqual([]);
-    expect(log.entries.at(-1)?.status).toBe("refused");
-  });
-
-  it("names the candidates when several match, instead of picking one", async () => {
-    const { planner, screen, shell } = setup({ answer: VISION["ambiguous"]! });
-
-    const outcome = await planner.run("where's the send button?");
-
-    expect(screen.pointed).toEqual([]);
-    expect(outcome.status).toBe("refused");
-    expect(shell.results[0]).toBe(
-      `I can see more than one thing that could be "the send button": Send and Send later. ` +
-        `Which one?`,
-    );
-  });
-
-  it("refuses the hedge — a box covering the whole screen", async () => {
-    const { planner, screen, shell } = setup({ answer: VISION["wholeScreen"]! });
-
-    const outcome = await planner.run("where's the send button?");
-
-    expect(screen.pointed).toEqual([]);
-    expect(outcome.status).toBe("refused");
-    expect(shell.results[0]).toMatch(/doesn't look right/);
-  });
-
-  it("refuses coordinates that are in the wrong pixel space", async () => {
-    // The likeliest real coordinate bug: an answer in the 1920x1080 native capture against the
-    // 1568x882 frame we actually sent. Without the bounds check this is a confident marker in
-    // the wrong place — the exact failure the milestone is designed around.
-    const { planner, screen } = setup({ answer: VISION["nativeCoordinates"]! });
-
-    const outcome = await planner.run("where's the close button?");
-
-    expect(screen.pointed).toEqual([]);
-    expect(outcome.status).toBe("refused");
-  });
-
-  it("refuses a small icon end to end, with a message distinct from 'not found'", async () => {
-    // M15.1: proves the size gate fires through the WHOLE tool, not just the pure function
-    // tests/visionLocate.test.ts already covers. The model here answers cleanly — in-frame,
-    // sensibly labelled, tight box — exactly the shape of answer every OTHER check in
-    // core/vision/locate.ts would pass. Only SMALL_TARGET_PX catches it.
-    const { planner, screen, shell } = setup({
-      answer: VISION["smallIcon"]!,
-      choice: { kind: "tool", name: "pointAt", input: { target: "the settings icon" } },
+  it("points at Notepad's Advice.txt TAB — native 454,1 120x48 -> DIP 303,1 80x32", async () => {
+    const { screen } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.picking("Advice.txt"),
     });
 
-    const outcome = await planner.run("where's the settings icon?");
-
-    expect(screen.pointed).toEqual([]);
-    expect(outcome.status).toBe("refused");
-    expect(shell.results[0]).toBe(
-      `I can see something that's probably "the settings icon", but it's small enough on ` +
-        `screen that I can't point at it reliably — you may need to find it and click it yourself.`,
-    );
-    // The distinction the task cares about: this reads as "it's there, but I can't trust my
-    // aim" — never as "I couldn't find it", which is a different fact with a different fix
-    // (rephrase vs. just click it yourself).
-    expect(shell.results[0]).not.toContain("couldn't find");
-  });
-});
-
-describe("when the machinery itself is unavailable", () => {
-  it("explains a screen that cannot be captured, and never asks the model", async () => {
-    const screen = new FakeScreen({ failCapture: screenCaptureError("no-display") });
-    const { planner, vision, shell } = setup({ screen });
-
-    const outcome = await planner.run("where's the send button?");
-
-    expect(outcome.status).toBe("refused");
-    expect(shell.results[0]).toMatch(/couldn't get a picture of your screen/);
-    // Nothing was sent anywhere, because there was nothing to send.
-    expect(vision.asked).toEqual([]);
+    // The 120x48 hit area, not the 79x23 label UIA nests inside it. That the label never even
+    // reaches the chooser is the dedup rule working three layers down.
+    expect(screen.pointed).toEqual([
+      { rect: { x: 303, y: 1, width: 80, height: 32 }, label: "Advice.txt. Unmodified." },
+    ]);
   });
 
-  it("explains an unreachable model without blaming the screen", async () => {
-    const { planner, screen, shell } = setup({
-      visionFails: visionError("unreachable", "connect ETIMEDOUT"),
+  it("points at Explorer's New button — native 9,123 129x67 -> DIP 6,82 86x45", async () => {
+    const { screen } = await run({
+      trees: [TREES["explorer"]!],
+      chooser: FakeChooser.picking("New"),
     });
 
-    const outcome = await planner.run("where's the send button?");
+    expect(screen.pointed).toEqual([
+      { rect: { x: 6, y: 82, width: 86, height: 45 }, label: "New" },
+    ]);
+  });
 
+  it("converts through the display the WINDOW is on, not a guessed one", async () => {
+    const { screen } = await run({
+      trees: [TREES["explorer"]!],
+      chooser: FakeChooser.picking("New"),
+    });
+    // The lookup is driven by the window's own rect — the seam that would silently put a marker
+    // on the wrong monitor if it were skipped or fed the wrong rectangle.
+    expect(screen.displayLookups).toEqual([TREES["explorer"]!.windowRect]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("what reaches the chooser", () => {
+  it("passes the filtered candidates, the user's words and the window title", async () => {
+    const chooser = FakeChooser.picking("File");
+    await run({ trees: [TREES["notepad"]!], chooser });
+
+    const asked = (chooser as FakeChooser).asked;
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.target).toBe(TARGET);
+    expect(asked[0]!.windowTitle).toBe("Advice.txt - Notepad");
+    // 26, not 39: the filter and dedup ran before the model was asked.
+    expect(asked[0]!.candidates).toHaveLength(26);
+  });
+
+  it("announces the check BEFORE reading the window, and no longer claims to look at a screen", async () => {
+    const { shell } = await run({ chooser: FakeChooser.picking("File") });
+    // M16 takes no screenshot at all, so "Looking at your screen…" would now be a false
+    // statement about what the app just did.
+    expect(shell.actions).toEqual([
+      { kind: "notify", payload: `Checking the controls on screen for ${TARGET}…` },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EVERY REFUSAL PATH, DRIVEN FROM THE PLANNER.
+//
+// Each was built and unit-tested where it is raised. What that cannot show is whether it
+// SURVIVES the trip: a `UserFixableError` caught and rewrapped somewhere, an exception swallowed
+// by an intermediate `try`, or a path the pipeline simply never reaches. So each is re-proven
+// from the outside, and each asserts `screen.pointed` is EMPTY — the milestone's safety property
+// is that an answer we do not trust never becomes a marker.
+// ---------------------------------------------------------------------------
+describe("refusals reach the user, and never draw", () => {
+  it("unreadable: a bare tree (Claude desktop, chrome only)", async () => {
+    const { outcome, screen } = await run({
+      trees: [TREES["claudeBare"]!],
+      probeCounts: [14, 14, 14, 14],
+      chooser: FakeChooser.picking("Close"),
+    });
+
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
     expect(outcome.status).toBe("refused");
-    expect(shell.results[0]).toBe(
-      "I couldn't reach Anthropic to look at your screen: connect ETIMEDOUT",
-    );
+    expect(outcome.result).toContain("can't read the controls");
+    // Present tense, and it names the window rather than the application.
+    expect(outcome.result).toContain("Claude");
+    expect(outcome.result).toContain("right now");
     expect(screen.pointed).toEqual([]);
   });
 
-  it("names the right key when the Anthropic one is missing", async () => {
-    // The planner may be running perfectly well on OPENAI_API_KEY, so "the API key is missing"
-    // would read as obviously false. This is M13's insufficient-scope lesson: a message that
-    // sends someone to fix the wrong thing is worse than a vague one.
-    const { planner, shell } = setup({ visionFails: visionError("no-key") });
+  it("unreadable: a minimized window, which IsOffscreen does not catch", async () => {
+    const { outcome, screen } = await run({
+      trees: [TREES["notepadMinimized"]!],
+      probeCounts: [49, 49, 49],
+      chooser: FakeChooser.picking("File"),
+    });
 
-    await planner.run("where's the send button?");
-
-    expect(shell.results[0]).toContain("ANTHROPIC_API_KEY");
-  });
-
-  it("refuses through the unavailable defaults when nothing is wired up at all", async () => {
-    // The second line of defence: in the running app `pointAt` is not even on the menu without
-    // VISION_ENABLED, but a planner built without the surfaces must still refuse honestly rather
-    // than throw something shaped like a crash.
-    const shell = new MockShell({ context: NO_CONTEXT });
-    const planner = new Planner(
-      new FakeLLM(choice()),
-      shell,
-      [pointAtTool],
-      new NoopMemoryResolver(),
-      new InMemoryActionLog(),
-    );
-
-    const outcome = await planner.run("where's the send button?");
-
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
     expect(outcome.status).toBe("refused");
-    expect(shell.results[0]).toContain("VISION_ENABLED=1");
-  });
-});
-
-describe("how the tool is wired", () => {
-  it("is only on the menu when vision is turned on", () => {
-    const off = buildRegistry({ gmail: false }).map((t) => t.name);
-    const on = buildRegistry({ gmail: false, vision: true }).map((t) => t.name);
-
-    expect(off).not.toContain("pointAt");
-    expect(on).toContain("pointAt");
-    // Still resolvable by name, so a model that names it on an install where it is off gets a
-    // graceful refusal rather than a hallucinated-tool path.
-    expect(findTool("pointAt")).toBe(pointAtTool);
+    expect(outcome.result).toContain("can't read the controls");
+    expect(screen.pointed).toEqual([]);
   });
 
-  it("keeps memory away from the target", async () => {
-    // `target` is a literal description of something visible, not a reference to look up.
-    // Resolution would rewrite "my inbox" into a URL and then hunt the screen for it.
-    const resolved: ToolInput[] = [];
-    // A real subclass, not a spread of one: `NoopMemoryResolver`'s methods live on the
-    // prototype, so `{...new NoopMemoryResolver()}` copies nothing at all.
-    class SpyMemory extends NoopMemoryResolver {
-      override resolveArgs(input: ToolInput): Promise<ToolInput> {
-        resolved.push(input);
-        return super.resolveArgs(input);
-      }
-    }
-    const spy: Memory = new SpyMemory();
-    const { planner } = setup({ memory: spy, choice: choice("my inbox") });
+  it("unsettled: a tree still growing when the budget runs out", async () => {
+    const { outcome, screen, elements } = await run({
+      trees: [TREES["claudeWoke"]!],
+      probeCounts: [13, 40, 88, 141, 197, 260, 322, 400],
+      chooser: FakeChooser.picking("Close"),
+    });
 
-    await planner.run("point at my inbox");
-
-    expect(pointAtTool.resolvesReferences).toBe(false);
-    expect(resolved).toEqual([]);
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
+    expect(outcome.status).toBe("refused");
+    expect(outcome.result).toContain("still loading");
+    expect(screen.pointed).toEqual([]);
+    // It never read the tree, because there was never a moment worth reading.
+    expect(elements.enumerations).toBe(0);
   });
 
-  it("is caution, and declares only that", () => {
-    // Not `reversible`: the overlay is undoable, but a screenshot that has left the machine is
-    // not, and the tier describes the worse half. Not `dangerous`: nothing reaches anyone else.
-    expect(pointAtTool.risk).toBe("caution");
-    expect(pointAtTool.narrate).toBeTypeOf("function");
-    expect(pointAtTool.confirmSummary).toBeUndefined();
+  it("not-found: the model says none of these", async () => {
+    const { outcome, screen } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.saying_none(),
+    });
+
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
+    expect(outcome.status).toBe("refused");
+    // The claim vision could never make: it can say how many it looked at.
+    expect(outcome.result).toContain("26 controls");
+    expect(outcome.result).toContain("Advice.txt - Notepad");
+    expect(screen.pointed).toEqual([]);
   });
 
-  it("asks for the target and nothing else", () => {
-    expect(pointAtTool.inputSchema.required).toEqual(["target"]);
-    expect(Object.keys(pointAtTool.inputSchema.properties)).toEqual(["target"]);
+  it("ambiguous: the model volunteers several", async () => {
+    const { outcome, screen } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.saying_ambiguous("Advice.txt", "Imp.txt"),
+    });
+
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
+    expect(outcome.status).toBe("refused");
+    expect(outcome.result).toContain("2 things that could be");
+    expect(screen.pointed).toEqual([]);
   });
 
-  it("complains usefully when the model passes an empty target", async () => {
-    const { planner, screen, shell } = setup({ choice: { kind: "tool", name: "pointAt", input: { target: "   " } } });
+  it("ambiguous: CODE catches indistinguishable twins the model picked between", async () => {
+    // Explorer's four "Filter dropdown" buttons — identical name, type and position. The model
+    // answered a confident PICK; the gate refuses anyway.
+    const { outcome, screen } = await run({
+      trees: [TREES["explorer"]!],
+      chooser: FakeChooser.picking("Filter dropdown"),
+    });
 
-    const outcome = await planner.run("point at");
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
+    expect(outcome.status).toBe("refused");
+    expect(outcome.result).toContain("Filter dropdown");
+    expect(outcome.result).toContain("from the left");
+    expect(screen.pointed).toEqual([]);
+  });
 
-    // An empty required argument is a malfunction of the call, not a state of the world — so
-    // this is an error, not a refusal.
-    expect(outcome.status).toBe("error");
-    expect(shell.results[0]).toContain("Tell me what to look for");
+  it("untrustworthy: an index that does not exist", async () => {
+    const { outcome, screen } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.picking_number(999),
+    });
+
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
+    expect(outcome.status).toBe("refused");
+    expect(outcome.result).toContain("doesn't match anything I can see");
+    expect(screen.pointed).toEqual([]);
+  });
+
+  it("a chooser that cannot be reached at all", async () => {
+    // Throws what the REAL chooser would throw, not a bare Error: ModelElementClassifier turns a
+    // network failure into a ChooserError before it leaves that class, and the thing worth
+    // checking here is that the classified error survives the trip out as a refusal rather than
+    // surfacing as a malfunction. A fake throwing a raw Error would be testing the fake.
+    const { outcome, screen } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.failing(chooserError("unreachable", "ECONNREFUSED")),
+    });
+
+    // "refused", not "error": every one of these is a UserFixableError, so the planner reports
+    // it as something the person can act on rather than as a malfunction. That classification
+    // surviving the trip out is itself part of what this file is checking.
+    expect(outcome.status).toBe("refused");
     expect(screen.pointed).toEqual([]);
   });
 });
 
-describe("what gets recorded", () => {
-  it("logs the words and the answer, and no image", async () => {
-    // The privacy claim in one assertion: the screenshot exists for the duration of the handler
-    // and reaches nothing durable. The action log is the only thing in this app that persists a
-    // record of what happened, and it must hold text.
-    const { planner, log } = setup();
+// ---------------------------------------------------------------------------
+describe("the settle cost, through the pipeline", () => {
+  it("a native window pays no delay at all", async () => {
+    const { sleeps, elements } = await run({
+      trees: [TREES["notepad"]!],
+      probeCounts: [49],
+      chooser: FakeChooser.picking("File"),
+    });
 
-    await planner.run("where's the send button?");
+    expect(sleeps).toEqual([]);
+    expect(elements.probes).toBe(1);
+    expect(elements.enumerations).toBe(1);
+  });
 
-    const entry = log.entries.at(-1);
-    expect(entry?.tool).toBe("pointAt");
-    expect(entry?.arguments).toEqual({ target: TARGET });
-    expect(entry?.result).toBe(`Pointing at "Send" — the top right of your screen.`);
+  it("a cold Chromium window waits, then answers from the SETTLED list", async () => {
+    const { screen, sleeps } = await run({
+      trees: [TREES["claudeWoke"]!],
+      probeCounts: [13, 613, 613],
+      chooser: FakeChooser.picking("Close"),
+    });
 
-    const serialized = JSON.stringify(entry);
-    expect(serialized).not.toContain("png");
-    expect(serialized.length).toBeLessThan(400);
+    // Two settle rounds at 350ms, exactly as settle.test.ts predicts for 13 -> 613 -> 613.
+    expect(sleeps).toEqual([350, 350]);
+    expect(screen.pointed).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe("the registry gate", () => {
+  it("does not offer pointAt when pointing is off", () => {
+    expect(buildRegistry({ gmail: false }).map((t) => t.name)).not.toContain("pointAt");
+    expect(buildRegistry({ gmail: false, vision: true }).map((t) => t.name)).toContain("pointAt");
+  });
+});
+
+// A tiny runner so each test reads as a scenario rather than as setup.
+async function run(wiring: Wiring) {
+  const parts = setup(wiring);
+  const outcome = await parts.planner.run("where is it?");
+  return { ...parts, outcome };
+}

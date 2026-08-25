@@ -1573,6 +1573,41 @@ were tuned, not from this fixture alone.
 The "Thinking…" indicator covers it, but a "where is X" that takes half a minute is a different
 interaction from one that takes three seconds.
 
+### M16 — known limitations, carried deliberately
+
+Recorded here rather than left implicit, because both are things a future reader would otherwise
+have to rediscover.
+
+- **Multi-monitor DPI math has never run on real multi-monitor hardware.** The native-pixels →
+  DIP conversion (`core/screen/geometry.ts`) translates the physical origin before scaling and
+  adds the DIP origin after, which is the correct form on a desktop spanning displays with
+  different scale factors. It is unit-tested against hand-derived values — including a test that
+  asserts the *specific wrong answer* the un-translated formula would produce — but the machine
+  this was built on has exactly one display, so every term that is zero there has only ever been
+  exercised as a literal in a test. Same category of unverified-for-lack-of-hardware gap as this
+  project's Mac shell (§4): the interface and the arithmetic are written for it, nothing has run
+  against it. On a single display the wrong formula and the right one agree exactly, which is why
+  this is worth writing down instead of trusting a green suite.
+
+- **`pointAt` cannot target this app's own UI.** The target window is snapshotted *before* the
+  command bar takes focus, so the bar is never a candidate — and the app is itself an Electron
+  window, which is the class of window M16's recon found returning a bare accessibility tree
+  (R1/R1a). Asking the app to point at itself is the one limitation a user is most likely to
+  trip over first.
+
+- **Some windows expose no controls *right now*.** Deliberately present tense: recon measured
+  Claude desktop flat at 14 elements (window frame only) across 9.4 seconds, and then fully
+  populated an hour later in the same process. "This app is unsupported" is not a claim the code
+  can make or that the docs should.
+
+- **Every Chromium window pays a ~460ms settle delay**, whether or not its tree was ever going to
+  move, because the trigger is the window class alone. Native windows pay nothing. Accepted as a
+  correctness-over-latency trade; the sound optimisation (a per-window-handle memo of "already
+  seen settled") is named but not built.
+
+- **The taskbar, the desktop, and open popup menus are out of scope.** They are separate
+  top-level windows, and enumeration is scoped to the foreground window.
+
 ### M15 — proven vs. live-only
 
 **Proven deterministically (96 new tests, no screen captured and no image sent anywhere).** The

@@ -48,6 +48,16 @@ patterns behind them — each cost a real debugging session.
 - **Recon before fixtures.** Interrogate the real thing — DOM, API, binary — and transcribe what
   it does. `scripts/notion-recon.mjs` and `scripts/tts-recon.mjs` exist because a fixture written
   from an assumption passes every test and matches nothing.
+- **When a RULE changes, re-justify its existing tests — do not just re-run them.** A test can
+  keep passing after a rule changes for a reason that has nothing to do with the new rule being
+  correct. M16.5 narrowed the ambiguity gate from "any shared name refuses" to "refuse only when
+  two entries are identical in every field the model saw". The four-`Filter dropdown` test stayed
+  green throughout — but it asserted only *that four exist and one refuses*, never that they were
+  identical on type and position, so it could not distinguish "the new rule fired" from "the old
+  rule would have fired anyway". Its title still described the deleted rule. Ask what a test
+  actually **distinguishes**, not whether it is green; a test that cannot fail under the wrong
+  implementation is not testing that implementation. The fix is usually to assert the new rule's
+  *precondition* alongside its outcome, and to add a case that the old rule would have failed.
 
 ## Scope added mid-milestone
 

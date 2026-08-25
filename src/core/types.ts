@@ -350,6 +350,18 @@ export interface ScreenSurface {
   point(target: PointerTarget): Promise<void>;
   // Take it away. Safe to call when nothing is showing, and safe to call twice.
   clearPointer(): void;
+  // SAFE. Which display does this NATIVE-pixel rectangle fall on, and what are its two
+  // coordinate spaces? (M16)
+  //
+  // The lookup lives behind the surface because it needs the OS, but the CONVERSION it feeds
+  // stays in `/core` where it is testable — the opposite of the tempting arrangement, which
+  // would be to hand the surface a native rect and let `/main` do the arithmetic somewhere no
+  // test can reach it.
+  //
+  // It takes a native rect rather than returning "the current display" because on a
+  // multi-monitor desktop those are different questions: the window being read may not be on
+  // the display the cursor is on, and picking the wrong one puts the marker on the wrong screen.
+  displayForNative(rect: NativeRect): Promise<DisplayBounds>;
 }
 
 // --- The window's controls (M16), behind an interface like GmailSurface / CalendarSurface ---
@@ -568,6 +580,11 @@ export interface ToolDeps {
   // window and asking a model about it are different capabilities that fail differently — the
   // same split `screen` and `vision` already have.
   chooser: ElementChooser;
+  // M16. Injected so the settle loop's delays are a dependency rather than a wall-clock fact —
+  // tests advance it instantly, and `core/screen/settle.ts` stays a pure decision with the
+  // waiting done out here. Same reasoning as every other seam in this bundle: the thing that
+  // would otherwise be untestable is the thing that gets injected.
+  sleep: (ms: number) => Promise<void>;
   // What tier THIS call resolved to (core/risk.ts). `null` only inside a `RiskPolicy.resolve`,
   // which is the thing that decides it and therefore runs before it exists; by the time
   // `narrate`, `confirmSummary` or the handler sees it, it is always set.

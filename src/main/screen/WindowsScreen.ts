@@ -5,6 +5,7 @@ import { PointerOverlay } from "./PointerOverlay.ts";
 import type { FramePolicy } from "../../core/vision/frame.ts";
 import type {
   DisplayBounds,
+  NativeRect,
   PointerTarget,
   ScreenSurface,
   Screenshot,
@@ -89,6 +90,32 @@ export class WindowsScreen implements ScreenSurface {
 
   clearPointer(): void {
     this.overlay.clear();
+  }
+
+  // Which display does a NATIVE-pixel rectangle fall on? (M16)
+  //
+  // Asked in native pixels because that is the only space the caller has: UIA reports a window's
+  // bounds in physical pixels, and electron's own `getDisplayMatching` wants DIP — which is the
+  // very thing we are trying to work out. So the search is done in physical space instead, by
+  // converting each display's DIP bounds to physical via the OS and testing containment there.
+  //
+  // Falls back to the display nearest the cursor rather than to the primary. A window that
+  // straddles two monitors, or sits fractionally outside every reported bound, still has to
+  // produce SOME mapping — and "where the user is working" is a better guess than "monitor one".
+  displayForNative(rect: NativeRect): Promise<DisplayBounds> {
+    const displays = screen.getAllDisplays().map(toBounds);
+
+    const containing = displays.find(
+      (d) =>
+        rect.x >= d.nativeX &&
+        rect.y >= d.nativeY &&
+        rect.x < d.nativeX + d.nativeWidth &&
+        rect.y < d.nativeY + d.nativeHeight,
+    );
+    if (containing) return Promise.resolve(containing);
+
+    const nearest = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    return Promise.resolve(toBounds(nearest));
   }
 
   dispose(): void {

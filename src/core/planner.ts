@@ -34,6 +34,10 @@ import type {
   VisionLocator,
 } from "./types.ts";
 
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 const REFUSAL = "I can't do that yet — I don't have a tool for that.";
 const TRUNCATED =
   "I couldn't work out what to do — the model ran out of room before it answered. " +
@@ -80,6 +84,9 @@ export class Planner {
     // routes through it.
     private readonly elements: ElementSurface = new UnavailableElements(),
     private readonly chooser: ElementChooser = new UnavailableChooser(),
+    // M16. The settle loop's delay, injected so it is a dependency rather than a wall-clock
+    // fact. Tests pass one that resolves immediately.
+    private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -152,6 +159,7 @@ export class Planner {
       vision: this.vision,
       elements: this.elements,
       chooser: this.chooser,
+      sleep: this.sleep,
       tier: null,
     };
 

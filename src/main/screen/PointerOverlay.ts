@@ -33,6 +33,20 @@ export class PointerOverlay {
   private window: BrowserWindow | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
+  // THE BRAND ON `ScreenRect` IS COMPILE-TIME ONLY, so it is worth recording exactly where the
+  // rect does and does not cross a boundary (checked at M16.7).
+  //
+  // It NEVER goes through IPC. There is no ipcMain/ipcRenderer channel for a position, so
+  // structured clone — which would silently strip the phantom field — is not in the path at all.
+  // Every consumer of `target.rect` below is a main-process Electron call.
+  //
+  // It DOES reach the renderer, as URL-hash STRINGS (see `load` below), and the overlay page
+  // parses them back with Number(). That is safe for a different and stronger reason than typing:
+  // what crosses is already-converted, window-relative DIP, and the page uses it for nothing but
+  // CSS `left/top/width/height`. It never reconstructs a rect, never casts anything back to
+  // `ScreenRect`, and has no say in which coordinates are correct. The only code that decides
+  // WHAT DIP RECT TO USE is on this side of the line, and it can only have obtained one from
+  // core/screen/geometry.ts's `toScreenRect`.
   async point(target: PointerTarget): Promise<void> {
     // The display the marker actually falls on, which is not necessarily the one that was
     // captured: the rect came back in screen coordinates and a multi-monitor desktop is one
