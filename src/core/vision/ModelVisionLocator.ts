@@ -9,9 +9,14 @@ import {
 } from "./prompt.ts";
 import type { JSONSchema, LocateResult, Screenshot, VisionLocator } from "../types.ts";
 
-// The vision call (M15). Anthropic-only, behind the `VisionLocator` interface, so a second
-// provider is a drop-in rather than a rewrite — the same arrangement `Transcriber` and
-// `SpeechSynthesizer` already have, and the same one-connector precedent Slack set.
+// The vision call (M15), behind the `VisionLocator` interface — the same arrangement
+// `Transcriber` and `SpeechSynthesizer` already have.
+//
+// PROVIDER-NEUTRAL BY CONSTRUCTION. Everything here is request shaping and answer handling; the
+// provider lives entirely behind `VisionApi` (see anthropicApi.ts and openaiApi.ts). That split
+// earned itself immediately: the milestone was designed and tested against Anthropic, Anthropic
+// billing was blocked upstream, and moving to OpenAI touched one adapter and one frame-size
+// constant rather than this file at all.
 //
 // M13'S SPLIT, APPLIED ON PURPOSE THIS TIME. `GoogleCalendar.ts` shipped untested on the
 // argument that only a live run could prove it, and both bugs the first live run found were in
@@ -32,7 +37,11 @@ import type { JSONSchema, LocateResult, Screenshot, VisionLocator } from "../typ
 // does not reach costs nothing; one it does reach looks exactly like a refusal.
 const LOCATE_MAX_TOKENS = 4096;
 
-export const DEFAULT_VISION_MODEL = "claude-opus-5";
+// Whichever provider is behind `VisionApi`, this class does not know or care — it shapes the
+// request, finds the tool call, and hands the payload to the parser. The default names the
+// provider actually in use: Anthropic billing was blocked when this milestone was verified, so
+// OpenAI is what the numbers in core/vision/frame.ts were measured against.
+export const DEFAULT_VISION_MODEL = "gpt-5";
 
 // Everything the call needs, already shaped by us. The seam is drawn HERE rather than at "call
 // the API" so that request shaping — which model, which schema, which image — is on the testable
@@ -66,16 +75,16 @@ export interface VisionApi {
   create(params: LocateParams): Promise<VisionResponse>;
 }
 
-export interface AnthropicVisionOptions {
+export interface ModelVisionOptions {
   api: VisionApi;
   model?: string;
 }
 
-export class AnthropicVisionLocator implements VisionLocator {
+export class ModelVisionLocator implements VisionLocator {
   private readonly api: VisionApi;
   private readonly model: string;
 
-  constructor(options: AnthropicVisionOptions) {
+  constructor(options: ModelVisionOptions) {
     this.api = options.api;
     this.model = options.model ?? DEFAULT_VISION_MODEL;
   }

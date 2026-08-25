@@ -21,10 +21,25 @@
 // "the coordinates looked about right" is not a measurement — open it and see whether the
 // rectangle is ON the button.
 //
+// PROVIDER: OpenAI. The milestone was designed against Anthropic; Anthropic billing is blocked
+// upstream, so this runs on the key that exists. That swap turned out NOT to be cosmetic, and
+// the finding is the reason this file re-states its own image rule:
+//
+//   GPT-5 ANSWERS PIXEL COORDINATES IN THE SPACE OPENAI RESIZED THE IMAGE TO, NOT THE SPACE WE
+//   SENT. With `detail: "high"` the API scales the image so its SHORTEST side is 768. Measured
+//   against a fixture with known element positions, a 1568x823 frame produced boxes that were
+//   4/4 outside the target button — consistently ~36px high — and 4/4 correct once divided by
+//   that resize factor. Normalised 0-1 coordinates were tried as an alternative and were WORSE
+//   (2/4, and both failures landed on a different button).
+//
+//   So the fix is to remove the mismatch at source: send an image whose shortest side is already
+//   768, and the model's pixel space and ours are the same one. No correction constant to
+//   maintain, and nothing for core/vision/geometry.ts to know about.
+//
 //   1. Capture a screenshot to work from:
 //        npx electron scripts/screen-recon.mjs --keep --out screen-recon-out
 //      (or point --image at any PNG of a screen)
-//   2. Set ANTHROPIC_API_KEY in .env — this milestone's vision call is Anthropic-only.
+//   2. Set OPENAI_API_KEY in .env.
 //   3. node scripts/vision-recon.mjs --image screen-recon-out/q2-full.png --target "the Send button"
 //
 // Flags:
@@ -33,10 +48,10 @@
 //   --absent <text>   something definitely NOT on screen, for V2
 //                     (default: "the espresso machine")
 //   --ambiguous <text> something there are several of, for V3  (default: "a button")
-//   --model <id>      override the model             (default: claude-opus-5)
+//   --model <id>      override the model             (default: gpt-5)
 //   --out <dir>       where the marked-up HTML lands (default: <tmp>/vision-recon)
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -63,9 +78,9 @@ const IMAGE = flag("--image", null);
 const TARGET = flag("--target", "the close button");
 const ABSENT = flag("--absent", "the espresso machine");
 const AMBIGUOUS = flag("--ambiguous", "a button");
-const MODEL = flag("--model", "claude-opus-5");
+const MODEL = flag("--model", "gpt-5");
 const OUT_DIR = flag("--out", join(tmpdir(), "vision-recon"));
-const API_KEY = process.env["ANTHROPIC_API_KEY"] ?? fromEnvFile("ANTHROPIC_API_KEY");
+const API_KEY = process.env["OPENAI_API_KEY"] ?? fromEnvFile("OPENAI_API_KEY");
 
 if (!IMAGE) {
   console.error(
@@ -77,8 +92,8 @@ if (!IMAGE) {
 }
 if (!API_KEY) {
   console.error(
-    "ANTHROPIC_API_KEY is not set (checked the environment and .env).\n" +
-      "M15's vision call is Anthropic-only — see spec.md §3. Nothing here can run without it.",
+    "OPENAI_API_KEY is not set (checked the environment and .env).\n" +
+      "Nothing here can run without it.",
   );
   process.exit(1);
 }
@@ -86,11 +101,7 @@ if (!API_KEY) {
 // THE SCHEMA. This is the contract core/vision/AnthropicVisionLocator.ts implements, kept
 // verbatim in both places on purpose: recon that asks a different question than the app asks
 // proves nothing about the app.
-const LOCATE_TOOL = {
-  name: "locate_element",
-  description:
-    "Report where the requested element is in the screenshot, or that you cannot identify it.",
-  input_schema: {
+const LOCATE_SCHEMA = {
     type: "object",
     properties: {
       outcome: {
@@ -130,7 +141,6 @@ const LOCATE_TOOL = {
       },
     },
     required: ["outcome"],
-  },
 };
 
 const SYSTEM = [
@@ -144,7 +154,7 @@ const SYSTEM = [
   "wrong part of their screen, which is worse than admitting you cannot tell.",
 ].join(" ");
 
-const client = new Anthropic({ apiKey: API_KEY });
+const client = new OpenAI({ apiKey: API_KEY });
 
 function pngSize(buffer) {
   // PNG: 8-byte signature, then IHDR — width/height are big-endian uint32 at offsets 16 and 20.
@@ -154,29 +164,49 @@ function pngSize(buffer) {
 
 async function ask(imageBase64, target) {
   const started = Date.now();
-  const response = await client.messages.create({
+  const response = await client.chat.completions.create({
     model: MODEL,
-    max_tokens: 4096,
-    system: SYSTEM,
-    tools: [LOCATE_TOOL],
-    tool_choice: { type: "tool", name: "locate_element" },
+    // Headroom, not a target: gpt-5 is a reasoning model and spends from this same allowance
+    // before any tool call is emitted (spec §3a).
+    max_completion_tokens: 4096,
     messages: [
+      { role: "system", content: SYSTEM },
       {
         role: "user",
         content: [
-          { type: "image", source: { type: "base64", media_type: "image/png", data: imageBase64 } },
+          {
+            type: "image_url",
+            // `detail: "high"` is what makes the model look closely enough to find a control at
+            // all. It is also what triggers the shortest-side-768 resize this file's header is
+            // about — which is why the image is pre-sized rather than left to be rescaled.
+            image_url: { url: `data:image/png;base64,${imageBase64}`, detail: "high" },
+          },
           { type: "text", text: `Find: ${target}` },
         ],
       },
     ],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "locate_element",
+          description:
+            "Report where the requested element is in the screenshot, or that you cannot identify it.",
+          parameters: LOCATE_SCHEMA,
+        },
+      },
+    ],
+    // Forced: there is exactly one thing to say and one shape to say it in.
+    tool_choice: { type: "function", function: { name: "locate_element" } },
   });
-  const call = response.content.find((block) => block.type === "tool_use");
+  const choice = response.choices[0];
+  const call = choice?.message?.tool_calls?.[0];
   return {
     elapsedMs: Date.now() - started,
-    stopReason: response.stop_reason,
+    stopReason: choice?.finish_reason,
     usage: response.usage,
-    input: call ? call.input : null,
-    raw: response.content,
+    input: call ? JSON.parse(call.function.arguments || "{}") : null,
+    raw: choice?.message?.content ?? null,
   };
 }
 
@@ -208,7 +238,7 @@ function report(label, result) {
   console.log(`  ${label}`);
   console.log(`    stop_reason=${result.stopReason}  ${result.elapsedMs} ms`);
   console.log(
-    `    tokens: in=${result.usage?.input_tokens} out=${result.usage?.output_tokens}`,
+    `    tokens: in=${result.usage?.prompt_tokens} out=${result.usage?.completion_tokens}`,
   );
   console.log(`    input: ${JSON.stringify(result.input)}`);
   if (result.input === null) {
@@ -221,6 +251,21 @@ async function main() {
 
   const buffer = readFileSync(IMAGE);
   const size = pngSize(buffer);
+
+  // THE ONE CHECK THAT DECIDES WHETHER ANY NUMBER BELOW MEANS ANYTHING. `detail: "high"` makes
+  // OpenAI scale the image so its shortest side is 768, and the model answers in THAT space. Send
+  // anything else and every coordinate comes back offset by the resize factor — measured at 4/4
+  // boxes landing outside the target button on a 1568x823 frame. An un-flagged mismatch here
+  // makes a run that looks fine silently wrong.
+  if (size && Math.min(size.width, size.height) !== 768) {
+    const factor = 768 / Math.min(size.width, size.height);
+    console.error(
+      `\n!!  This image is ${size.width}x${size.height}; its shortest side is not 768.\n` +
+        `!!  OpenAI will rescale it by ${factor.toFixed(4)} and answer in THAT space, so every\n` +
+        `!!  coordinate below will be off by roughly that factor. Resize to ` +
+        `${Math.round(size.width * factor)}x${Math.round(size.height * factor)} first.\n`,
+    );
+  }
   const base64 = buffer.toString("base64");
   console.log(
     `image: ${basename(IMAGE)}  ${size ? `${size.width}x${size.height}` : "(size unknown)"}  ` +

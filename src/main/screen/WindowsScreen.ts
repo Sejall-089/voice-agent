@@ -1,6 +1,8 @@
 import { desktopCapturer, screen } from "electron";
 import { screenCaptureError } from "../../core/errors.ts";
+import { OPENAI_FRAME, targetSize } from "../../core/vision/frame.ts";
 import { PointerOverlay } from "./PointerOverlay.ts";
+import type { FramePolicy } from "../../core/vision/frame.ts";
 import type {
   DisplayBounds,
   PointerTarget,
@@ -16,17 +18,20 @@ import type { NativeImage } from "electron";
 // with the wrong display's bounds, does not throw — it produces a marker that lands confidently
 // somewhere the user was not asking about.
 
-// The long edge the model actually sees.
+// What size frame the model actually sees — a POLICY, injected, because it is a property of the
+// provider rather than of the screen.
 //
-// Downscaling is not an optimisation, it is what makes the coordinate space OURS. Anthropic
-// resizes images past roughly this size on its own, and a resize we did not perform is a scale
-// factor we do not know — every coordinate that came back would be in a pixel space we could
-// only guess at. Recon measured the resize at 14ms with the aspect ratio preserved exactly, so
-// controlling it costs nothing.
-const MAX_LONG_EDGE = 1568;
+// Downscaling is not an optimisation, it is what makes the coordinate space OURS. Providers
+// rescale images on the way in and the model answers in the space it was given; send a size the
+// provider will change and every coordinate comes back offset, with nothing thrown and no
+// symptom but a marker in the wrong place. See core/vision/frame.ts for the measurements.
 
 export class WindowsScreen implements ScreenSurface {
   private readonly overlay = new PointerOverlay();
+
+  // Defaults to the OpenAI rule because that is the provider this was measured against; main.ts
+  // passes the one matching whatever `VisionApi` it built.
+  constructor(private readonly frame: FramePolicy = OPENAI_FRAME) {}
 
   async capture(): Promise<Screenshot> {
     // The display the user is looking at. The cursor is the best available proxy — electron
@@ -59,7 +64,7 @@ export class WindowsScreen implements ScreenSurface {
     // empty picture.
     if (source.thumbnail.isEmpty()) throw screenCaptureError("no-display");
 
-    const image = downscale(source.thumbnail);
+    const image = resizeTo(source.thumbnail, this.frame);
     const size = image.getSize();
     const png = image.toPNG();
     if (png.length === 0 || size.width === 0 || size.height === 0) {
@@ -117,15 +122,14 @@ function pickSource(
   );
 }
 
-function downscale(image: NativeImage): NativeImage {
+function resizeTo(image: NativeImage, frame: FramePolicy): NativeImage {
   const { width, height } = image.getSize();
-  const longEdge = Math.max(width, height);
-  // Never upscale. A small display is already in a pixel space the model can work in, and
-  // enlarging it would invent detail while making the request bigger.
-  if (longEdge <= MAX_LONG_EDGE) return image;
-  return width >= height
-    ? image.resize({ width: MAX_LONG_EDGE, quality: "best" })
-    : image.resize({ height: MAX_LONG_EDGE, quality: "best" });
+  const target = targetSize(width, height, frame);
+  if (target.width === width && target.height === height) return image;
+  // Both dimensions given explicitly: `targetSize` has already preserved the aspect ratio, and
+  // asking for one and letting the library infer the other reintroduces a rounding disagreement
+  // between the size we believe we sent and the size we actually sent.
+  return image.resize({ width: target.width, height: target.height, quality: "best" });
 }
 
 // Note what is dropped: `scaleFactor`. It is genuinely needed above, to ask for the right

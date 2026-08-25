@@ -498,25 +498,36 @@ sends a picture of your screen off your machine.
 
 ```env
 VISION_ENABLED=1
-ANTHROPIC_API_KEY=sk-ant-...
+# and the key for whichever provider you use — OPENAI_API_KEY is the verified path
 ```
 
 That's the whole setup — no binary to install, no model to download, nothing to start.
 
-Two things that catch people:
+Three things that catch people:
 
 - **`VISION_ENABLED=1` exactly.** Not `true`, not `yes`. It is a deliberate speed bump on the
   one setting that changes what leaves your computer.
-- **`ANTHROPIC_API_KEY` is needed even if `LLM_PROVIDER=openai`.** The vision call is
-  Anthropic-only. If the flag is on and the key is missing, the app says so at startup and leaves
-  the capability off rather than offering a tool that could only ever refuse.
+- **The provider defaults to `LLM_PROVIDER`**, so an install that only ever configured one vendor
+  needs nothing extra. `VISION_PROVIDER` overrides it — they are separate choices on purpose,
+  because the planner and the vision call can have different keys, different costs, and (as
+  happened during this milestone) different billing outages.
+- **Only `openai` is verified.** It was measured against a fixture with known element positions:
+  it finds the right control, declines when the thing isn't on screen, and reports ambiguity
+  instead of picking. `anthropic` is implemented against the same interface but has never been
+  run, and its frame size is read from documentation rather than measured — which is exactly the
+  assumption that cost the OpenAI path 4 misses out of 4 before it was measured.
 
-`VISION_MODEL` overrides the model (default `claude-opus-5`).
+`VISION_MODEL` overrides the model (defaults: `gpt-5`, or `claude-opus-5` on Anthropic).
+
+**It is good at buttons and marginal at small icons.** Boxes carry a systematic offset of about
++20px right and +12px down — absorbed by a 100px button, not by a 39px toolbar icon. Expect
+"where's the Send button" to work and "where's the settings gear" to land just off it.
 
 Every run prints which state you're in:
 
 ```
-[main] vision guidance ON - 'where is X' captures the screen and sends it to Anthropic
+[main] vision guidance ON - 'where is X' captures the screen and sends it to a cloud model
+[main] vision provider: openai (frame: shortest edge 768 - measured)
 [main] vision guidance off - VISION_ENABLED not set (no screen is ever captured)
 ```
 
@@ -780,29 +791,47 @@ filter loose enough to pick up desktop content and report a wildly misplaced mar
 measurement produces a confident wrong answer, which is precisely the failure this milestone is
 about.
 
-**What is NOT verified, and the first item is the important one.** `scripts/vision-recon.mjs` is
-written and **has not been run** — there's no `ANTHROPIC_API_KEY` in this `.env`, since the
-planner runs on OpenAI. So:
+**The central question has now been answered — on OpenAI, not Anthropic.** Anthropic billing was
+blocked upstream, so the probe ran against `gpt-5`. Three things came out of it.
 
-- **Whether the model declines when the thing isn't on screen is unknown.** If it invents a
-  plausible box instead of answering `notFound`, the deterministic checks are the only thing
-  between that and a confident marker on the wrong control — and those catch *certainly* wrong
-  answers, not *subtly* wrong ones. A box on **Discard** when you asked for **Send** passes every
-  rule there is. This is the single most important open question in the milestone, and it is
-  probe V2 in that script.
-- Whether it uses the `ambiguous` branch or silently picks one (V3) is unknown.
-- Coordinate accuracy, and what the 1568px downscale costs, is unmeasured (V4) — the script
-  writes an HTML file with the returned box drawn over the screenshot so this gets *looked at*.
-- Latency and token cost per call are unmeasured.
-- **Multi-monitor is unverified** — this machine has one display. The source↔display join is
-  written to refuse rather than fall back when it can't be made confidently, which is the right
-  default for something that fails silently, but that path has never fired.
-- A UAC prompt or locked session is untried. The "try again once you're back at your desktop"
-  message is a guess about what that state produces, not a transcription of it.
+**It declines honestly.** Asked for something not on screen — both an obviously-absent thing and
+the harder case of something plausible for that UI but not actually present — it answered
+`notFound` rather than inventing a box. Asked for something with several matches it answered
+`ambiguous` and named them, including spotting that "the red button" could mean either Discard or
+the red window-close circle. This is the assumption the whole design rests on, and it holds.
 
-`FakeVisionLocator` replays adversarial answers — the whole-screen hedge, native-resolution
-coordinates — as a stand-in for behaviour nobody has observed yet. That's a stated substitute for
-evidence, not evidence.
+**The decoy case is correct.** Send and Discard side by side, same size, same shape, 119px apart.
+Asked for each specifically, both landed on the right one — confirmed by drawing the returned box
+over the screenshot and looking at it, not by trusting that a box came back.
+
+**The provider swap was not cosmetic, and this is the finding worth keeping.** GPT-5 answers pixel
+coordinates in the space OpenAI *resized* the image to, not the space we sent — with
+`detail: "high"` it scales the shortest side to 768. On the original 1568-long-edge frame, **0 of
+4 boxes landed inside the target button**; consistently ~36px high. On a pre-sized 1463x768 frame,
+**4 of 4**. Normalised 0–1 coordinates were tried instead and were worse — 2 of 4, with both
+failures on a *different button*. The fix removes the mismatch at source rather than compensating
+for it: `src/core/vision/frame.ts` holds the per-provider frame rule and it travels with the
+locator, so the capture size and the provider that will rescale it cannot be picked separately.
+
+**The real limit, stated plainly: this is reliable for buttons and marginal for small icons.**
+Boxes carry a systematic offset of roughly +20px right and +12px down. A 95–130px button absorbs
+that. A 39px settings gear does not — asked for one, the marker centre landed *outside* the icon
+4 times out of 4, even though the box *size* was near-perfect. None of the safety checks catch
+this, because the box is in-frame, sensibly sized and tight; it passes everything.
+
+That is survivable here in a way it would not be for auto-clicking: 20px off a small icon is a
+marker you can still read, not a misfired action. It is exactly the margin the design bought by
+keeping a person as the executor. But it is a real limit, and tuning it from four samples would
+be worse than naming it.
+
+**Still not verified:** Anthropic has never been run at all (its frame rule is read from docs, not
+measured — the same kind of assumption that just cost OpenAI 4/4 misses); everything was measured
+on a *synthetic* fixture rather than real application chrome; multi-monitor and locked-session
+behaviour; and the in-app path end to end. Latency is 7–46s per call, typically ~20s.
+
+`FakeVisionLocator`'s fixtures are now transcribed from that run rather than imagined — and its
+"native-resolution coordinates" case stopped being hypothetical the moment a wrongly-sized frame
+made every real answer look exactly like it.
 
 ---
 

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  AnthropicVisionLocator,
+  ModelVisionLocator,
   classifyVisionFailure,
   DEFAULT_VISION_MODEL,
-} from "../src/core/vision/AnthropicVisionLocator.ts";
+} from "../src/core/vision/ModelVisionLocator.ts";
 import { LOCATE_TOOL_NAME } from "../src/core/vision/prompt.ts";
 import { VisionError } from "../src/core/errors.ts";
 import { RECON_SHOT } from "./FakeScreen.ts";
@@ -11,7 +11,7 @@ import type {
   LocateParams,
   VisionApi,
   VisionResponse,
-} from "../src/core/vision/AnthropicVisionLocator.ts";
+} from "../src/core/vision/ModelVisionLocator.ts";
 
 // The vision transport (M15), tested on the half that is ordinary branching.
 //
@@ -59,7 +59,7 @@ function httpError(status: number, message: string): Error {
 describe("what gets sent", () => {
   it("asks the configured model, with the image and the target", async () => {
     const api = new StubApi(toolUse({ outcome: "found", box: { x: 1, y: 2, width: 8, height: 8 } }));
-    const locator = new AnthropicVisionLocator({ api });
+    const locator = new ModelVisionLocator({ api });
 
     await locator.locate(RECON_SHOT, "  the send button  ");
 
@@ -74,7 +74,7 @@ describe("what gets sent", () => {
 
   it("honours a model override", async () => {
     const api = new StubApi(toolUse({ outcome: "notFound" }));
-    await new AnthropicVisionLocator({ api, model: "claude-sonnet-5" }).locate(RECON_SHOT, "x");
+    await new ModelVisionLocator({ api, model: "claude-sonnet-5" }).locate(RECON_SHOT, "x");
     expect(api.calls[0]?.model).toBe("claude-sonnet-5");
   });
 
@@ -82,7 +82,7 @@ describe("what gets sent", () => {
     // Thinking is on by default on the current Opus models and is spent from the SAME allowance
     // the tool call has to fit inside (spec §3a). A tight cap here looks exactly like a refusal.
     const api = new StubApi(toolUse({ outcome: "notFound" }));
-    await new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "x");
+    await new ModelVisionLocator({ api }).locate(RECON_SHOT, "x");
     expect(api.calls[0]?.maxTokens).toBe(4096);
   });
 });
@@ -92,7 +92,7 @@ describe("what comes back", () => {
     const api = new StubApi(
       toolUse({ outcome: "found", box: { x: 10, y: 20, width: 30, height: 40 }, label: "Send" }),
     );
-    const result = await new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "the send button");
+    const result = await new ModelVisionLocator({ api }).locate(RECON_SHOT, "the send button");
     expect(result).toEqual({
       kind: "found",
       box: { x: 10, y: 20, width: 30, height: 40 },
@@ -103,7 +103,7 @@ describe("what comes back", () => {
   it("refuses when the model answered in words instead of using the tool", async () => {
     const api = new StubApi({ content: [{ type: "text" }], stopReason: "end_turn" });
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
     );
     expect(error.reason).toBe("bad-response");
     expect(error.message).toContain("without using the tool");
@@ -114,7 +114,7 @@ describe("what comes back", () => {
     // are different facts, and collapsing them sends the user to look at the wrong thing.
     const api = new StubApi({ content: [], stopReason: "max_tokens" });
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
     );
     expect(error.reason).toBe("bad-response");
     expect(error.message).toContain("ran out of room");
@@ -127,7 +127,7 @@ describe("what comes back", () => {
       stopReason: "tool_use",
     });
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
     );
     expect(error.reason).toBe("bad-response");
   });
@@ -135,7 +135,7 @@ describe("what comes back", () => {
   it("passes an off-schema answer to the parser rather than trusting it", async () => {
     const api = new StubApi(toolUse({ outcome: "found", label: "Send" })); // found, but no box
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "the send button"),
     );
     expect(error.reason).toBe("bad-response");
     expect(error.message).toContain("gave no position");
@@ -150,7 +150,7 @@ describe("what the user is told when the call fails", () => {
     for (const status of [401, 403]) {
       const api = new StubApi(null, httpError(status, "invalid x-api-key"));
       const error = await visionFailure(() =>
-        new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "x"),
+        new ModelVisionLocator({ api }).locate(RECON_SHOT, "x"),
       );
       expect(error.reason).toBe("denied");
       expect(error.message).toContain("invalid x-api-key");
@@ -160,7 +160,7 @@ describe("what the user is told when the call fails", () => {
   it("says to wait on 429, and does not blame a setting", async () => {
     const api = new StubApi(null, httpError(429, "rate_limit_error"));
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "x"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "x"),
     );
     expect(error.reason).toBe("rate-limited");
     expect(error.message).toMatch(/give it a moment/);
@@ -170,7 +170,7 @@ describe("what the user is told when the call fails", () => {
   it("surfaces Anthropic's own words on 400 without diagnosing them", async () => {
     const api = new StubApi(null, httpError(400, "image exceeds 8000 pixels"));
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "x"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "x"),
     );
     expect(error.reason).toBe("rejected");
     expect(error.message).toContain("image exceeds 8000 pixels");
@@ -180,7 +180,7 @@ describe("what the user is told when the call fails", () => {
     for (const status of [404, 408, 500, 503, 529]) {
       const api = new StubApi(null, httpError(status, "upstream"));
       const error = await visionFailure(() =>
-        new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "x"),
+        new ModelVisionLocator({ api }).locate(RECON_SHOT, "x"),
       );
       expect(error.reason).toBe("unreachable");
       expect(error.message).toContain(String(status));
@@ -190,7 +190,7 @@ describe("what the user is told when the call fails", () => {
   it("surfaces a bare network failure verbatim", async () => {
     const api = new StubApi(null, new Error("connect ETIMEDOUT 160.79.104.10:443"));
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "x"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "x"),
     );
     expect(error.reason).toBe("unreachable");
     expect(error.message).toContain("connect ETIMEDOUT");
@@ -199,7 +199,7 @@ describe("what the user is told when the call fails", () => {
   it("survives being thrown something that is not an Error at all", async () => {
     const api = new StubApi(null, "everything is fine");
     const error = await visionFailure(() =>
-      new AnthropicVisionLocator({ api }).locate(RECON_SHOT, "x"),
+      new ModelVisionLocator({ api }).locate(RECON_SHOT, "x"),
     );
     expect(error.reason).toBe("unreachable");
     expect(error.message).toContain("everything is fine");

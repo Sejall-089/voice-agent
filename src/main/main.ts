@@ -25,11 +25,14 @@ import { GoogleCalendar } from "../core/calendar/GoogleCalendar.ts";
 import { GoogleCalendarAuth } from "../core/calendar/GoogleCalendarAuth.ts";
 import { UnavailableCalendar } from "../core/calendar/UnavailableCalendar.ts";
 import { WindowsScreen } from "./screen/WindowsScreen.ts";
-import { AnthropicMessages } from "../core/vision/AnthropicMessages.ts";
-import { AnthropicVisionLocator } from "../core/vision/AnthropicVisionLocator.ts";
+import { AnthropicVisionApi } from "../core/vision/anthropicApi.ts";
+import { OpenAIVisionApi } from "../core/vision/openaiApi.ts";
+import { ModelVisionLocator } from "../core/vision/ModelVisionLocator.ts";
+import { ANTHROPIC_FRAME, OPENAI_FRAME } from "../core/vision/frame.ts";
 import { UnavailableScreen } from "../core/vision/UnavailableScreen.ts";
 import { UnavailableVisionLocator } from "../core/vision/UnavailableVisionLocator.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
+import type { FramePolicy } from "../core/vision/frame.ts";
 import type {
   CalendarSurface,
   GmailSurface,
@@ -197,7 +200,9 @@ app.whenReady().then(() => {
   const vision = createVisionLocator();
   // Built only when vision is on, so an install that never opted in has no capture machinery at
   // all — "no screenshot is taken" is a property of the object graph, not of a branch somewhere.
-  const screenSurfaceOrNull = vision ? new WindowsScreen() : null;
+  // The frame policy comes from the same object as the locator, so the capture size and the
+  // provider that will (or will not) rescale it can never be chosen independently.
+  const screenSurfaceOrNull = vision ? new WindowsScreen(vision.frame) : null;
   screenSurface = screenSurfaceOrNull;
   if (screenSurfaceOrNull) shell.attachPointer(() => screenSurfaceOrNull.clearPointer());
   const tools = buildRegistry({
@@ -225,7 +230,7 @@ app.whenReady().then(() => {
     calendar ?? new UnavailableCalendar(),
     undefined, // speech store — the planner's own scratch state, no composition needed
     screenSurfaceOrNull ?? new UnavailableScreen(),
-    vision ?? new UnavailableVisionLocator(),
+    vision?.locator ?? new UnavailableVisionLocator(),
   );
 
   // The speech queue, wired both ways: the session plays THROUGH the shell, and the shell
@@ -315,7 +320,7 @@ app.whenReady().then(() => {
   // exactly the situation the explicit opt-in exists to prevent.
   console.log(
     vision
-      ? "[main] vision guidance ON - 'where is X' captures the screen and sends it to Anthropic"
+      ? "[main] vision guidance ON - 'where is X' captures the screen and sends it to a cloud model"
       : "[main] vision guidance off - VISION_ENABLED not set (no screen is ever captured)",
   );
 });
@@ -431,25 +436,61 @@ function createSynthesizer(): PiperSynthesizer | null {
 // Unset means the tool is never on the menu, no WindowsScreen is constructed, and no screen is
 // ever captured — the same "off is a real state" rule as voice and speech, on the capability
 // where it matters most.
-function createVisionLocator(): VisionLocator | null {
+function createVisionLocator(): { locator: VisionLocator; frame: FramePolicy } | null {
   if (process.env["VISION_ENABLED"] !== "1") return null;
 
-  // Enabled but unusable is worth saying out loud at startup rather than discovering at the
-  // first "where's the send button?" — the app would otherwise offer a tool that can only refuse.
-  if (!process.env["ANTHROPIC_API_KEY"]) {
-    console.error(
-      "[main] VISION_ENABLED=1 but ANTHROPIC_API_KEY is not set - vision guidance stays off. " +
-        "The vision call is Anthropic-only (spec §3), independently of LLM_PROVIDER.",
-    );
-    return null;
+  // Which provider, and it is a SEPARATE choice from LLM_PROVIDER on purpose: the planner and
+  // the vision call have different requirements and, as of this milestone, different billing
+  // realities. VISION_PROVIDER overrides; otherwise follow the planner, which is the least
+  // surprising default on an install that has only ever configured one vendor.
+  const provider = process.env["VISION_PROVIDER"] ?? process.env["LLM_PROVIDER"];
+  const model = process.env["VISION_MODEL"];
+
+  // The frame size travels WITH the provider, never separately. It is the size that provider
+  // will not rescale, and a mismatched pair puts every marker in the wrong place with nothing
+  // thrown — see core/vision/frame.ts for the measurement. Returning them together is what makes
+  // picking one without the other impossible.
+  if (provider === "anthropic") {
+    if (!process.env["ANTHROPIC_API_KEY"]) {
+      console.error(
+        "[main] VISION_ENABLED=1 with the Anthropic vision provider but ANTHROPIC_API_KEY is " +
+          "not set - vision guidance stays off.",
+      );
+      return null;
+    }
+    console.log("[main] vision provider: anthropic (frame: long edge 1568 - UNVERIFIED, see frame.ts)");
+    return {
+      locator: new ModelVisionLocator({
+        api: new AnthropicVisionApi(),
+        ...(model ? { model } : { model: "claude-opus-5" }),
+      }),
+      frame: ANTHROPIC_FRAME,
+    };
   }
 
-  // The key is read inside AnthropicMessages, from the environment, and never logged (spec §10).
-  const model = process.env["VISION_MODEL"];
-  return new AnthropicVisionLocator({
-    api: new AnthropicMessages(),
-    ...(model ? { model } : {}),
-  });
+  if (provider === "openai") {
+    if (!process.env["OPENAI_API_KEY"]) {
+      console.error(
+        "[main] VISION_ENABLED=1 with the OpenAI vision provider but OPENAI_API_KEY is not " +
+          "set - vision guidance stays off.",
+      );
+      return null;
+    }
+    console.log("[main] vision provider: openai (frame: shortest edge 768 - measured)");
+    return {
+      locator: new ModelVisionLocator({
+        api: new OpenAIVisionApi(),
+        ...(model ? { model } : {}),
+      }),
+      frame: OPENAI_FRAME,
+    };
+  }
+
+  console.error(
+    `[main] VISION_ENABLED=1 but the vision provider is "${provider ?? "unset"}" - set ` +
+      "VISION_PROVIDER (or LLM_PROVIDER) to \"openai\" or \"anthropic\". Vision guidance stays off.",
+  );
+  return null;
 }
 
 // Same shape as createTranscriber: config is read HERE, in composition, and a missing value

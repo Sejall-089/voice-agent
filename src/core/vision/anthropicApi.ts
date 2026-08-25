@@ -4,7 +4,7 @@ import type {
   LocateParams,
   VisionApi,
   VisionResponse,
-} from "./AnthropicVisionLocator.ts";
+} from "./ModelVisionLocator.ts";
 
 // The SDK adapter, and NOTHING ELSE.
 //
@@ -19,7 +19,7 @@ import type {
 // M13's `GoogleCalendar.ts` is why this is split at all: it shipped untested on the argument
 // that only a live run could prove it, and both bugs the first live run found were in the half
 // that was ordinary branching.
-export class AnthropicMessages implements VisionApi {
+export class AnthropicVisionApi implements VisionApi {
   private readonly apiKey: string | undefined;
   private client: Anthropic | null = null;
 

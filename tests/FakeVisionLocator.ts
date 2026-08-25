@@ -7,7 +7,7 @@ import type {
 // Deterministic stand-in for the vision model (M15) — no network, no API key, no image.
 //
 // WHAT THIS FAKE DELIBERATELY DOES NOT DO: it does not go through `parseLocateResponse`, and it
-// does not share a line of code with `AnthropicVisionLocator`. It hands back `LocateResult`s
+// does not share a line of code with `ModelVisionLocator`. It hands back `LocateResult`s
 // directly. M13's rule is that a fake written in terms of the code under test only proves the
 // code agrees with itself — `FakeCalendar` matched substrings where Google ANDs its terms, and
 // the bug it existed to catch was invisible underneath it. So the wire-shape parsing is tested
@@ -15,10 +15,22 @@ import type {
 // layer above it.
 //
 // THE ANSWERS IT REPLAYS ARE NOT ALL WELL-BEHAVED, and that is the point. A model that returns a
-// tidy box for everything is not the model this code has to survive: scripts/vision-recon.mjs
-// exists to find out what the real one does when the thing is not on screen (V2) or when several
-// things match (V3), and until it has been run against a real key, the adversarial cases below
-// are the honest stand-in for "we do not yet know that it declines".
+// tidy box for everything is not the model this code has to survive.
+//
+// TRANSCRIBED FROM A REAL RUN, not imagined. scripts/vision-recon.mjs has now been run against
+// gpt-5 (Anthropic billing was blocked, so OpenAI is the verified provider), and the good news is
+// that the two branches this fake exercises are ones the model actually uses:
+//
+//   asked for something absent ("the espresso machine", and the harder "the print button" on a
+//   mail UI where one would be plausible) -> notFound, both times, with a usable reason
+//   asked for "a button" on a screen with five -> ambiguous, naming all five
+//   asked for "the red button" where two things are red -> ambiguous, naming Discard AND the
+//     red window-close circle
+//
+// `nativeCoordinates` below stopped being hypothetical during that run: sending a frame the
+// provider rescales makes the model answer in ITS space, not ours, and 4/4 boxes landed outside
+// the target button. That is what core/vision/frame.ts exists to prevent, and this fixture is
+// what proves the checks catch it if the frame policy is ever got wrong again.
 export class FakeVisionLocator implements VisionLocator {
   // What it was asked, in order — so a test can prove the target text and the actual captured
   // frame both reached the model, rather than assuming the wiring.

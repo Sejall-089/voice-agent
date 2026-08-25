@@ -1508,6 +1508,61 @@ been live-tested at all** — it's implemented against the same interface and ty
 but its actual tool-calling behavior against a real key (including the correction-routing
 case above) is unverified until someone runs it live.
 
+### M15.1 — the provider swap, and what running the probe actually found
+
+Anthropic billing was blocked upstream (mandate registration succeeds, the charge fails), so the
+milestone's central open question was answered on **OpenAI / `gpt-5`** instead. The swap cost one
+adapter and one constant — `ModelVisionLocator` never changed, which is the `VisionApi` seam
+earning itself — but it was **not** cosmetic, and the reason is the finding:
+
+**GPT-5 answers pixel coordinates in the space OpenAI RESIZED the image to, not the space we
+sent.** With `detail: "high"` (which is required — without it the model cannot reliably find a
+control at all) the API scales the image so its SHORTEST side is 768. Measured against a fixture
+whose element positions were read out of the DOM:
+
+| frame sent | boxes landing inside the target button |
+|---|---|
+| 1568x823 (the M15 long-edge rule) | **0 / 4** — consistently ~36px high, centre on nothing |
+| 1463x768 (shortest side 768) | **4 / 4** |
+
+Normalised 0-1 coordinates were tried as the alternative fix and were **worse**: 2/4, and both
+failures landed on a *different button*. So the fix is to remove the mismatch at source rather
+than compensate for it — `core/vision/frame.ts` holds the per-provider frame rule, it travels
+with the locator so the two cannot be chosen independently, and `geometry.ts` never learns about
+any of it.
+
+**The three probe cases, on the verified path:**
+
+- **Absent target** → `notFound`, both for an obviously-absent thing ("the espresso machine") and
+  for the harder case of something plausible on that UI but not present ("the print button"). It
+  declined rather than inventing a box. *This is the assumption the whole milestone rests on, and
+  it holds.*
+- **Visually similar decoy** — Send and Discard side by side, same size, same pill shape, 119px
+  apart. Asked for each specifically: both correct, verified by drawing the returned box over the
+  screenshot and looking. Neither drifted onto the other.
+- **Ambiguous** → `ambiguous` with candidates named. Asked for "a button" it listed all five;
+  asked for "the red button" it named Discard *and* the red window-close circle rather than
+  picking.
+
+**The real accuracy gap, and it is not a footnote.** Boxes carry a systematic offset of roughly
+**+20px right and +12px down**. On a 95-130px button that is absorbed — the centre stays well
+inside. On a **small icon it is not**: asked for a 39px settings gear and a 41px paperclip, the
+centre landed outside the target **0/4 times**, while the box SIZE was near-perfect. So the model
+knows how big the thing is and is slightly wrong about where. `core/vision/locate.ts`'s checks do
+NOT catch this: the box is in-frame, plausibly sized, and tight, so it passes everything and
+becomes a marker ~20px off the icon.
+
+That is tolerable for the "point, don't click" design in a way it would not be for auto-click —
+being 20px off a 39px icon is a marker the user can still read, not a misfired action, which is
+precisely the margin the milestone bought by keeping a human as the executor. But it is a real
+limit: **this is reliable for buttons and text controls, and marginal for small icons.** Whether
+that wants a minimum-target-size refusal, or a bias correction, is a decision for a later
+milestone with more than one fixture behind it — not something to tune from four samples.
+
+**Latency is the other cost.** 7-46s per call, typically ~20s, against the planner's own 6-13s.
+The "Thinking…" indicator covers it, but a "where is X" that takes half a minute is a different
+interaction from one that takes three seconds.
+
 ### M15 — proven vs. live-only
 
 **Proven deterministically (84 new tests, no screen captured and no image sent anywhere).** The
@@ -1535,34 +1590,36 @@ measured and then made deliberate) and, first, a magenta detector loose enough t
 content and report a wildly misplaced marker. A loose measurement produces a confident wrong
 answer, which is the same failure mode the whole milestone is about.
 
-**Live-only, and not yet done — this is the honest part.** `scripts/vision-recon.mjs` is written
-and has **not been run**, because there is no `ANTHROPIC_API_KEY` in this `.env` (the planner
-runs on OpenAI). Until it has been:
+**Live-only — now largely DONE, on a different provider than planned.** See M15.1 above for the
+full account. In short: the probe was run against `gpt-5`, the model does decline on absent
+targets and does report ambiguity rather than picking, the decoy case is correct and visually
+verified, and the provider swap surfaced a coordinate-space bug that the original 1568-long-edge
+frame would have shipped with.
 
-- **Whether the model declines when the thing is not on screen is UNKNOWN.** This is V2 in the
-  recon script and the single most important open question in the milestone. If it hallucinates a
-  plausible box rather than answering `notFound`, `core/vision/locate.ts` is the only thing
-  standing between that and a confident marker on the wrong control — and the checks there catch
-  *certainly* wrong answers, not *subtly* wrong ones. A box on the Discard button when the user
-  asked for Send passes every rule in that table.
-- **Whether it uses the `ambiguous` branch or silently picks one is UNKNOWN** (V3).
-- **How accurate the coordinates are, and what the 1568 downscale costs, is UNKNOWN** (V4). The
-  script writes an HTML file with the returned box drawn over the screenshot precisely so this
-  is looked at rather than asserted.
-- Latency and token cost per call are unmeasured. The "Thinking…" indicator covers the wait, but
-  nobody has seen how long it is.
-- Multi-monitor is unverified — this machine has one display, so `pickSource`'s
-  `display_id` join and `getDisplayMatching` for overlay placement have never run against a
-  second screen. The join is written to REFUSE rather than fall back to the first source when it
-  cannot be made confidently, which is the right default for something that fails silently, but
-  that path has never fired.
+What remains genuinely unverified:
+
+- **Small-icon accuracy is a known limit, not an unknown.** A systematic ~(+20, +12)px offset puts
+  the marker outside a 39px icon 4 times out of 4, and none of `locate.ts`'s checks catch it
+  because the box is in-frame, well-sized and tight. Fine for buttons, marginal for icons.
+- **Anthropic has never been run at all.** It is implemented against the same `VisionApi` seam and
+  typechecks, and its frame rule in `core/vision/frame.ts` is read from documentation rather than
+  measured — which is exactly the kind of assumption that just cost OpenAI 4/4 misses. Treat
+  `ANTHROPIC_FRAME` as a starting point for whoever runs that recon.
+- **Everything was measured on a synthetic fixture**, not on live application chrome. A rendered
+  compose window has crisp edges and generous hit targets; real Windows apps have neither.
+- Multi-monitor is unverified — this machine has one display, so `pickSource`'s `display_id` join
+  and `getDisplayMatching` for overlay placement have never run against a second screen. The join
+  is written to REFUSE rather than fall back when it cannot be made confidently, but that path
+  has never fired.
 - A UAC prompt or a locked session (recon Q7) has not been tried. `WindowsScreen` classifies an
   empty thumbnail as `no-display` and says "try again once you're back at your desktop", which is
   a guess about what that state produces, not a transcription of it.
+- The in-app path (hotkey → `pointAt` → overlay on a real foreground window) has not been driven
+  end to end; only the recon script and a standalone overlay probe have.
 
-**`FakeVisionLocator` is honest about this.** It replays adversarial answers — the whole-screen
-hedge, native-resolution coordinates — as a stand-in for behaviour nobody has observed yet. That
-is a stated substitute for evidence, not evidence.
+**`FakeVisionLocator` is now transcribed rather than imagined.** Its `notFound` and `ambiguous`
+fixtures are branches the real model was observed using; its `nativeCoordinates` fixture stopped
+being hypothetical the moment a wrongly-sized frame made every real answer look exactly like it.
 
 ### M10 — proven vs. live-only
 
