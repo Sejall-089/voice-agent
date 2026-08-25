@@ -455,7 +455,14 @@ export interface ElementSurface {
 // list it was handed, and core/screen/ validates the answer is even in range before anything is
 // drawn.
 export interface ElementChooser {
-  choose(candidates: Candidate[], target: string): Promise<ChoiceResult>;
+  // `windowTitle` is context for the model, not decoration: "the new button" means something
+  // different in File Explorer than in a mail client. It is already on screen in front of the
+  // user, so it discloses nothing the request does not already imply.
+  choose(
+    candidates: readonly Candidate[],
+    target: string,
+    windowTitle: string,
+  ): Promise<ChoiceResult>;
 }
 
 // --- Memory resolve seam (M1 no-op; M3 becomes SQLite-backed) ---

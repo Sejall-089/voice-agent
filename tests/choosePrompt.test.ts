@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCandidates } from "../src/core/screen/elements.ts";
-import { CHOOSE_SYSTEM, parseChoice, renderChooseRequest } from "../src/core/screen/prompt.ts";
+import { CHOOSE_CONTROL_SYSTEM, parseChoice, renderChooseRequest } from "../src/core/screen/prompt.ts";
 import { resolveChoice } from "../src/core/screen/resolve.ts";
 import { ChooserError, ElementNotFoundError } from "../src/core/errors.ts";
 import { TREES } from "./FakeElements.ts";
@@ -209,22 +209,56 @@ describe("ambiguity, detected by CODE after the pick", () => {
     expect(error.message).toContain("4th from the left");
   });
 
-  it("uses the position phrase when that DOES separate them", () => {
+  // NARROWED FROM "SHARED NAME" BY MEASUREMENT (M16.5). The first version of this gate refused on
+  // the name alone. scripts/choose-recon.ts found the case that breaks: asked for "the column
+  // header for when things were last changed", the model correctly picked Explorer's "Date
+  // modified" SplitButton — and the gate refused it, because Explorer also has a "Date modified"
+  // Edit (its filter box). Same name, different control type, and the user's words named one of
+  // them unambiguously. Refusing there discards information the model used correctly.
+  it("accepts a shared name when the CONTROL TYPE tells them apart", () => {
+    const candidates = cands("explorer");
+    const dated = candidates.filter((c) => c.name === "Date modified");
+    expect(dated).toHaveLength(2);
+    expect(new Set(dated.map((c) => c.controlType))).toEqual(new Set(["SplitButton", "Edit"]));
+
+    const header = dated.find((c) => c.controlType === "SplitButton")!;
+    const chosen = resolveChoice(
+      candidates,
+      { kind: "picked", number: header.number },
+      "the column header for when things were last changed",
+      "File Explorer",
+    );
+    expect(chosen.controlType).toBe("SplitButton");
+  });
+
+  it("accepts a shared name when the POSITION tells them apart", () => {
     const candidates = cands("explorer");
     const details = candidates.filter((c) => c.name === "Details");
     expect(details).toHaveLength(2);
     expect(new Set(details.map((c) => c.position)).size).toBe(2);
 
-    const error = refusalOf(() =>
+    // The model had a discriminator and could have used it, so the answer stands.
+    expect(
       resolveChoice(
         candidates,
         { kind: "picked", number: details[0]!.number },
         "details",
         "File Explorer",
-      ),
-    );
-    expect(error.message).toContain("bottom right");
-    expect(error.message).toContain("top right");
+      ).number,
+    ).toBe(details[0]!.number);
+  });
+
+  it("refuses only when NOTHING the model saw could have told them apart", () => {
+    // The rule stated as one property: name, control type and position all equal.
+    const candidates = cands("explorer");
+    const filters = candidates.filter((c) => c.name === "Filter dropdown");
+    expect(new Set(filters.map((c) => `${c.controlType}|${c.position}`)).size).toBe(1);
+
+    expect(
+      refusalOf(() =>
+        resolveChoice(candidates, { kind: "picked", number: filters[0]!.number }, "filter", "Explorer"),
+      ).refusal,
+    ).toBe("ambiguous");
   });
 
   it("accepts a unique name without complaint", () => {
@@ -320,7 +354,7 @@ describe("renderChooseRequest", () => {
   });
 
   it("tells the model to decline rather than offer the nearest thing", () => {
-    expect(CHOOSE_SYSTEM).toContain("NONE");
-    expect(CHOOSE_SYSTEM).toContain("worse in every case");
+    expect(CHOOSE_CONTROL_SYSTEM).toContain("NONE");
+    expect(CHOOSE_CONTROL_SYSTEM).toContain("worse in every case");
   });
 });

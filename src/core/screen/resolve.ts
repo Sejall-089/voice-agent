@@ -78,24 +78,47 @@ export function resolveChoice(
   // of several matches. The number is unambiguous. What is NOT settled is whether the model had
   // any basis for choosing between entries the user could not have told apart either.
   //
-  // Measured on real windows: Explorer shows FOUR controls named "Filter dropdown", and the
-  // coarse position phrase puts all four at "top". VS Code and Claude each have several such
-  // groups. If someone asks for "the filter dropdown", there genuinely are four and picking one
-  // is a decision they did not delegate.
+  // Measured on real windows: Explorer shows FOUR controls named "Filter dropdown", all of them
+  // `Button`s, and the coarse position phrase puts all four at "top". If someone asks for "the
+  // filter dropdown", there genuinely are four and picking one is a decision they did not
+  // delegate.
   //
   // SO CODE DECIDES, NOT THE MODEL. Refusing here is deterministic and does not depend on the
   // model choosing to be honest about its own uncertainty, which is the same reason M13's
-  // resolveTargetEvent refuses on multiple matches rather than asking the model to behave. The
-  // asymmetry M15 settled applies unchanged: an unhelpful refusal costs a rephrase, a confident
-  // wrong marker costs a click on something the user did not intend.
-  const sameName = candidates.filter(
-    (c) => c.name.trim().toLowerCase() === candidate.name.trim().toLowerCase(),
-  );
-  if (sameName.length > 1) {
-    throw ambiguity(quoted, sameName);
+  // resolveTargetEvent refuses on multiple matches rather than asking the model to behave.
+  //
+  // THE RULE IS "INDISTINGUISHABLE IN EVERY FIELD THE MODEL WAS SHOWN" — name, control type and
+  // position — AND IT WAS NARROWED FROM "SHARED NAME" BY MEASUREMENT (M16.5).
+  //
+  // The first version refused on the name alone, on the argument that a refusal is cheaper than
+  // a wrong marker. scripts/choose-recon.ts then produced a case that argument does not cover:
+  // asked for "the column header for when things were last changed", the model correctly picked
+  // Explorer's "Date modified" — and the gate refused it, because Explorer ALSO has an "Date
+  // modified" filter box. The two are a `SplitButton` at 699,193 and an `Edit` at 699,248: same
+  // name, DIFFERENT control type, and the user's own words named one of them unambiguously.
+  // Refusing there is not caution, it is discarding information the model used correctly.
+  //
+  // The narrowed rule is not a heuristic. It says exactly one thing: refuse when the model had
+  // NO INFORMATION with which to tell two entries apart. Where a discriminator existed and the
+  // model used it, the answer stands; where none existed, a confident PICK is a coin flip and is
+  // refused. The four "Filter dropdown" buttons are still caught — identical on all three fields.
+  const twins = candidates.filter((c) => indistinguishable(c, candidate));
+  if (twins.length > 1) {
+    throw ambiguity(quoted, twins);
   }
 
   return candidate;
+}
+
+// Are these two entries the same as far as the model could tell? Compares exactly the three
+// fields renderChooseRequest puts on the line, and nothing else — the rect is deliberately not
+// consulted, because the model never saw it.
+function indistinguishable(a: Candidate, b: Candidate): boolean {
+  return (
+    a.name.trim().toLowerCase() === b.name.trim().toLowerCase() &&
+    a.controlType === b.controlType &&
+    a.position === b.position
+  );
 }
 
 function ambiguity(quoted: string, candidates: readonly Candidate[]): ElementNotFoundError {

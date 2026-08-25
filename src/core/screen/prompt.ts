@@ -22,7 +22,7 @@ import type { Candidate, ChoiceResult } from "../types.ts";
 // The answer forms. Deliberately terse rather than JSON: the reply is a few tokens, this rides
 // on `LLMClient.complete()` (which both providers already implement and both are already tested
 // on), and a one-line grammar is far easier to state unambiguously in a prompt than a schema.
-export const CHOOSE_SYSTEM = [
+export const CHOOSE_CONTROL_SYSTEM = [
   "You are helping someone find a control in a window on their screen.",
   "You will be given the exact list of controls that window contains, numbered.",
   "Your ONLY job is to say which numbered entry the person means.",
