@@ -1605,6 +1605,13 @@ have to rediscover.
   correctness-over-latency trade; the sound optimisation (a per-window-handle memo of "already
   seen settled") is named but not built.
 
+- **`-Command -` may not reliably deliver stdin commands to a PowerShell host** (found M16.8,
+  not acted on). M16's UIA host printed `READY` and answered nothing under that invocation, and
+  the same was reproduced against `WindowsInputInjector`'s own unmodified script driven from
+  node. M16 switched to `-File`; M12 was left alone because shipped dictation works and runs
+  under electron's spawn, where the behaviour may differ. Full note and the symptom to watch for
+  are in `src/main/shell/WindowsInputInjector.ts`.
+
 - **The taskbar, the desktop, and open popup menus are out of scope.** They are separate
   top-level windows, and enumeration is scoped to the foreground window.
 

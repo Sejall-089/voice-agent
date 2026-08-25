@@ -131,7 +131,11 @@ export type PointingRefusal =
   | "untrustworthy"
   | "imprecise"
   | "unreadable"
-  | "unsettled";
+  | "unsettled"
+  // The user switched away between the question and the answer (M16.9). Its own refusal because
+  // it is its own fact and it has its own fix — ask again, and the app will look at whatever is
+  // in front NOW. See core/tools/pointAt.ts for why this is detected rather than ignored.
+  | "stale";
 
 export class ElementNotFoundError extends UserFixableError {
   constructor(

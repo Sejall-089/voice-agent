@@ -39,6 +39,8 @@ interface Wiring {
   trees?: WindowElements[];
   probeCounts?: number[];
   chooser?: ElementChooser;
+  switchedAway?: boolean;
+  movedTo?: { x: number; y: number; width: number; height: number };
 }
 
 function setup(wiring: Wiring = {}) {
@@ -48,6 +50,8 @@ function setup(wiring: Wiring = {}) {
   const elements = new FakeElements({
     trees: wiring.trees ?? [TREES["notepad"]!],
     ...(wiring.probeCounts ? { probeCounts: wiring.probeCounts } : {}),
+    ...(wiring.switchedAway ? { switchedAway: true } : {}),
+    ...(wiring.movedTo ? { movedTo: wiring.movedTo } : {}),
   });
   const chooser = wiring.chooser ?? FakeChooser.picking("File");
 
@@ -276,6 +280,38 @@ describe("refusals reach the user, and never draw", () => {
     expect(outcome.status).toBe("refused");
     expect(outcome.result).toContain("Filter dropdown");
     expect(outcome.result).toContain("from the left");
+    expect(screen.pointed).toEqual([]);
+  });
+
+  it("stale: the user switched to another app while we were working", async () => {
+    // A DECIDED behaviour, not an accident. ~1.9s passes on a real Chromium window between the
+    // snapshot and the marker (M16.8), so alt-tabbing inside that is ordinary. The overlay is
+    // always-on-top, so drawing anyway would put a marker labelled "File" over whatever app is
+    // now in front, at coordinates that meant something in a window behind it.
+    const { outcome, screen, elements } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.picking("File"),
+      switchedAway: true,
+    });
+
+    expect(outcome.status).toBe("refused");
+    expect(outcome.result).toContain("switched away");
+    expect(screen.pointed).toEqual([]);
+    // Checked AFTER the choice, immediately before drawing — the latest possible moment.
+    expect(elements.verifications).toBe(1);
+  });
+
+  it("stale: the window moved while we were working", async () => {
+    // A window dragged between the enumerate and the draw invalidates every rect that came out
+    // of it just as thoroughly as a focus change does.
+    const { outcome, screen } = await run({
+      trees: [TREES["notepad"]!],
+      chooser: FakeChooser.picking("File"),
+      movedTo: { x: 300, y: 200, width: 1920, height: 1008 },
+    });
+
+    expect(outcome.status).toBe("refused");
+    expect(outcome.result).toContain("moved while I was looking");
     expect(screen.pointed).toEqual([]);
   });
 

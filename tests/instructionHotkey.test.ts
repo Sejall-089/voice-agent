@@ -27,6 +27,9 @@ function harness(options: { confirmPending?: boolean; dictating?: boolean; typed
       return Promise.resolve(options.typed ?? "");
     },
     clearPointer: () => events.push("clearPointer"),
+    // M16.9. Recorded so the ORDER can be asserted: the snapshot has to happen before
+    // showInput(), because showInput() is what makes this app the foreground window.
+    snapshotPointTarget: () => events.push("snapshotTarget"),
   };
   const voice = {
     begin: () => {
@@ -194,5 +197,42 @@ describe("the instruction hotkey otherwise", () => {
     // Nothing at all — including no clearPointer. Dictation owns the screen and the microphone,
     // and an ignored press must leave every one of them exactly as it found them.
     expect(events).toEqual([]);
+  });
+});
+
+// M16.9. The one ordering that matters in this file, and the one nothing else could catch: the
+// target snapshot has to be taken BEFORE showInput(), because showInput() calls window.focus()
+// and makes this app the foreground window. Taken after, it would record the command bar every
+// single time and pointAt would read its own UI.
+//
+// Exactly the mistake DictationSession already avoids by capturing getForegroundWindow() before
+// opening the microphone — same problem, same one-line answer, and worth an assertion rather
+// than a comment because a later refactor moving one line would break it silently.
+describe("the target snapshot", () => {
+  it("happens before the bar takes focus", async () => {
+    const { onHotkey, events } = harness({ typed: "where is the file menu" });
+    onHotkey();
+    await settle();
+
+    expect(events.indexOf("snapshotTarget")).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf("snapshotTarget")).toBeLessThan(events.indexOf("showInput"));
+  });
+
+  it("is NOT taken when the press was ignored for a pending confirm", async () => {
+    // A press that changed nothing must not move the target either — otherwise answering a
+    // dialog would silently repoint the next question at whatever was in front then.
+    const { onHotkey, events } = harness({ confirmPending: true });
+    onHotkey();
+    await settle();
+
+    expect(events).not.toContain("snapshotTarget");
+  });
+
+  it("is NOT taken while dictation is running", async () => {
+    const { onHotkey, events } = harness({ dictating: true });
+    onHotkey();
+    await settle();
+
+    expect(events).not.toContain("snapshotTarget");
   });
 });

@@ -63,6 +63,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // has any business doing to it — the shell does not capture and does not point, it only knows
   // that "never mind" should mean never mind for everything on screen at once.
   private dismissPointer: (() => void) | null = null;
+  private snapshotTarget: (() => void) | null = null;
   // Whether a confirm dialog is on screen awaiting an answer (M14 §8). Set SYNCHRONOUSLY
   // before the dialog is created, so there is no instant in which it is visible and this is
   // still false — the gap a live tester would find first.
@@ -293,6 +294,17 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // is being handed, not the other way round.
   attachPointer(dismiss: () => void): void {
     this.dismissPointer = dismiss;
+  }
+
+  // M16.9. Same shape as attachPointer: the shell is handed the thing to call, and never learns
+  // what a UIA host is.
+  attachTargetSnapshot(snapshot: () => void): void {
+    this.snapshotTarget = snapshot;
+  }
+
+  // Called by the instruction hotkey BEFORE showInput() steals focus.
+  snapshotPointTarget(): void {
+    this.snapshotTarget?.();
   }
 
   // Called by the hotkey handlers before a new instruction starts, so a marker never outlives

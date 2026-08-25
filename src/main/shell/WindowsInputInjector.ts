@@ -34,6 +34,28 @@ import type { ForegroundWindow, InputInjector } from "./InputInjector.ts";
 // silently swallowed — see InputInjector.ts's doc comment for why that distinction is the
 // whole point.
 
+// KNOWN ISSUE, FOUND AT M16.8, NOT YET ACTED ON.
+//
+// This class writes HOST_SCRIPT into the child's stdin (`-Command -`) and then writes commands
+// down the SAME pipe. Building M16's UIA host on that pattern produced a host that printed READY
+// and then answered nothing: with `-Command -`, PowerShell treats stdin as the SCRIPT SOURCE and
+// keeps consuming it, so the loop's `[Console]::In.ReadLine()` never sees anything written
+// afterwards.
+//
+// That was REPRODUCED AGAINST THIS FILE'S OWN HOST_SCRIPT, UNCHANGED, driven from plain node —
+// it printed READY and never answered `FG`. So the fault is the invocation, not M16's script.
+//
+// WHY THIS IS A NOTE AND NOT A FIX: shipped dictation demonstrably works, and it runs under
+// electron's spawn rather than the one used to reproduce this, so the behaviour may genuinely
+// differ there. Changing a live-tested input path on the strength of a reproduction in a
+// different host is the wrong trade to make without a dictation failure to point at.
+//
+// THE FIX, IF IT IS EVER NEEDED: write the script to a temp file and spawn with
+// `-File <path>`, which leaves stdin exclusively the command channel. See
+// src/main/uia/WindowsElements.ts, which does exactly that and works.
+//
+// SYMPTOM TO WATCH FOR: dictation that narrates "Dictating into —" and then types nothing,
+// with no error — a `FG` or `TYPE` that never gets a reply and times out.
 const STARTUP_TIMEOUT_MS = 10_000; // Add-Type compiled in ~500ms locally; generous headroom for a cold machine
 const FOREGROUND_TIMEOUT_MS = 5_000; // a plain user32 read; if this hangs, the host is dead
 const TYPE_TIMEOUT_MS = 20_000; // covers even a very long transcript's worth of chunks

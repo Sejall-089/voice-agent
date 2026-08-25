@@ -23,6 +23,13 @@ export interface InstructionHotkeyShell {
   // M15. Take down the pointing marker, if there is one. A no-op on an install with vision off,
   // and on one where nothing has been pointed at.
   clearPointer(): void;
+  // M16.9. Remember which window the user is looking at, RIGHT NOW — before showInput() calls
+  // window.focus() and this app becomes the foreground.
+  //
+  // This is the same problem DictationSession solved by capturing getForegroundWindow() before
+  // opening the microphone, and it has the same one-line answer: the moment the bar appears, the
+  // question "which window did they mean" is unanswerable. A no-op when pointing is off.
+  snapshotPointTarget(): void;
 }
 
 export interface VoiceLike {
@@ -88,6 +95,13 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
     //    passed. Deliberately AFTER both guards above: a press that was ignored changed nothing,
     //    and should not silently clear the answer to the question still on screen.
     shell.clearPointer();
+
+    // 5. Snapshot the target window BEFORE the bar takes focus (M16.9). Deliberately after the
+    //    guards above — a press that was ignored must not move the target — and deliberately
+    //    before showInput(), which is the call that makes this app the foreground window.
+    //    Fire-and-forget: it must not delay the bar appearing, and a failed snapshot degrades to
+    //    "whatever is in front", which is the same answer it would have had anyway.
+    shell.snapshotPointTarget();
 
     void (async () => {
       const typed = shell.showInput(); // resolves on Enter/Escape with whatever was typed

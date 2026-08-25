@@ -1,5 +1,10 @@
 import { ElementNotFoundError } from "../errors.ts";
-import type { ElementSurface, WindowElements, WindowProbe } from "../types.ts";
+import type {
+  ElementSurface,
+  TargetCheck,
+  WindowElements,
+  WindowProbe,
+} from "../types.ts";
 
 // The default `ElementSurface` (M16) — the exact counterpart of `UnavailableScreen`,
 // `UnavailableGmail`, `UnavailableNotion` and `UnavailableCalendar`.
@@ -20,6 +25,10 @@ export class UnavailableElements implements ElementSurface {
   }
 
   enumerate(): Promise<WindowElements> {
+    return Promise.reject(unavailable());
+  }
+
+  verifyTarget(): Promise<TargetCheck> {
     return Promise.reject(unavailable());
   }
 }

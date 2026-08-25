@@ -31,6 +31,10 @@ import { ModelVisionLocator } from "../core/vision/ModelVisionLocator.ts";
 import { ANTHROPIC_FRAME, OPENAI_FRAME } from "../core/vision/frame.ts";
 import { UnavailableScreen } from "../core/vision/UnavailableScreen.ts";
 import { UnavailableVisionLocator } from "../core/vision/UnavailableVisionLocator.ts";
+import { WindowsElements } from "./uia/WindowsElements.ts";
+import { ModelElementChooser } from "../core/screen/ModelElementChooser.ts";
+import { UnavailableElements } from "../core/screen/UnavailableElements.ts";
+import { UnavailableChooser } from "../core/screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
 import type { FramePolicy } from "../core/vision/frame.ts";
 import type {
@@ -88,6 +92,7 @@ let speechEngine: PiperSynthesizer | null = null;
 // And again for the pointing overlay (M15): a transparent always-on-top window that would
 // otherwise outlive the app exactly as the input host and the Piper process both once did.
 let screenSurface: WindowsScreen | null = null;
+let elementsSurface: WindowsElements | null = null;
 
 const WINDOW_WIDTH = 640;
 const WINDOW_HEIGHT = 640;
@@ -202,16 +207,67 @@ app.whenReady().then(() => {
   // all — "no screenshot is taken" is a property of the object graph, not of a branch somewhere.
   // The frame policy comes from the same object as the locator, so the capture size and the
   // provider that will (or will not) rescale it can never be chosen independently.
-  const screenSurfaceOrNull = vision ? new WindowsScreen(vision.frame) : null;
+  // M16. POINTING is now its own opt-in, separate from VISION.
+  //
+  // The two are no longer the same capability. Vision photographed the screen and sent the
+  // picture; pointing reads one window's control NAMES and sends those. That is a materially
+  // smaller disclosure, but it is still reading the contents of whatever the user was last
+  // looking at, so it keeps a flag of its own rather than inheriting one — the same reasoning
+  // that gave vision a flag instead of keying off an API key that was already present.
+  const pointing = process.env["POINTING_ENABLED"] === "1";
+  // Snapshot taken by the instruction hotkey before the bar takes focus (M16.9); null until
+  // then, which the host reads as "whatever is in the foreground".
+  let pointTarget: number | null = null;
+
+  const elements = pointing
+    ? new WindowsElements({
+        target: () => pointTarget,
+        // Our own windows, so `verifyTarget` can tell "the bar has focus, as expected" from
+        // "the user switched to a third application". Read live rather than captured: the
+        // overlay window is created lazily, so a list taken at startup would miss it.
+        ownWindows: () =>
+          BrowserWindow.getAllWindows().map((w) => {
+            try {
+              return Number(w.getNativeWindowHandle().readBigUInt64LE(0));
+            } catch {
+              return 0;
+            }
+          }),
+      })
+    : null;
+  elementsSurface = elements;
+
+  // The chooser rides the planner's own LLM — no second provider, no second key (M16.5).
+  const chooser = pointing ? new ModelElementChooser({ llm }) : null;
+
+  // The overlay still needs a WindowsScreen, but pointing no longer needs vision: an install
+  // with POINTING_ENABLED and no VISION_ENABLED gets a screen surface purely to draw with.
+  const screenSurfaceOrNull =
+    vision || pointing ? new WindowsScreen(vision?.frame) : null;
   screenSurface = screenSurfaceOrNull;
   if (screenSurfaceOrNull) shell.attachPointer(() => screenSurfaceOrNull.clearPointer());
+  // M16.9. Before the bar steals focus, remember which window the user is looking at.
+  if (elements) {
+    shell.attachTargetSnapshot(() => {
+      void elements
+        .snapshotForeground()
+        .then((handle) => {
+          pointTarget = handle;
+        })
+        .catch(() => {
+          // A failed snapshot degrades to "whatever is in front", which is what the answer would
+          // have been anyway. Never blocks the bar from opening.
+          pointTarget = null;
+        });
+    });
+  }
   const tools = buildRegistry({
     gmail: gmail !== null,
     notion: notion !== null,
     calendar: calendar !== null,
     speech: synthesizer !== null,
-    // Both halves, or neither. Pointing needs something to capture with AND something to ask.
-    vision: vision !== null && screenSurfaceOrNull !== null,
+    // Both halves, or neither: something to READ the window with and something to ASK.
+    vision: elements !== null && chooser !== null && screenSurfaceOrNull !== null,
   });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
@@ -231,6 +287,8 @@ app.whenReady().then(() => {
     undefined, // speech store — the planner's own scratch state, no composition needed
     screenSurfaceOrNull ?? new UnavailableScreen(),
     vision?.locator ?? new UnavailableVisionLocator(),
+    elements ?? new UnavailableElements(),
+    chooser ?? new UnavailableChooser(),
   );
 
   // The speech queue, wired both ways: the session plays THROUGH the shell, and the shell
@@ -318,10 +376,14 @@ app.whenReady().then(() => {
   // Said out loud at startup, every run, on purpose. This is the one capability that can send a
   // picture of the user's screen off the machine, and an install where it is quietly on is
   // exactly the situation the explicit opt-in exists to prevent.
+  // Says what the app will ACTUALLY do, which changed at M16: pointing no longer photographs
+  // anything. An install that logged "captures the screen" while sending only control names
+  // would be over-warning, and one that logged nothing would be under-warning.
   console.log(
-    vision
-      ? "[main] vision guidance ON - 'where is X' captures the screen and sends it to a cloud model"
-      : "[main] vision guidance off - VISION_ENABLED not set (no screen is ever captured)",
+    pointing
+      ? "[main] pointing ON - 'where is X' reads the focused window's control names and sends " +
+          "them to the model (no screenshot is taken)"
+      : "[main] pointing off - POINTING_ENABLED not set (no window is ever read)",
   );
 });
 
@@ -569,4 +631,5 @@ app.on("will-quit", () => {
   // And the pointing overlay (M15) — a transparent always-on-top window is the most obnoxious
   // possible thing to leave behind, because there is nothing visible to close it with.
   screenSurface?.dispose();
+  elementsSurface?.dispose();
 });

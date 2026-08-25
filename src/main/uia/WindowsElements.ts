@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { ElementNotFoundError } from "../../core/errors.ts";
 import type {
   ElementSurface,
+  TargetCheck,
   NativeRect,
   UiElement,
   WindowElements,
@@ -49,6 +50,8 @@ import type {
 //
 //   PROBE <hwnd>  -> "PROBE <count> <base64 windowClass>"   or  "ERR <base64 message>"
 //   ENUM  <hwnd>  -> "ENUM <base64 json>"                   or  "ERR <base64 message>"
+//   FG            -> "FG <hwnd>"                            (the foreground window right now)
+//   CHECK <hwnd>  -> "CHECK <fgHwnd> <x> <y> <w> <h>"       or  "ERR <base64 message>"
 //
 // `<hwnd>` of 0 means "whatever is in the foreground right now", which is only correct before
 // this app's own window takes focus — M16.9 supplies the snapshot taken at hotkey time.
@@ -164,6 +167,17 @@ while ($true) {
       $json = $payload | ConvertTo-Json -Depth 6 -Compress
       Write-Output ("ENUM {0}" -f (To-B64 $json))
     }
+    elseif ($cmd -eq "FG") {
+      Write-Output ("FG {0}" -f ([VaUia]::GetForegroundWindow()).ToInt64())
+    }
+    elseif ($cmd -eq "CHECK") {
+      # Cheap, and deliberately so: this runs immediately before the marker is drawn, so it must
+      # not add another enumeration's worth of latency to a call that has already spent one.
+      $el = Get-Target $arg
+      $r = Rect-Of $el.Current.BoundingRectangle
+      $fg = ([VaUia]::GetForegroundWindow()).ToInt64()
+      Write-Output ("CHECK {0} {1} {2} {3} {4}" -f $fg, $r.x, $r.y, $r.width, $r.height)
+    }
     else {
       Write-Output ("ERR {0}" -f (To-B64 ("unknown command: " + $cmd)))
     }
@@ -174,6 +188,10 @@ while ($true) {
 `;
 
 export interface WindowsElementsOptions {
+  // This app's own top-level window handles. Needed because the command bar necessarily HOLDS
+  // focus for the whole of a pointAt call, so "is the target still foreground" is always false —
+  // the real question is whether focus has moved to a THIRD application.
+  ownWindows: () => number[];
   // The window the user was looking at, captured BEFORE the command bar took focus (M16.9).
   // Returning null means "whatever is in the foreground now", which is right only for a caller
   // that has not stolen focus.
@@ -200,6 +218,39 @@ export class WindowsElements implements ElementSurface {
     return {
       count: Number(parts[1] ?? 0),
       windowClass: decode(parts[2] ?? ""),
+    };
+  }
+
+  // Capture the window the user is looking at, BEFORE this app's bar takes focus (M16.9). The
+  // handle is held until the next snapshot; `target` in the options is what M16.9's wiring reads
+  // it back through.
+  async snapshotForeground(): Promise<number | null> {
+    const line = await this.send("FG", PROBE_TIMEOUT_MS);
+    const parts = line.split(" ");
+    if (parts[0] !== "FG") return null;
+    const handle = Number(parts[1] ?? 0);
+    return Number.isSafeInteger(handle) && handle !== 0 ? handle : null;
+  }
+
+  async verifyTarget(): Promise<TargetCheck> {
+    const line = await this.send(`CHECK ${this.handle()}`, PROBE_TIMEOUT_MS);
+    const parts = line.split(" ");
+    if (parts[0] !== "CHECK") throw this.hostError(line);
+
+    const foreground = Number(parts[1] ?? 0);
+    const target = Number(this.options.target() ?? 0);
+    const ours = this.options.ownWindows();
+
+    return {
+      // Current if focus is on the window we read, or on one of our own windows (the bar, the
+      // overlay). Anything else means the user has moved to a third application.
+      stillCurrent: foreground === target || ours.includes(foreground),
+      rect: {
+        x: Number(parts[2] ?? 0),
+        y: Number(parts[3] ?? 0),
+        width: Number(parts[4] ?? 0),
+        height: Number(parts[5] ?? 0),
+      },
     };
   }
 

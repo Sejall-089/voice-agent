@@ -1,6 +1,7 @@
 import { toScreenRect } from "../screen/geometry.ts";
 import { readSettledWindow } from "../screen/pointing.ts";
 import { resolveChoice } from "../screen/resolve.ts";
+import { ElementNotFoundError } from "../errors.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
 // M16: show the user where something is on their screen, so THEY can click it.
@@ -89,7 +90,47 @@ export const pointAtTool: Tool = {
     //    could not have told apart all refuse here rather than becoming a marker.
     const chosen = resolveChoice(candidates, choice, target, window.windowTitle);
 
-    // 4. Native screen pixels → DIP. Exact, not estimated: the rect came from the OS. This is
+    // 4. IS THIS STILL ABOUT THE RIGHT WINDOW?
+    //
+    //    A DECISION, NOT AN ACCIDENT. Between the snapshot and this line the app has read a
+    //    window, waited out a settle, and made a model call — measured at ~1.9s on a real
+    //    Chromium window (M16.8). A user alt-tabbing, or a notification stealing focus, is
+    //    comfortably inside that. So: DETECT AND REFUSE, rather than draw anyway.
+    //
+    //    The tempting alternative is "the rect is still geometrically correct for the window it
+    //    came from, so draw it". That reasoning does not survive the overlay being ALWAYS ON
+    //    TOP: if the user has switched to another app, the marker is drawn over THAT app, at
+    //    coordinates that meant something in a window now hidden behind it. A confident marker
+    //    labelled "File" sitting on a browser's tab bar is M15's exact failure mode let back in
+    //    through a different door — and M15's asymmetry settles it. A refusal costs a rephrase;
+    //    a marker on the wrong application costs a click the user did not intend.
+    //
+    //    Re-snapshotting instead was rejected too: it would answer a question about a window the
+    //    user never asked about.
+    //
+    //    The window's own bounds are re-read at the same time, because a window DRAGGED since
+    //    the enumerate invalidates every rect that came out of it just as thoroughly.
+    const check = await deps.elements.verifyTarget();
+    if (!check.stillCurrent) {
+      throw new ElementNotFoundError(
+        "stale",
+        `You've switched away from ${window.windowTitle} — ask me again and I'll look at ` +
+          `whatever's in front now.`,
+      );
+    }
+    if (
+      check.rect.x !== window.windowRect.x ||
+      check.rect.y !== window.windowRect.y ||
+      check.rect.width !== window.windowRect.width ||
+      check.rect.height !== window.windowRect.height
+    ) {
+      throw new ElementNotFoundError(
+        "stale",
+        `${window.windowTitle} moved while I was looking — ask me again and I'll re-read it.`,
+      );
+    }
+
+    // 5. Native screen pixels → DIP. Exact, not estimated: the rect came from the OS. This is
     //    still the one step that fails silently rather than loudly if it is wrong, which is why
     //    `ScreenRect` is branded so nothing else can reach the overlay.
     const display = await deps.screen.displayForNative(window.windowRect);

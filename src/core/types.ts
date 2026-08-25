@@ -477,9 +477,21 @@ export type ChoiceResult =
 // Neither method takes a window: the implementation resolves the target itself, from the
 // foreground-window snapshot taken BEFORE the command bar stole focus. Same shape as
 // `ScreenSurface.capture()` picking its own display, and it keeps `/core` free of HWNDs.
+// Is the window we read still the one the user is looking at? (M16.9)
+export interface TargetCheck {
+  // False when the user has switched to a THIRD application — not the target, and not this app's
+  // own bar, which necessarily holds focus for the whole call.
+  stillCurrent: boolean;
+  // The target window's bounds re-read now. A window that has been dragged or resized since the
+  // enumerate invalidates every rect that came out of it.
+  rect: NativeRect;
+}
+
 export interface ElementSurface {
   // SAFE. The cheap count-only read, for the settle check.
   probe(): Promise<WindowProbe>;
+  // SAFE. Re-read just enough to know whether the answer is still about the right window.
+  verifyTarget(): Promise<TargetCheck>;
   // SAFE. Everything pointable in the target window. Reads only; never invokes a control.
   enumerate(): Promise<WindowElements>;
 }

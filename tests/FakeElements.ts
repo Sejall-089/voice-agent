@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type {
   ElementSurface,
+  TargetCheck,
   NativeRect,
   UiElement,
   WindowElements,
@@ -181,6 +182,9 @@ export interface FakeElementsOptions {
   probeCounts?: number[];
   failEnumerate?: Error;
   failProbe?: Error;
+  // M16.9. Set to make verifyTarget report the user has switched away, or that the window moved.
+  switchedAway?: boolean;
+  movedTo?: NativeRect;
 }
 
 export class FakeElements implements ElementSurface {
@@ -193,6 +197,9 @@ export class FakeElements implements ElementSurface {
   private readonly probeCounts: number[] | undefined;
   private readonly failEnumerate: Error | undefined;
   private readonly failProbe: Error | undefined;
+  private readonly switchedAway: boolean;
+  private readonly movedTo: NativeRect | undefined;
+  public verifications = 0;
 
   constructor(options: FakeElementsOptions | WindowElements) {
     const opts: FakeElementsOptions =
@@ -201,6 +208,8 @@ export class FakeElements implements ElementSurface {
     this.probeCounts = opts.probeCounts;
     this.failEnumerate = opts.failEnumerate;
     this.failProbe = opts.failProbe;
+    this.switchedAway = opts.switchedAway ?? false;
+    this.movedTo = opts.movedTo;
   }
 
   probe(): Promise<WindowProbe> {
@@ -219,6 +228,15 @@ export class FakeElements implements ElementSurface {
     const tree = this.at(this.enumerations);
     this.enumerations += 1;
     return Promise.resolve(tree);
+  }
+
+  verifyTarget(): Promise<TargetCheck> {
+    this.verifications += 1;
+    const tree = this.at(Math.max(0, this.enumerations - 1));
+    return Promise.resolve({
+      stillCurrent: !this.switchedAway,
+      rect: this.movedTo ?? tree.windowRect,
+    });
   }
 
   private at(call: number): WindowElements {
