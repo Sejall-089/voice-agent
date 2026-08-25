@@ -193,82 +193,45 @@ See `spec.md` §2, §3, §4d, and §6's `speakResult`.
 
 ---
 
-## Vision guidance — point, don't click (M15)
+## Pointing — point, don't click (M15, regrounded in M16)
 
-Ask **"where's the send button?"** and the app photographs your screen, works out where the
-thing you named is, and draws a marker over it. Then it stops. **You** click it.
+Ask **"where's the send button?"** and the app works out where the thing you named is and draws
+a marker over it. Then it stops. **You** click it.
 
-That last sentence is the whole design. Auto-clicking was the obvious alternative and it is
-deliberately not built — not as a stepping stone this is halfway across, but as the thing this is
-the alternative to. The objection to screenshot-driven control was never that pixels are
-distasteful; it was that an unverifiable guess must not drive an irreversible action. Point at
-the wrong button and you notice and ignore it. Click the wrong button and you have sent
-something.
+### It does not photograph your screen
 
-It works on **any application** — Notepad, Explorer, a game launcher, a PDF viewer — which is
-what makes it different from the Gmail and Notion tools. Those read a real DOM and resolve
-controls structurally; they are precise, and they work in exactly one app each. This one is
-approximate and works everywhere, and the approximation is only tolerable because a human is
-the executor.
+The first version of this did. It sent a screenshot to a vision model and asked where the thing
+was — and on ordinary Windows chrome it answered with the **wrong control**: one tab over on a
+tab strip, ~200px onto a neighbouring toolbar icon. Not imprecision, the wrong answer given
+confidently. That is a known-hard problem (published benchmarks put the best models near 31%
+strict accuracy against ~97% human, worst on exactly the small dense targets a desktop is made
+of), so it was replaced rather than tuned.
 
-**It refuses more readily than it points.** The DOM tools get their safety for free: a control
-that can't be resolved by role and name is never clicked. There is no equivalent for pixels, so
-the checks are manufactured (`src/core/vision/locate.ts`) out of properties a wrong answer tends
-to violate — a box that runs off the frame means the model answered in some other coordinate
-space; a box covering half the screen is a model that couldn't find the thing and boxed the whole
-window rather than saying so; a box of eight pixels is pointing at nothing. Each of those is a
-refusal, never a nudge toward something plausible. So are "it isn't on your screen" and "there
-are three things matching that — which one?", the second of which names them so your rephrase is
-one word.
+**Now the coordinates come from Windows.** UI Automation — the same accessibility layer screen
+readers use — lists the controls in the window you were looking at, with their exact rectangles.
+Code numbers that list. The model's entire answer is **one number**, picking an entry. An integer
+cannot be off by 200 pixels.
 
-```
-you:  where's the send button?
-app:  Looking at your screen to find the send button…      (said before it looks)
-app:  [marker drawn on the button]
-      Pointing at "Send" — the top right of your screen.
-```
+### What leaves your machine
 
-The sentence is worth as much as the marker. It's derived from the same box, so the two can
-never describe different places, and it names what the app *thinks* it found — a marker sitting
-on **Discard** while the label says **Send** is then visible as a disagreement rather than
-trusted as an answer. It also means the answer survives being spoken aloud, or being read after
-the marker has timed out.
+The **names** of the controls in **one window**, as text — `"File"`, `"Edit"`, `"Advice.txt"`,
+`"New"` — plus the words you used. That's it. No image is captured at all.
 
-The marker is click-through (your click reaches the app underneath, which is the point),
-never takes focus, and dismisses itself after ten seconds or when you press Escape or the
-hotkey.
+It reads the window that was in front when you pressed the hotkey, snapshotted *before* the
+command bar takes focus. Not the desktop, not your other windows, and never the app's own UI.
 
-### The privacy part, which is a real change
+### When it declines
 
-Every other capability in this app is local on purpose. Whisper transcribes on your machine.
-Piper speaks on your machine. "Nothing leaves the machine" was load-bearing for both.
+It refuses rather than guessing, and says which kind of "no" it is:
 
-**It is not true of this one.** A picture of whatever is on your screen is sent to Anthropic.
-There is no local UI-grounding model in this stack that would let it be otherwise, so rather than
-soften that, here is exactly what happens and what was done about it:
+| | |
+|---|---|
+| **can't read that window right now** | the window exposes only its title bar to the accessibility layer. Some apps do this transiently — one measured flat for 9.4 seconds and fully populated an hour later — so the message is present-tense, not a claim about the app. |
+| **still loading** | the control list was still changing. It waits, and refuses rather than answering against a half-built list. |
+| **several things could be that** | two controls the model had no way to tell apart. It names them ("the 1st, 2nd, 3rd and 4th from the left") instead of picking. |
+| **couldn't find it** | and it says how many controls it actually looked at — a claim you can check, which the vision version could never make. |
+| **you've switched away** | you changed windows while it was working. The marker is always-on-top, so drawing anyway would put it over the wrong app. |
 
-- **It is off unless you turn it on.** `VISION_ENABLED=1`, and nothing else will do it. This is
-  the only capability here gated on an explicit flag rather than on "did you configure the thing
-  it needs?" — because the thing it needs (`ANTHROPIC_API_KEY`) is probably already set for the
-  planner, and treating that as consent would turn *"I configured an LLM"* into *"I agreed to
-  screen capture"*. With it unset, no capture machinery is even constructed.
-- **It says so, out loud, every time.** "Looking at your screen to find the send button…" is
-  narrated and spoken *before* the capture, not after. That is why the tool is `caution` rather
-  than `reversible`: the marker is trivially undoable, a screenshot that has left the machine is
-  not, and narration is what this app uses in place of an undo that doesn't exist.
-- **Only when you ask a question that needs it.** No continuous capture, no background polling.
-  `summarize this` captures nothing.
-- **Nothing is kept.** Never written to disk, never logged. The action log records the words you
-  used and the sentence you got back — no image bytes anywhere. The screenshot exists for the
-  few seconds of the request and is dropped.
-- **The app is never in the picture.** Its own windows are excluded from the capture at the OS
-  level, so the command bar isn't photographed sitting on top of what you were asking about.
-- **The startup log says which state you're in**, every run, so an install where this is quietly
-  on isn't a thing that can happen.
-
-See `spec.md` §2, §3, §4e, and §6d.
-
----
 
 ## Running it
 
@@ -491,77 +454,31 @@ type, or Windows blocks the keystrokes outright (typically an unelevated app try
 into an elevated one — an admin terminal, say), nothing gets typed. You'll see the transcript
 you spoke instead of losing it silently.
 
-### Setting up vision guidance (optional)
+### Setting up pointing (optional)
 
-**Read the privacy section above before turning this on.** It's the one capability here that
-sends a picture of your screen off your machine.
+**Read the section above before turning this on.** It's the one capability here that reads the
+contents of another window.
 
 ```env
-VISION_ENABLED=1
-# and the key for whichever provider you use — OPENAI_API_KEY is the verified path
+POINTING_ENABLED=1
 ```
 
-That's the whole setup — no binary to install, no model to download, nothing to start.
+- **`POINTING_ENABLED=1` exactly.** Not `true`, not `yes`. It is a deliberate speed bump on the
+  one capability that reads a window you did not point it at explicitly.
+- **No extra key, no extra provider.** The model that picks a control is the planner's own —
+  the request is a list of names and the answer is a number, so there is nothing a separate
+  vision model would add. `VISION_ENABLED`, `VISION_PROVIDER` and `VISION_MODEL` were removed
+  in M16 and do nothing if set.
+- **Windows only.** It reads Windows' UI Automation tree through a PowerShell helper process,
+  started on first use and kept warm (~0.9s once, then ~0.3–0.5s per question on a native
+  window, ~1.9s on a Chromium one).
 
-Three things that catch people:
-
-- **`VISION_ENABLED=1` exactly.** Not `true`, not `yes`. It is a deliberate speed bump on the
-  one setting that changes what leaves your computer.
-- **The provider defaults to `LLM_PROVIDER`**, so an install that only ever configured one vendor
-  needs nothing extra. `VISION_PROVIDER` overrides it — they are separate choices on purpose,
-  because the planner and the vision call can have different keys, different costs, and (as
-  happened during this milestone) different billing outages.
-- **Only `openai` is verified.** It was measured against a fixture with known element positions:
-  it finds the right control, declines when the thing isn't on screen, and reports ambiguity
-  instead of picking. `anthropic` is implemented against the same interface but has never been
-  run, and its frame size is read from documentation rather than measured — which is exactly the
-  assumption that cost the OpenAI path 4 misses out of 4 before it was measured.
-
-`VISION_MODEL` overrides the model (defaults: `gpt-5`, or `claude-opus-5` on Anthropic).
-
-**It is good at buttons and marginal at small icons — and now refuses rather than guessing on
-the marginal ones.** Boxes carry a systematic offset of about +20px right and +12px down —
-absorbed by a 100px button, not by a 39px toolbar icon, so below ~40px on its shorter side the
-app declines with "...too small on screen for me to point at reliably" rather than drawing a
-marker that is likely off. Expect "where's the Send button" to work and "where's the settings
-gear" to get a polite refusal instead of a wrong marker.
-
-Every run prints which state you're in:
+On startup you'll see one of:
 
 ```
-[main] vision guidance ON - 'where is X' captures the screen and sends it to a cloud model
-[main] vision provider: openai (frame: shortest edge 768 - measured)
-[main] vision guidance off - VISION_ENABLED not set (no screen is ever captured)
+[main] pointing ON - 'where is X' reads the focused window's control names and sends them to the model (no screenshot is taken)
+[main] pointing off - POINTING_ENABLED not set (no window is ever read)
 ```
-
-Then press the hotkey and ask for something on screen — *"where's the send button"*, *"point at
-the settings menu"*, *"show me how to attach a file"*.
-
-**Before trusting it on your setup**, run the recon scripts. They exist because a fixture written
-from an assumption passes every test and matches nothing, and the second one answers a question
-this milestone cannot answer without it — whether the model *declines* when the thing isn't
-there, or invents a plausible box:
-
-```bash
-npx electron scripts/screen-recon.mjs --keep --out screen-recon-out
-node scripts/vision-recon.mjs --image screen-recon-out/q2-full.png --target "the send button"
-```
-
-The first measures capture on *your* display (resolution, DPI, timing, and whether the app's own
-windows are really excluded). The second asks the real model for a box, an absent thing, and an
-ambiguous thing, and writes an HTML file with the returned box drawn over your screenshot — open
-it and see whether the rectangle is actually on the button. Both write pictures of your screen;
-`screen-recon` deletes them unless you pass `--keep`, and both output directories are gitignored.
-
----
-
-> **Native-module note.** `better-sqlite3` needs a different binary for Node (tests) than for
-> Electron (the app). The `pretest` / `predev` scripts rebuild it automatically, so switching
-> between `npm test` and `npm run dev` costs one short rebuild. Nothing to do manually — except
-> **quit the app before running `npm test`**: a running Electron holds `better_sqlite3.node` open,
-> and the rebuild fails with `EBUSY` / `EPERM` rather than anything that names the real cause.
-
----
 
 ## Watching the memory story
 

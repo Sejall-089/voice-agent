@@ -46,14 +46,20 @@ export const calendarTools: Tool[] = [readScheduleTool, createEventTool, moveEve
 // the menu the model chooses from.
 export const speechTools: Tool[] = [elaborateTool];
 
-// The vision tool (M15). Gated on the one capability in this app that is opt-in rather than
-// merely configured: VISION_ENABLED. Every other gate above asks "is there a thing to talk to?"
-// — a debug Chrome, a refresh token, a piper binary — and answers itself from config that exists
-// for no other purpose. This one cannot: the API key it would otherwise key off is very likely
-// already present for the planner, and its presence must never be read as permission to send a
-// picture of the user's screen anywhere. So main.ts requires an explicit flag, and an install
-// that has not set it is never even offered the tool.
-export const visionTools: Tool[] = [pointAtTool];
+// The pointing tool (M15, regrounded in M16). Gated on the one capability in this app that is
+// opt-in rather than merely configured: POINTING_ENABLED.
+//
+// Every other gate above asks "is there a thing to talk to?" — a debug Chrome, a refresh token,
+// a piper binary — and answers itself from config that exists for no other purpose. This one
+// cannot: the API key it would otherwise key off is very likely already present for the planner,
+// and its presence must never be read as permission to read the contents of whatever window the
+// user was last looking at. So main.ts requires an explicit flag, and an install that has not
+// set it is never even offered the tool.
+//
+// (Through M15 the flag was VISION_ENABLED and what it authorised was a SCREENSHOT. M16 replaced
+// the grounding: no picture is taken, and what leaves the machine is a list of control names.
+// The gate stayed because the smaller disclosure is still a disclosure.)
+export const pointingTools: Tool[] = [pointAtTool];
 
 export interface RegistryOptions {
   // Whether a Chrome to drive is actually configured.
@@ -67,10 +73,13 @@ export interface RegistryOptions {
   // Optional (defaults to not offered) — whether this install can speak (M14). Decided in
   // main.ts by the same "is it configured?" check the others use, on the piper paths.
   speech?: boolean;
-  // Optional (defaults to not offered) — whether this install may look at the screen (M15).
-  // True only when BOTH halves exist: something to capture with and something to ask. See
-  // `visionTools` above for why this one gate is an explicit opt-in rather than inferred config.
-  vision?: boolean;
+  // Optional (defaults to not offered) — whether this install may read a window's controls
+  // (M16). True only when BOTH halves exist: something to READ with and something to ASK. See
+  // `pointingTools` above for why this gate is an explicit opt-in rather than inferred config.
+  //
+  // Renamed from `vision` at M16.10: nothing is photographed any more, and an option named for a
+  // capability that no longer exists is a trap for whoever reads it next.
+  pointing?: boolean;
 }
 
 // The menu for one app run.
@@ -86,7 +95,7 @@ export function buildRegistry(options: RegistryOptions): Tool[] {
   if (options.notion === true) tools.push(...notionTools);
   if (options.calendar === true) tools.push(...calendarTools);
   if (options.speech === true) tools.push(...speechTools);
-  if (options.vision === true) tools.push(...visionTools);
+  if (options.pointing === true) tools.push(...pointingTools);
   return tools;
 }
 
@@ -99,7 +108,7 @@ export function findTool(name: string): Tool | undefined {
     ...notionTools,
     ...calendarTools,
     ...speechTools,
-    ...visionTools,
+    ...pointingTools,
   ].find((tool) => tool.name === name);
 }
 

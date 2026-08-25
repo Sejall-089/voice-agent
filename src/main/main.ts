@@ -25,24 +25,17 @@ import { GoogleCalendar } from "../core/calendar/GoogleCalendar.ts";
 import { GoogleCalendarAuth } from "../core/calendar/GoogleCalendarAuth.ts";
 import { UnavailableCalendar } from "../core/calendar/UnavailableCalendar.ts";
 import { WindowsScreen } from "./screen/WindowsScreen.ts";
-import { AnthropicVisionApi } from "../core/vision/anthropicApi.ts";
-import { OpenAIVisionApi } from "../core/vision/openaiApi.ts";
-import { ModelVisionLocator } from "../core/vision/ModelVisionLocator.ts";
-import { ANTHROPIC_FRAME, OPENAI_FRAME } from "../core/vision/frame.ts";
-import { UnavailableScreen } from "../core/vision/UnavailableScreen.ts";
-import { UnavailableVisionLocator } from "../core/vision/UnavailableVisionLocator.ts";
+import { UnavailableScreen } from "../core/screen/UnavailableScreen.ts";
 import { WindowsElements } from "./uia/WindowsElements.ts";
 import { ModelElementChooser } from "../core/screen/ModelElementChooser.ts";
 import { UnavailableElements } from "../core/screen/UnavailableElements.ts";
 import { UnavailableChooser } from "../core/screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
-import type { FramePolicy } from "../core/vision/frame.ts";
 import type {
   CalendarSurface,
   GmailSurface,
   NotionSurface,
   Transcriber,
-  VisionLocator,
 } from "../core/types.ts";
 
 // ONE hotkey (M8). It opens the command bar AND starts listening, so you decide whether
@@ -197,16 +190,6 @@ app.whenReady().then(() => {
   // M14: same gate shape again — a capability the app cannot exercise is never offered.
   const synthesizer = createSynthesizer();
   speechEngine = synthesizer;
-  // M15: the only gate here that is an explicit OPT-IN rather than inferred from config that
-  // exists anyway. Every other capability above answers "is there a thing to talk to?" from
-  // something set for no other purpose — a debug Chrome, a refresh token, a piper binary. This
-  // one cannot: ANTHROPIC_API_KEY is very likely already present for the planner, and its
-  // presence must never be read as permission to send a picture of the user's screen anywhere.
-  const vision = createVisionLocator();
-  // Built only when vision is on, so an install that never opted in has no capture machinery at
-  // all — "no screenshot is taken" is a property of the object graph, not of a branch somewhere.
-  // The frame policy comes from the same object as the locator, so the capture size and the
-  // provider that will (or will not) rescale it can never be chosen independently.
   // M16. POINTING is now its own opt-in, separate from VISION.
   //
   // The two are no longer the same capability. Vision photographed the screen and sent the
@@ -240,10 +223,9 @@ app.whenReady().then(() => {
   // The chooser rides the planner's own LLM — no second provider, no second key (M16.5).
   const chooser = pointing ? new ModelElementChooser({ llm }) : null;
 
-  // The overlay still needs a WindowsScreen, but pointing no longer needs vision: an install
-  // with POINTING_ENABLED and no VISION_ENABLED gets a screen surface purely to draw with.
-  const screenSurfaceOrNull =
-    vision || pointing ? new WindowsScreen(vision?.frame) : null;
+  // The screen surface is now purely the overlay plus the display lookup — it stopped taking
+  // pictures at M16.10, so it is built exactly when pointing is on and never otherwise.
+  const screenSurfaceOrNull = pointing ? new WindowsScreen() : null;
   screenSurface = screenSurfaceOrNull;
   if (screenSurfaceOrNull) shell.attachPointer(() => screenSurfaceOrNull.clearPointer());
   // M16.9. Before the bar steals focus, remember which window the user is looking at.
@@ -267,7 +249,7 @@ app.whenReady().then(() => {
     calendar: calendar !== null,
     speech: synthesizer !== null,
     // Both halves, or neither: something to READ the window with and something to ASK.
-    vision: elements !== null && chooser !== null && screenSurfaceOrNull !== null,
+    pointing: elements !== null && chooser !== null && screenSurfaceOrNull !== null,
   });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
@@ -286,7 +268,6 @@ app.whenReady().then(() => {
     calendar ?? new UnavailableCalendar(),
     undefined, // speech store — the planner's own scratch state, no composition needed
     screenSurfaceOrNull ?? new UnavailableScreen(),
-    vision?.locator ?? new UnavailableVisionLocator(),
     elements ?? new UnavailableElements(),
     chooser ?? new UnavailableChooser(),
   );
@@ -485,75 +466,6 @@ function createSynthesizer(): PiperSynthesizer | null {
   });
 }
 
-// M15. Config is read HERE like every other capability, but the GATE is a different shape, and
-// deliberately so.
-//
-// Every other one asks "is there a thing to talk to?" and answers itself from config that exists
-// for no other purpose — a debug Chrome URL, a Google refresh token, a piper binary path. Vision
-// cannot be gated that way: the credential it would key off, ANTHROPIC_API_KEY, is very likely
-// already set because the planner is using it, and reading its presence as permission to
-// photograph the user's screen would turn "I configured an LLM" into "I consented to screen
-// capture". Those are not the same decision, so this one needs a flag of its own.
-//
-// Unset means the tool is never on the menu, no WindowsScreen is constructed, and no screen is
-// ever captured — the same "off is a real state" rule as voice and speech, on the capability
-// where it matters most.
-function createVisionLocator(): { locator: VisionLocator; frame: FramePolicy } | null {
-  if (process.env["VISION_ENABLED"] !== "1") return null;
-
-  // Which provider, and it is a SEPARATE choice from LLM_PROVIDER on purpose: the planner and
-  // the vision call have different requirements and, as of this milestone, different billing
-  // realities. VISION_PROVIDER overrides; otherwise follow the planner, which is the least
-  // surprising default on an install that has only ever configured one vendor.
-  const provider = process.env["VISION_PROVIDER"] ?? process.env["LLM_PROVIDER"];
-  const model = process.env["VISION_MODEL"];
-
-  // The frame size travels WITH the provider, never separately. It is the size that provider
-  // will not rescale, and a mismatched pair puts every marker in the wrong place with nothing
-  // thrown — see core/vision/frame.ts for the measurement. Returning them together is what makes
-  // picking one without the other impossible.
-  if (provider === "anthropic") {
-    if (!process.env["ANTHROPIC_API_KEY"]) {
-      console.error(
-        "[main] VISION_ENABLED=1 with the Anthropic vision provider but ANTHROPIC_API_KEY is " +
-          "not set - vision guidance stays off.",
-      );
-      return null;
-    }
-    console.log("[main] vision provider: anthropic (frame: long edge 1568 - UNVERIFIED, see frame.ts)");
-    return {
-      locator: new ModelVisionLocator({
-        api: new AnthropicVisionApi(),
-        ...(model ? { model } : { model: "claude-opus-5" }),
-      }),
-      frame: ANTHROPIC_FRAME,
-    };
-  }
-
-  if (provider === "openai") {
-    if (!process.env["OPENAI_API_KEY"]) {
-      console.error(
-        "[main] VISION_ENABLED=1 with the OpenAI vision provider but OPENAI_API_KEY is not " +
-          "set - vision guidance stays off.",
-      );
-      return null;
-    }
-    console.log("[main] vision provider: openai (frame: shortest edge 768 - measured)");
-    return {
-      locator: new ModelVisionLocator({
-        api: new OpenAIVisionApi(),
-        ...(model ? { model } : {}),
-      }),
-      frame: OPENAI_FRAME,
-    };
-  }
-
-  console.error(
-    `[main] VISION_ENABLED=1 but the vision provider is "${provider ?? "unset"}" - set ` +
-      "VISION_PROVIDER (or LLM_PROVIDER) to \"openai\" or \"anthropic\". Vision guidance stays off.",
-  );
-  return null;
-}
 
 // Same shape as createTranscriber: config is read HERE, in composition, and a missing value
 // disables one capability rather than breaking the app. Chrome has to be started with

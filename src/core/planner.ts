@@ -5,8 +5,7 @@ import { UnavailableSender } from "./senders/SlackSender.ts";
 import { UnavailableGmail } from "./gmail/UnavailableGmail.ts";
 import { UnavailableNotion } from "./notion/UnavailableNotion.ts";
 import { UnavailableCalendar } from "./calendar/UnavailableCalendar.ts";
-import { UnavailableScreen } from "./vision/UnavailableScreen.ts";
-import { UnavailableVisionLocator } from "./vision/UnavailableVisionLocator.ts";
+import { UnavailableScreen } from "./screen/UnavailableScreen.ts";
 import { UnavailableElements } from "./screen/UnavailableElements.ts";
 import { UnavailableChooser } from "./screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "./draft.ts";
@@ -31,7 +30,6 @@ import type {
   Tool,
   ToolDeps,
   ToolInput,
-  VisionLocator,
 } from "./types.ts";
 
 function defaultSleep(ms: number): Promise<void> {
@@ -71,17 +69,13 @@ export class Planner {
     // summary rather than the whole thing, so an "and the rest?" follow-up has something to
     // answer from. One per app run, in memory only.
     private readonly speech: SpeechStore = new InMemorySpeechStore(),
-    // M15. Two more surfaces, same rule as every one above: an unavailable default means a tool
-    // can never reach a screen — or a vision model — this install was not configured for. They
-    // are separate parameters rather than one bundle because they fail for different reasons and
-    // have different fixes: the screen can be un-capturable while the model is fine, and the
-    // model can be unreachable while the screen is perfectly capturable.
+    // M15/M16. The screen surface — the overlay, and the display lookup that feeds the
+    // coordinate conversion. Same rule as every surface above: an unavailable default means a
+    // tool can never reach a screen this install was not configured for.
     private readonly screen: ScreenSurface = new UnavailableScreen(),
-    private readonly vision: VisionLocator = new UnavailableVisionLocator(),
-    // M16. The same two-parameter split one more time, for the grounding that REPLACES vision:
-    // reading a window's controls and asking a model which one was meant fail differently and
-    // are fixed differently. `vision` above is on its way out (M16.10) once pointAt no longer
-    // routes through it.
+    // M16. Reading a window's controls and asking a model which one was meant fail differently
+    // and are fixed differently, so they are two parameters rather than one bundle — the same
+    // split every surface pair above uses.
     private readonly elements: ElementSurface = new UnavailableElements(),
     private readonly chooser: ElementChooser = new UnavailableChooser(),
     // M16. The settle loop's delay, injected so it is a dependency rather than a wall-clock
@@ -156,7 +150,6 @@ export class Planner {
       calendar: this.calendar,
       speech: this.speech,
       screen: this.screen,
-      vision: this.vision,
       elements: this.elements,
       chooser: this.chooser,
       sleep: this.sleep,

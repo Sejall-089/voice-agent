@@ -1,7 +1,7 @@
 import { screenCaptureError } from "../errors.ts";
-import type { DisplayBounds, NativeRect, ScreenSurface, Screenshot } from "../types.ts";
+import type { DisplayBounds, NativeRect, ScreenSurface } from "../types.ts";
 
-// The default `ScreenSurface` (M15) — the exact counterpart of `UnavailableSender`,
+// The default `ScreenSurface` (M15, trimmed at M16.10 when `capture()` went) — the exact counterpart of `UnavailableSender`,
 // `UnavailableGmail`, `UnavailableNotion` and `UnavailableCalendar`.
 //
 // A Planner built without a screen gets this, so "vision isn't turned on" is a missing
@@ -14,9 +14,6 @@ import type { DisplayBounds, NativeRect, ScreenSurface, Screenshot } from "../ty
 // whether or not anything was ever pointed at. Making "take the marker away" fail on an install
 // that has no marker would turn a no-op into an error report.
 export class UnavailableScreen implements ScreenSurface {
-  capture(): Promise<Screenshot> {
-    return Promise.reject(screenCaptureError("unavailable"));
-  }
   point(): Promise<void> {
     return Promise.reject(screenCaptureError("unavailable"));
   }

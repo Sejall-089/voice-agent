@@ -61,7 +61,7 @@ function setup(wiring: Wiring = {}) {
     input: { target: TARGET },
   });
 
-  // Thirteen `undefined`s to reach the M16 surfaces. The comment this replaces called six of
+  // Twelve `undefined`s to reach the M16 surfaces. The comment this replaces called six of
   // them "the clearest argument in the codebase for making Planner take an options object" —
   // M16 has now doubled it. Left positional deliberately rather than refactored mid-milestone:
   // 33 construction sites across 17 files is not a change to make while wiring a pipeline.
@@ -70,7 +70,7 @@ function setup(wiring: Wiring = {}) {
   const planner = new Planner(
     llm,
     shell,
-    buildRegistry({ gmail: false, vision: true }),
+    buildRegistry({ gmail: false, pointing: true }),
     new NoopMemoryResolver(),
     log,
     undefined, // sender
@@ -80,7 +80,6 @@ function setup(wiring: Wiring = {}) {
     undefined, // calendar
     undefined, // speech store
     screen,
-    undefined, // vision (M15, on its way out at M16.10)
     elements,
     chooser,
     async (ms: number) => {
@@ -378,7 +377,7 @@ describe("the settle cost, through the pipeline", () => {
 describe("the registry gate", () => {
   it("does not offer pointAt when pointing is off", () => {
     expect(buildRegistry({ gmail: false }).map((t) => t.name)).not.toContain("pointAt");
-    expect(buildRegistry({ gmail: false, vision: true }).map((t) => t.name)).toContain("pointAt");
+    expect(buildRegistry({ gmail: false, pointing: true }).map((t) => t.name)).toContain("pointAt");
   });
 });
 

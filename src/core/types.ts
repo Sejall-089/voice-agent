@@ -260,31 +260,9 @@ export interface DisplayBounds {
   nativeHeight: number;
 }
 
-// One frame of one display, plus everything needed to map a point in it back onto the screen.
-export interface Screenshot {
-  // PNG, not JPEG. Recon measured the downscaled frame at 265 KB as PNG against 92 KB as
-  // JPEG(q80), and the bytes are not the constraint: the model is billed on pixel DIMENSIONS,
-  // both sizes fit one request comfortably, and JPEG's artefacts land precisely on the small UI
-  // text that a button's label has to be read from. Fidelity wins over a rounding error's worth
-  // of upload.
-  png: Uint8Array;
-  // The image's own pixel dimensions — the space the vision model answers in.
-  width: number;
-  height: number;
-  display: DisplayBounds;
-}
-
-// A rectangle in IMAGE pixels, as the vision model reports it.
-export interface ElementBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 // A rectangle in SCREEN DIP, as the overlay needs it.
 //
-// BRANDED, AND THAT IS THE POINT (M16.6). M15 gave this a separate name from `ElementBox` and
+// BRANDED, AND THAT IS THE POINT (M16.6). M15 gave this a separate name from `ElementBox` (deleted at M16.10) and
 // argued "two names make that visible at the call site" — but a name is documentation, not
 // enforcement. TypeScript is structural: `ElementBox`, `NativeRect` and this were all
 // `{x,y,width,height}`, so passing any one where another belonged compiled silently. That is
@@ -312,39 +290,16 @@ export interface PointerTarget {
   label: string;
 }
 
-// What the vision model came back with. Three outcomes, not one nullable box, for the same
-// reason ToolChoice has three: "here it is", "it isn't here", and "several things match" are
-// different facts, and collapsing them loses the one thing the user needs to hear.
-export type LocateResult =
-  | { kind: "found"; box: ElementBox; label: string }
-  | { kind: "ambiguous"; candidates: string[] }
-  | { kind: "notFound"; reason: string };
-
-// Where is this thing on screen? Behind an interface like `Transcriber` and `SpeechSynthesizer`,
-// and pointedly NOT a widening of `LLMClient`: that interface is about language (choose a tool,
-// complete some text), and this is a different job with a different return type and its own
-// model choice. Same reasoning that kept speech synthesis out of it.
+// Drawing on the screen, and knowing which display a rectangle falls on. Implemented in `/main`
+// (it needs electron) but DECLARED here, because it is a dependency a tool reaches through
+// `ToolDeps` — the GmailSurface/NotionSurface/CalendarSurface shape.
 //
-// The implementation never decides an ACTION. It answers one bounded question and hands back a
-// rectangle that core/vision/locate.ts then validates and may refuse — the same shape as
-// gmailScript.ts resolving a control by role+name and declining when it cannot.
-export interface VisionLocator {
-  locate(shot: Screenshot, target: string): Promise<LocateResult>;
-}
-
-// Looking at the screen, and pointing at something on it. Implemented in `/main` (it needs
-// electron) but DECLARED here, because it is a dependency a tool reaches through `ToolDeps` —
-// the GmailSurface/NotionSurface/CalendarSurface shape, not the VoiceShell/SpeechShell one.
-//
-// The difference is worth stating: voice and speech never needed a contract inside `/core`
-// because `/core` never calls them — an utterance leaves as a fire-and-forget `LocalAction`.
-// Capture is a request/response; the tool needs the picture BACK. So it is a surface.
+// IT NO LONGER CAPTURES ANYTHING (M16.10). `capture()` existed for one caller — the vision
+// grounding this milestone replaced — and went with it. What is left is the overlay and the
+// display lookup that feeds the coordinate conversion. `setContentProtection` stays on the
+// overlay window regardless: it is what stops one marker appearing in a screenshot some OTHER
+// application takes, which was never a vision-specific concern.
 export interface ScreenSurface {
-  // SAFE. One frame of the display the user is looking at. The app's OWN windows are excluded
-  // from it (Windows' WDA_EXCLUDEFROMCAPTURE, via setContentProtection) — verified by recon,
-  // which is what lets the capture happen lazily inside the handler while the command bar is
-  // sitting on screen in front of whatever is being asked about.
-  capture(): Promise<Screenshot>;
   // REVERSIBLE. Draw the marker. It NEVER clicks, never moves the real cursor, and never
   // takes focus — the whole premise of this milestone is that the human is the one who clicks.
   point(target: PointerTarget): Promise<void>;
@@ -384,7 +339,7 @@ export interface ScreenSurface {
 // A rectangle in NATIVE SCREEN PIXELS, as UI Automation reports `BoundingRectangle`.
 //
 // A third rect type, and deliberately its own name rather than a reuse of `ScreenRect`
-// (DIP, what the overlay wants) or `ElementBox` (image pixels, what the vision path used).
+// (DIP, what the overlay wants) or the deleted `ElementBox` (image pixels, the vision path's).
 // M15 made this call first and it was the right one: the entire expected class of bug here is
 // one rect type being passed where another belongs, and separate names make that visible at the
 // call site instead of at the moment a marker lands 1.5x away from the button.
@@ -459,7 +414,7 @@ export interface Candidate {
   rect: NativeRect;
 }
 
-// Which candidate did they mean? Three outcomes for the same reason `LocateResult` had three and
+// Which candidate did they mean? Three outcomes for the same reason M15's `LocateResult` had three and
 // `ToolChoice` has three: "that one", "none of these", and "several of these" are different
 // facts, and collapsing them loses the one thing the user needs to hear.
 //
@@ -497,7 +452,7 @@ export interface ElementSurface {
 }
 
 // Which of these did they mean? Its own interface rather than a widening of `LLMClient`, for the
-// reason that kept `VisionLocator` separate: that interface is about language in general, and
+// reason that kept M15's `VisionLocator` separate: that interface is about language in general, and
 // this is one bounded question with its own return type and its own failure modes.
 //
 // The implementation never decides an ACTION and never produces a coordinate — it picks from a
@@ -573,17 +528,8 @@ export interface ToolDeps {
   // Scratch state owned by the planner (one per app run), handed down like `draft` — see
   // core/speechStore.ts for why it deliberately never reaches SQLite.
   speech: SpeechStore;
-  // M15. Looking at the screen, and pointing at it. Same "unavailable default" rule as every
-  // surface above: a tool can never reach a screen the app was not configured to look at.
+  // M15/M16. Drawing on the screen. Same "unavailable default" rule as every surface above.
   screen: ScreenSurface;
-  // M15. Where is this thing? Gated separately from `screen` in principle — capturing a frame
-  // and sending one somewhere are different permissions — though in the running app both derive
-  // from the same explicit VISION_ENABLED opt-in in main.ts.
-  //
-  // M16 REPLACES THIS. Grounding moves to `elements` + `chooser` below; this pair is removed
-  // once pointAt no longer routes through it (M16.10), and is kept only so the tree stays green
-  // milestone by milestone.
-  vision: VisionLocator;
   // M16. The controls of the window the user was looking at, with exact rects. Same
   // "unavailable default" rule as every surface above: a tool can never reach a window the app
   // was not configured to read.
