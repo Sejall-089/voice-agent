@@ -23,7 +23,7 @@ import type { DisplayBounds, ElementBox, Screenshot } from "../src/core/types.ts
 // in here rather than at every call site, because the vision mapping under test never reads it —
 // it spans image pixels → DIP, and the native size belongs to the UIA mapping instead.
 function shotOn(
-  display: Omit<DisplayBounds, "nativeWidth" | "nativeHeight">,
+  display: Omit<DisplayBounds, "nativeX" | "nativeY" | "nativeWidth" | "nativeHeight">,
   width: number,
   height: number,
 ): Screenshot {
@@ -33,6 +33,8 @@ function shotOn(
     height,
     display: {
       ...display,
+      nativeX: display.x,
+      nativeY: display.y,
       nativeWidth: display.width,
       nativeHeight: display.height,
     },

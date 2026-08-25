@@ -160,11 +160,21 @@ describe("failure mode 3: the model correctly says it is not here", () => {
 // AMBIGUITY. Two routes in, one refusal out.
 // ---------------------------------------------------------------------------
 describe("ambiguity, detected by CODE after the pick", () => {
-  it("refuses when the chosen candidate shares its name with another", () => {
-    // Explorer really does expose four controls named "Filter dropdown".
+  // RE-PROVEN AGAINST THE NARROWED RULE (M16.5). This test was originally titled "refuses when
+  // the chosen candidate shares its name with another" — which described the OLD rule and is now
+  // a false statement of what the gate does. It kept passing after the narrowing, but passing is
+  // not the same as testing the right thing, so the assertions below now establish WHY it
+  // refuses: the four entries are identical on all three fields the model was shown, which is
+  // the only condition the current code refuses on.
+  it("refuses four Filter dropdowns that are identical on name, type AND position", () => {
     const candidates = cands("explorer");
     const filters = candidates.filter((c) => c.name === "Filter dropdown");
     expect(filters).toHaveLength(4);
+
+    // The precondition the NEW rule turns on. Without this, the refusal below would tell us
+    // nothing about which rule produced it.
+    expect(new Set(filters.map((c) => c.controlType)).size).toBe(1);
+    expect(new Set(filters.map((c) => c.position)).size).toBe(1);
 
     const error = refusalOf(() =>
       resolveChoice(
@@ -177,11 +187,62 @@ describe("ambiguity, detected by CODE after the pick", () => {
     expect(error.refusal).toBe("ambiguous");
   });
 
+  // THE RULE AS A TRUTH TABLE, on synthetic candidates so each field varies independently.
+  //
+  // The Explorer cases above are real but they only cover two corners of this table. This one
+  // pins the rule exactly, and — the point — CANNOT be satisfied by the old "any shared name"
+  // logic: two of the four rows require ACCEPTANCE of a shared name.
+  describe("the rule is exactly: identical on name AND type AND position", () => {
+    const at = (
+      number: number,
+      name: string,
+      controlType: string,
+      position: string,
+    ): Candidate => ({
+      number,
+      name,
+      controlType,
+      position,
+      rect: { x: number * 10, y: 0, width: 20, height: 20 },
+    });
+
+    it.each([
+      ["all three equal", "Button", "top", "refuse"],
+      ["control type differs", "Edit", "top", "accept"],
+      ["position differs", "Button", "bottom right", "accept"],
+    ])("%s -> %s", (_label, otherType, otherPosition, expected) => {
+      const candidates = [
+        at(1, "Filter", "Button", "top"),
+        at(2, "Filter", otherType, otherPosition),
+      ];
+      const run = (): unknown =>
+        resolveChoice(candidates, { kind: "picked", number: 1 }, "the filter", "Test");
+
+      if (expected === "refuse") {
+        expect(refusalOf(run).refusal).toBe("ambiguous");
+      } else {
+        expect(run()).toMatchObject({ number: 1 });
+      }
+    });
+
+    it("a different name is never ambiguous, whatever else matches", () => {
+      const candidates = [
+        at(1, "Filter", "Button", "top"),
+        at(2, "Sort", "Button", "top"),
+      ];
+      expect(
+        resolveChoice(candidates, { kind: "picked", number: 1 }, "the filter", "Test"),
+      ).toMatchObject({ number: 1 });
+    });
+  });
+
   it("does not depend on the model admitting the ambiguity", () => {
     // The model answered a confident PICK. Code refused anyway. That is the guarantee: it does
     // not rest on the model choosing to be honest about its own uncertainty.
     const candidates = cands("explorer");
     const filters = candidates.filter((c) => c.name === "Filter dropdown");
+    // Indistinguishable on every field the model saw — the current rule's precondition.
+    expect(new Set(filters.map((c) => `${c.controlType}|${c.position}`)).size).toBe(1);
     for (const filter of filters) {
       expect(
         refusalOf(() =>

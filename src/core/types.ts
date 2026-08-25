@@ -242,7 +242,20 @@ export interface DisplayBounds {
   y: number;
   width: number;
   height: number;
-  // The same display's true size in physical pixels — the space UIA answers in (M16).
+  // The same display's true ORIGIN and SIZE in physical pixels — the space UIA answers in (M16).
+  //
+  // THE ORIGIN IS NOT `x * scaleFactor`, AND THAT IS THIS MILESTONE'S VERSION OF M15's TRAP.
+  // On the machine everything here was measured on there is one display at DIP (0,0), so
+  // `0 * 1.5 === 0` and the wrong formula passes every test that exists. It breaks on a second
+  // monitor, where each display has its own scale factor and the physical origin of the one on
+  // the right is NOT its DIP origin times its own scale. Same shape as M15's `x / scaleFactor`:
+  // correct in the configuration it was written against, silently wrong elsewhere, and it fails
+  // by putting a confident marker on the wrong screen rather than by throwing.
+  //
+  // So these come from the OS (`screen.dipToScreenPoint`), never from arithmetic. See
+  // src/main/screen/WindowsScreen.ts.
+  nativeX: number;
+  nativeY: number;
   nativeWidth: number;
   nativeHeight: number;
 }
@@ -269,14 +282,26 @@ export interface ElementBox {
   height: number;
 }
 
-// A rectangle in SCREEN DIP, as the overlay needs it. Structurally identical to ElementBox and
-// deliberately a separate name: the entire class of bug this milestone expects is one of these
-// being passed where the other belongs, and two names make that visible at the call site.
+// A rectangle in SCREEN DIP, as the overlay needs it.
+//
+// BRANDED, AND THAT IS THE POINT (M16.6). M15 gave this a separate name from `ElementBox` and
+// argued "two names make that visible at the call site" — but a name is documentation, not
+// enforcement. TypeScript is structural: `ElementBox`, `NativeRect` and this were all
+// `{x,y,width,height}`, so passing any one where another belonged compiled silently. That is
+// precisely the milestone's #1 expected bug, and it produced no error at all.
+//
+// The phantom `__dip` field cannot be forged by a literal, so the ONLY way to obtain a
+// `ScreenRect` is through `core/screen/geometry.ts`'s `toScreenRect`. Handing UIA's native
+// pixels straight to the overlay — the exact 1.5x mistake — is now a compile error rather than
+// a marker in the wrong place. Nothing reads the field at runtime; it does not exist there.
+declare const DIP_BRAND: unique symbol;
+
 export interface ScreenRect {
   x: number;
   y: number;
   width: number;
   height: number;
+  readonly [DIP_BRAND]: never;
 }
 
 export interface PointerTarget {

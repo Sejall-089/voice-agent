@@ -140,15 +140,38 @@ function resizeTo(image: NativeImage, frame: FramePolicy): NativeImage {
 // ratio. UI Automation answers in native pixels, so the overlay needs a native → DIP mapping,
 // and core/screen/geometry.ts derives it from these two sizes the same way the vision path
 // derived its own from `display.width / shot.width`.
+// THE PHYSICAL RECTANGLE COMES FROM THE OS, NOT FROM MULTIPLICATION (M16.6).
+//
+// `bounds.x * scaleFactor` is the obvious way to write this and it is the trap. On this machine
+// there is one display at DIP (0,0) and `0 * 1.5 === 0`, so the wrong formula agrees with the
+// right one on every measurement that can be taken here — and disagrees on a second monitor,
+// where each display has its own scale factor and the physical origin of the one on the right is
+// not its DIP origin times its own scale. That is M15's `x / scaleFactor` wearing new clothes:
+// correct where it was written, silently wrong elsewhere, and it fails by placing a confident
+// marker on the wrong screen rather than by throwing.
+//
+// `dipToScreenPoint` asks Windows, which knows. Recon confirmed it round-trips exactly on this
+// display: DIP (100,100) -> physical (150,150) -> DIP (100,100).
 function toBounds(display: Electron.Display): DisplayBounds {
+  const { bounds } = display;
+  const origin = screen.dipToScreenPoint({ x: bounds.x, y: bounds.y });
+  const far = screen.dipToScreenPoint({
+    x: bounds.x + bounds.width,
+    y: bounds.y + bounds.height,
+  });
+
   return {
     id: display.id,
-    x: display.bounds.x,
-    y: display.bounds.y,
-    width: display.bounds.width,
-    height: display.bounds.height,
-    nativeWidth: Math.round(display.bounds.width * display.scaleFactor),
-    nativeHeight: Math.round(display.bounds.height * display.scaleFactor),
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    nativeX: origin.x,
+    nativeY: origin.y,
+    // Derived from the two corners rather than from the size times the scale, so the physical
+    // rectangle is internally consistent with the origin above even if Windows rounds.
+    nativeWidth: far.x - origin.x,
+    nativeHeight: far.y - origin.y,
   };
 }
 

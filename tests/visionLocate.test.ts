@@ -24,6 +24,8 @@ const SHOT: Screenshot = {
     y: 0,
     width: 1280,
     height: 720,
+    nativeX: 0,
+    nativeY: 0,
     nativeWidth: 1920,
     nativeHeight: 1080,
   },

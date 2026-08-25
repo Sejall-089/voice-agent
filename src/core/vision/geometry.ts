@@ -34,12 +34,14 @@ export function toScreenRect(box: ElementBox, shot: Screenshot): ScreenRect {
   const horizontal = edges(box.x, box.width, sx, display.x);
   const vertical = edges(box.y, box.height, sy, display.y);
 
+  // `as ScreenRect` for the brand M16.6 added — this file is deleted at M16.10, and until then
+  // it mints the same type through the same kind of conversion.
   return {
     x: horizontal.start,
     y: vertical.start,
     width: horizontal.extent,
     height: vertical.extent,
-  };
+  } as ScreenRect;
 }
 
 // The centre of a box, in image pixels. Used for the position phrase below and for the
