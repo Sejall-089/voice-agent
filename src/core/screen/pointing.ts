@@ -47,9 +47,15 @@ export async function readSettledWindow(deps: SettleDeps): Promise<Settled> {
         break;
       }
       case "wait": {
+        // THE BUDGET IS WALL-CLOCK, NOT SLEEP-CLOCK. A settle round costs the delay PLUS the
+        // probe that follows it, and M16.8 measured a real probe at 60-370ms depending on how
+        // big the window's tree is — not the 46-80ms the original recon saw against a smaller
+        // VS Code. Charging only the sleep would let the budget authorise four rounds that
+        // actually take three seconds. The round is timed and the whole of it is charged.
+        const started = Date.now();
         await deps.sleep(SETTLE_MS);
-        state = afterWait(state);
         const probe = await deps.elements.probe();
+        state = afterWait(state, Math.max(SETTLE_MS, Date.now() - started));
         state = afterProbe(state, probe.count, probe.windowClass);
         break;
       }

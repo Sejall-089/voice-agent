@@ -48,6 +48,15 @@ patterns behind them — each cost a real debugging session.
 - **Recon before fixtures.** Interrogate the real thing — DOM, API, binary — and transcribe what
   it does. `scripts/notion-recon.mjs` and `scripts/tts-recon.mjs` exist because a fixture written
   from an assumption passes every test and matches nothing.
+- **A fake's FAILURE shape drifts out of sync with the real one, silently.** A test that
+  exercises an error path can pass forever while validating the fake rather than the system.
+  M16.7's chooser-failure test threw a bare `Error` because the fake did — but the real
+  `ModelElementChooser` classifies a network failure into a `ChooserError` first, so the test was
+  asserting on something the running app can never produce. Nothing failed; it was caught only by
+  going and reading what the real implementation throws. Happy-path fakes get corrected the first
+  time someone runs the app; failure-path fakes are rarely exercised for real, so they rot
+  quietly. **Whenever a fake raises an error, check it raises the same TYPE the real
+  implementation would** — and re-check at the step where the real thing first runs.
 - **When a RULE changes, re-justify its existing tests — do not just re-run them.** A test can
   keep passing after a rule changes for a reason that has nothing to do with the new rule being
   correct. M16.5 narrowed the ambiguity gate from "any shared name refuses" to "refuse only when
