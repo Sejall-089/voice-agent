@@ -7,6 +7,8 @@ import { UnavailableNotion } from "./notion/UnavailableNotion.ts";
 import { UnavailableCalendar } from "./calendar/UnavailableCalendar.ts";
 import { UnavailableScreen } from "./vision/UnavailableScreen.ts";
 import { UnavailableVisionLocator } from "./vision/UnavailableVisionLocator.ts";
+import { UnavailableElements } from "./screen/UnavailableElements.ts";
+import { UnavailableChooser } from "./screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
@@ -24,6 +26,8 @@ import type {
   NotionSurface,
   PlannerOutcome,
   ScreenSurface,
+  ElementSurface,
+  ElementChooser,
   Tool,
   ToolDeps,
   ToolInput,
@@ -70,6 +74,12 @@ export class Planner {
     // model can be unreachable while the screen is perfectly capturable.
     private readonly screen: ScreenSurface = new UnavailableScreen(),
     private readonly vision: VisionLocator = new UnavailableVisionLocator(),
+    // M16. The same two-parameter split one more time, for the grounding that REPLACES vision:
+    // reading a window's controls and asking a model which one was meant fail differently and
+    // are fixed differently. `vision` above is on its way out (M16.10) once pointAt no longer
+    // routes through it.
+    private readonly elements: ElementSurface = new UnavailableElements(),
+    private readonly chooser: ElementChooser = new UnavailableChooser(),
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -140,6 +150,8 @@ export class Planner {
       speech: this.speech,
       screen: this.screen,
       vision: this.vision,
+      elements: this.elements,
+      chooser: this.chooser,
       tier: null,
     };
 

@@ -18,7 +18,15 @@ const SHOT: Screenshot = {
   png: new Uint8Array(0),
   width: 1568,
   height: 882,
-  display: { id: 1, x: 0, y: 0, width: 1280, height: 720 },
+  display: {
+    id: 1,
+    x: 0,
+    y: 0,
+    width: 1280,
+    height: 720,
+    nativeWidth: 1920,
+    nativeHeight: 1080,
+  },
 };
 
 const FRAME_AREA = 1568 * 882; // 1,382,976

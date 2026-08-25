@@ -219,19 +219,32 @@ export interface CalendarSurface {
 // One display, in DIP (device-independent pixels) — the coordinate space the OS positions
 // windows in, and therefore the space a pointer overlay has to be placed in.
 //
-// NOTE WHAT IS DELIBERATELY ABSENT: `scaleFactor`. Recon measured this machine at 1280x720 DIP
-// with a scaleFactor of 1.5, capturing to 1920x1080 native pixels — and then the app DOWNSCALES
-// that to a 1568-long-edge frame before sending it. After that downscale the scale factor
-// describes nothing useful: the only mapping that matters is image-pixels → DIP, and it is
-// `display.width / shot.width`. A `scaleFactor` field sitting in this type would be an
-// invitation to write `x / scaleFactor`, which is right at native resolution and quietly wrong
-// at every size the app actually uses. It is left out so that bug cannot be spelled.
+// NOTE WHAT IS STILL DELIBERATELY ABSENT: `scaleFactor`. Recon measured this machine at
+// 1280x720 DIP with a scaleFactor of 1.5, on a 1920x1080 native panel. A `scaleFactor` field
+// sitting in this type would be an invitation to write `x / scaleFactor` — and M15 measured
+// exactly why that is a trap: it is correct at native resolution and quietly wrong the moment
+// anything is rescaled. It is left out so that bug cannot be spelled.
+//
+// M16 ADDS THE NATIVE PIXEL SIZE, WHICH IS NOT THE SAME CONCESSION. UI Automation reports
+// `BoundingRectangle` in NATIVE PIXELS (measured — see scripts/uia-recon.ps1), and the overlay
+// places windows in DIP, so a real mapping is needed between them. Carrying the two SIZES
+// rather than the RATIO between them keeps the existing discipline intact: every mapping in
+// this codebase is derived from the two spaces it actually spans, at the moment it is needed —
+//
+//     native px → DIP :  display.width / display.nativeWidth
+//
+// — which is the same shape as the mapping the vision path derived (`display.width /
+// shot.width`). One idiom, no stored ratio to go stale, and still no way to spell the bug.
 export interface DisplayBounds {
   id: number;
+  // Position and size in DIP — where the overlay has to be placed.
   x: number;
   y: number;
   width: number;
   height: number;
+  // The same display's true size in physical pixels — the space UIA answers in (M16).
+  nativeWidth: number;
+  nativeHeight: number;
 }
 
 // One frame of one display, plus everything needed to map a point in it back onto the screen.
@@ -314,6 +327,137 @@ export interface ScreenSurface {
   clearPointer(): void;
 }
 
+// --- The window's controls (M16), behind an interface like GmailSurface / CalendarSurface ---
+//
+// THE INVERSION THIS MILESTONE EXISTS FOR. M15 asked a vision model both WHICH control the user
+// meant and WHERE it is, and live testing found it answering the second question wrong in a
+// specific, dangerous way: not imprecise, but the wrong control entirely — one tab over on a tab
+// label, ~208px onto a neighbouring icon on a toolbar. That is the one place in this codebase
+// where "the LLM proposes, the planner disposes" was broken, and no amount of prompt or
+// threshold tuning closes it (published 2026 benchmarks put the strongest models near 31% strict
+// point-in-box accuracy against ~97% human, worst on exactly the small, dense targets a desktop
+// is made of).
+//
+// So coordinates stop coming from the model. UI Automation enumerates the window's controls with
+// EXACT rects; code filters and numbers them; the model's entire output surface is one integer.
+// An integer cannot be off by 208 pixels. It can be the WRONG integer — a semantic error, which
+// is the error class models are actually good at, and one the user can see in the label drawn
+// beside the marker.
+
+// A rectangle in NATIVE SCREEN PIXELS, as UI Automation reports `BoundingRectangle`.
+//
+// A third rect type, and deliberately its own name rather than a reuse of `ScreenRect`
+// (DIP, what the overlay wants) or `ElementBox` (image pixels, what the vision path used).
+// M15 made this call first and it was the right one: the entire expected class of bug here is
+// one rect type being passed where another belongs, and separate names make that visible at the
+// call site instead of at the moment a marker lands 1.5x away from the button.
+export interface NativeRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// One control, exactly as UIA describes it — transcribed, not interpreted.
+//
+// `offscreen` is carried even though it is also used as a filter, because it is NOT sufficient
+// on its own: recon measured a MINIMIZED Notepad reporting `IsOffscreen = false` on all 39 of
+// its elements, with rects around (-31991, -31890). Anything reading this field needs the
+// window rect too. See core/screen/elements.ts.
+export interface UiElement {
+  // UIA's `Name`. The property the model does its matching against; empty for a great many
+  // elements, which is why the filter drops them rather than trying to invent one.
+  name: string;
+  // `ControlType.ProgrammaticName` with the "ControlType." prefix stripped: "Button",
+  // "MenuItem", "TabItem", "Group"... Reported to the model as context, never used to exclude —
+  // recon found VS Code's activity-bar icons are `Group`, not `Button`, so a control-type
+  // allowlist drops real targets.
+  controlType: string;
+  rect: NativeRect;
+  enabled: boolean;
+  offscreen: boolean;
+  focusable: boolean;
+  // UIA's `AutomationId` — stable across locales where `Name` is not. Carried for diagnostics
+  // and for future disambiguation; not currently shown to the model.
+  automationId: string;
+}
+
+// One enumeration of one window, at one moment.
+//
+// Scoped to a SINGLE window rather than the desktop, which is what keeps the candidate list at
+// the 26-97 entries recon measured, and what keeps names unambiguous — "New" is a Notepad tab
+// AND an Explorer button, but within one window it is neither.
+export interface WindowElements {
+  windowTitle: string;
+  // Win32 class name. Load-bearing, not diagnostic: it is trigger A of the settle check
+  // (core/screen/settle.ts) — `Chrome_WidgetWin_1` marks the Chromium/Electron windows recon
+  // measured populating their accessibility tree lazily.
+  windowClass: string;
+  // The window's own bounds, in native pixels. The filter intersects every element against
+  // this, because `offscreen` does not catch a minimized window (see UiElement above).
+  windowRect: NativeRect;
+  elements: UiElement[];
+}
+
+// The cheap half of the surface: how many controls are there right now, and what kind of window
+// is this? Measured at 46-80ms against full enumeration's 200-850ms, which is what makes the
+// settle check in core/screen/settle.ts affordable to run inside a live "point at X" turn.
+export interface WindowProbe {
+  count: number;
+  windowClass: string;
+}
+
+// A filtered, de-duplicated, numbered control — what the model actually sees.
+export interface Candidate {
+  // 1-based, and the ONLY thing the model ever answers with.
+  number: number;
+  name: string;
+  controlType: string;
+  // A coarse position phrase ("the top left"), COMPUTED BY CODE from `rect` and handed to the
+  // model as context. This is what lets someone say "the button next to the address bar" and be
+  // understood — the model READS position and never REPORTS it, which is the whole inversion in
+  // one field.
+  position: string;
+  // Never shown to the model. Resolved by code once a number comes back.
+  rect: NativeRect;
+}
+
+// Which candidate did they mean? Three outcomes for the same reason `LocateResult` had three and
+// `ToolChoice` has three: "that one", "none of these", and "several of these" are different
+// facts, and collapsing them loses the one thing the user needs to hear.
+//
+// Note what is NOT here: any coordinate. The type makes the safety property structural rather
+// than something a validator has to enforce after the fact.
+export type ChoiceResult =
+  | { kind: "picked"; number: number }
+  | { kind: "none" }
+  | { kind: "ambiguous"; numbers: number[] };
+
+// Reading the controls of the window the user was looking at. Implemented in `/main` (it needs
+// PowerShell and UI Automation) but DECLARED here, exactly like `ScreenSurface` — it is a
+// dependency a tool reaches through `ToolDeps`, so it is a surface, not a shell.
+//
+// Neither method takes a window: the implementation resolves the target itself, from the
+// foreground-window snapshot taken BEFORE the command bar stole focus. Same shape as
+// `ScreenSurface.capture()` picking its own display, and it keeps `/core` free of HWNDs.
+export interface ElementSurface {
+  // SAFE. The cheap count-only read, for the settle check.
+  probe(): Promise<WindowProbe>;
+  // SAFE. Everything pointable in the target window. Reads only; never invokes a control.
+  enumerate(): Promise<WindowElements>;
+}
+
+// Which of these did they mean? Its own interface rather than a widening of `LLMClient`, for the
+// reason that kept `VisionLocator` separate: that interface is about language in general, and
+// this is one bounded question with its own return type and its own failure modes.
+//
+// The implementation never decides an ACTION and never produces a coordinate — it picks from a
+// list it was handed, and core/screen/ validates the answer is even in range before anything is
+// drawn.
+export interface ElementChooser {
+  choose(candidates: Candidate[], target: string): Promise<ChoiceResult>;
+}
+
 // --- Memory resolve seam (M1 no-op; M3 becomes SQLite-backed) ---
 
 export interface MemoryResolver {
@@ -379,7 +523,19 @@ export interface ToolDeps {
   // M15. Where is this thing? Gated separately from `screen` in principle — capturing a frame
   // and sending one somewhere are different permissions — though in the running app both derive
   // from the same explicit VISION_ENABLED opt-in in main.ts.
+  //
+  // M16 REPLACES THIS. Grounding moves to `elements` + `chooser` below; this pair is removed
+  // once pointAt no longer routes through it (M16.10), and is kept only so the tree stays green
+  // milestone by milestone.
   vision: VisionLocator;
+  // M16. The controls of the window the user was looking at, with exact rects. Same
+  // "unavailable default" rule as every surface above: a tool can never reach a window the app
+  // was not configured to read.
+  elements: ElementSurface;
+  // M16. Which of those controls did they mean? Separate from `elements` because reading a
+  // window and asking a model about it are different capabilities that fail differently — the
+  // same split `screen` and `vision` already have.
+  chooser: ElementChooser;
   // What tier THIS call resolved to (core/risk.ts). `null` only inside a `RiskPolicy.resolve`,
   // which is the thing that decides it and therefore runs before it exists; by the time
   // `narrate`, `confirmSummary` or the handler sees it, it is always set.

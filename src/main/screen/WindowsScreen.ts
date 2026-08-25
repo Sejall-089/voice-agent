@@ -132,9 +132,14 @@ function resizeTo(image: NativeImage, frame: FramePolicy): NativeImage {
   return image.resize({ width: target.width, height: target.height, quality: "best" });
 }
 
-// Note what is dropped: `scaleFactor`. It is genuinely needed above, to ask for the right
-// capture size — and genuinely misleading afterwards, because the downscale invalidates it. See
-// core/types.ts's DisplayBounds for why the field does not exist on the other side of this line.
+// Note what is dropped: `scaleFactor` itself. It is genuinely needed above, to ask for the right
+// capture size — and genuinely misleading afterwards. See core/types.ts's DisplayBounds for why
+// the field does not exist on the other side of this line.
+//
+// What DOES cross (M16) is the native pixel SIZE, multiplied out here rather than carried as a
+// ratio. UI Automation answers in native pixels, so the overlay needs a native → DIP mapping,
+// and core/screen/geometry.ts derives it from these two sizes the same way the vision path
+// derived its own from `display.width / shot.width`.
 function toBounds(display: Electron.Display): DisplayBounds {
   return {
     id: display.id,
@@ -142,6 +147,8 @@ function toBounds(display: Electron.Display): DisplayBounds {
     y: display.bounds.y,
     width: display.bounds.width,
     height: display.bounds.height,
+    nativeWidth: Math.round(display.bounds.width * display.scaleFactor),
+    nativeHeight: Math.round(display.bounds.height * display.scaleFactor),
   };
 }
 

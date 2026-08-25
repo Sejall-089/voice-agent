@@ -110,7 +110,28 @@ export function calendarAuthError(reason: CalendarAuthReason): CalendarAuthError
 // measures something else: "the answer is plausible, but this app has evidence it can't be
 // trusted at this size." It is also a genuinely different FACT for the user than `not-found`:
 // the thing IS on screen, unlike `not-found`, and the fix is "click it yourself", not "rephrase".
-export type PointingRefusal = "not-found" | "ambiguous" | "untrustworthy" | "imprecise";
+// M16 ADDS TWO, AND WILL REMOVE `imprecise` (M16.10). Both new ones are facts M15 could not
+// establish, and that is the point of the milestone — vision could only ever be TRUSTED about
+// what it saw, whereas an enumeration can be CHECKED.
+//
+// `unreadable`: the window's controls could not be read at all — the surface threw, or the
+// window is gone. Distinct from `not-found`, which now means something much stronger than it did
+// under vision: we read the controls, we can name them, and none of them is the one you asked
+// for. That is a verifiable claim rather than a model's say-so.
+//
+// `unsettled`: the control list was still CHANGING when the settle budget ran out
+// (core/screen/settle.ts). Recon measured VS Code reporting 13 elements on the first touch and
+// 613 a second later — answering during that window would mean matching the user's words against
+// an incomplete list and returning something confident and wrong, which is precisely the failure
+// class M15 was retired for, relocated from coordinate space into enumeration timing. So a tree
+// in motion is refused, never answered against.
+export type PointingRefusal =
+  | "not-found"
+  | "ambiguous"
+  | "untrustworthy"
+  | "imprecise"
+  | "unreadable"
+  | "unsettled";
 
 export class ElementNotFoundError extends UserFixableError {
   constructor(

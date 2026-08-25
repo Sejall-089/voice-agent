@@ -19,8 +19,24 @@ import type { DisplayBounds, ElementBox, Screenshot } from "../src/core/types.ts
 // The numbers below come from scripts/screen-recon.mjs's real measurements: 1280x720 DIP at
 // scaleFactor 1.5, captured at 1920x1080 native, downscaled to 1568x882 before sending.
 
-function shotOn(display: DisplayBounds, width: number, height: number): Screenshot {
-  return { png: new Uint8Array(0), width, height, display };
+// Takes the DIP bounds only. The native pixel pair that M16 added to `DisplayBounds` is filled
+// in here rather than at every call site, because the vision mapping under test never reads it —
+// it spans image pixels → DIP, and the native size belongs to the UIA mapping instead.
+function shotOn(
+  display: Omit<DisplayBounds, "nativeWidth" | "nativeHeight">,
+  width: number,
+  height: number,
+): Screenshot {
+  return {
+    png: new Uint8Array(0),
+    width,
+    height,
+    display: {
+      ...display,
+      nativeWidth: display.width,
+      nativeHeight: display.height,
+    },
+  };
 }
 
 // This machine, as recon measured it: 1280x720 DIP, and the 1568-long-edge frame the app sends.

@@ -17,7 +17,17 @@ export const RECON_SHOT: Screenshot = {
   png: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), // a PNG signature and nothing more
   width: 1568,
   height: 882,
-  display: { id: 3136901802, x: 0, y: 0, width: 1280, height: 720 },
+  // 1280x720 DIP on a 1920x1080 panel — scaleFactor 1.5, as scripts/screen-recon.mjs measured
+  // this machine. The native pair (M16) is what UI Automation answers in.
+  display: {
+    id: 3136901802,
+    x: 0,
+    y: 0,
+    width: 1280,
+    height: 720,
+    nativeWidth: 1920,
+    nativeHeight: 1080,
+  },
 };
 
 export interface FakeScreenOptions {
