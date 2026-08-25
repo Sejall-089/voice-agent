@@ -519,9 +519,12 @@ Three things that catch people:
 
 `VISION_MODEL` overrides the model (defaults: `gpt-5`, or `claude-opus-5` on Anthropic).
 
-**It is good at buttons and marginal at small icons.** Boxes carry a systematic offset of about
-+20px right and +12px down — absorbed by a 100px button, not by a 39px toolbar icon. Expect
-"where's the Send button" to work and "where's the settings gear" to land just off it.
+**It is good at buttons and marginal at small icons — and now refuses rather than guessing on
+the marginal ones.** Boxes carry a systematic offset of about +20px right and +12px down —
+absorbed by a 100px button, not by a 39px toolbar icon, so below ~40px on its shorter side the
+app declines with "...too small on screen for me to point at reliably" rather than drawing a
+marker that is likely off. Expect "where's the Send button" to work and "where's the settings
+gear" to get a polite refusal instead of a wrong marker.
 
 Every run prints which state you're in:
 
@@ -590,7 +593,7 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (584 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
+**Verified deterministically (597 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
@@ -813,16 +816,25 @@ failures on a *different button*. The fix removes the mismatch at source rather 
 for it: `src/core/vision/frame.ts` holds the per-provider frame rule and it travels with the
 locator, so the capture size and the provider that will rescale it cannot be picked separately.
 
-**The real limit, stated plainly: this is reliable for buttons and marginal for small icons.**
-Boxes carry a systematic offset of roughly +20px right and +12px down. A 95–130px button absorbs
-that. A 39px settings gear does not — asked for one, the marker centre landed *outside* the icon
-4 times out of 4, even though the box *size* was near-perfect. None of the safety checks catch
-this, because the box is in-frame, sensibly sized and tight; it passes everything.
+**The real limit, stated plainly: this is reliable for buttons and marginal for small icons —
+and now that limit is a REFUSAL, not a silent miss.** Boxes carry a systematic offset of roughly
++20px right and +12px down. A 95–130px button absorbs that. A 39px settings gear does not —
+asked for one, the marker centre landed *outside* the icon 4 times out of 4, even though the box
+*size* was near-perfect, and at the time that was measured, none of the safety checks caught it:
+the box is in-frame, sensibly sized and tight, so it passed everything.
 
-That is survivable here in a way it would not be for auto-clicking: 20px off a small icon is a
-marker you can still read, not a misfired action. It is exactly the margin the design bought by
-keeping a person as the executor. But it is a real limit, and tuning it from four samples would
-be worse than naming it.
+`core/vision/locate.ts` now declines below ~40px on a box's shorter side (`SMALL_TARGET_PX`)
+instead of drawing there — a fourth, distinct refusal (`imprecise`) that tells the user the thing
+IS on screen but can't be aimed at reliably, rather than reusing the "I couldn't find it" wording,
+which would be a different and wrong fact. It **refuses rather than nudges**: correcting the box
+by the measured offset would need confidence this milestone does not have from four samples,
+where refusing only needs to know where the measured failures started. That is survivable here
+in a way it would not be for auto-clicking — a refusal costs a rephrase or a manual click, not a
+misfired one.
+
+The threshold itself is still exactly what it was before: a **placeholder from four samples**,
+commented as such in the code, not a proven line. Whether 40px is right for real (non-fixture)
+application icons is unverified.
 
 **Still not verified:** Anthropic has never been run at all (its frame rule is read from docs, not
 measured — the same kind of assumption that just cost OpenAI 4/4 misses); everything was measured

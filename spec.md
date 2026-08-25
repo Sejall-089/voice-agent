@@ -1454,14 +1454,15 @@ Post-v0:
       because the guess drives a suggestion and a person is the executor. See "M15 — proven vs.
       live-only" below for what that leaves unverified, which is more than usual.
 
-**v0 status: complete.** **584 tests green** (`npm test`) across 42 files. Through M12.1 that
+**v0 status: complete.** **597 tests green** (`npm test`) across 43 files. Through M12.1 that
 was 242 — 63 for v0, 24 added by M7, 37 by M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by
 M12.1 (M12.2 added no new tests — all four fixes are covered by existing coverage, adjusted
 where a fix changed an assertion's shape; see §9's M12.2 for specifics). M13 and M14 added 259
-between them, and M15 added 83. (Against `MockShell`, fake Gmail/Notion tabs, jsdom fixtures,
-a `MockInputInjector` standing in for real `SendInput`, and — from M15 — `FakeScreen` and
-`FakeVisionLocator`; no browser, inbox, Notion account, OS keystroke, screen capture, or
-outbound image is ever touched by the test suite.) The eval harness
+between them, and M15 (including M15.1's provider swap and its size-confidence gate) added 96.
+(Against `MockShell`, fake Gmail/Notion tabs, jsdom fixtures, a `MockInputInjector` standing in
+for real `SendInput`, and — from M15 — `FakeScreen` and `FakeVisionLocator`; no browser, inbox,
+Notion account, OS keystroke, screen capture, or outbound image is ever touched by the test
+suite.) The eval harness
 (`npm run eval`, `tests/eval/`) runs the memory story as one continuous scenario — cold memory
 refuses →
 teaching fixes it → a correction versions it → recall reveals it — plus the seven demo tasks
@@ -1548,16 +1549,25 @@ any of it.
 **+20px right and +12px down**. On a 95-130px button that is absorbed — the centre stays well
 inside. On a **small icon it is not**: asked for a 39px settings gear and a 41px paperclip, the
 centre landed outside the target **0/4 times**, while the box SIZE was near-perfect. So the model
-knows how big the thing is and is slightly wrong about where. `core/vision/locate.ts`'s checks do
-NOT catch this: the box is in-frame, plausibly sized, and tight, so it passes everything and
-becomes a marker ~20px off the icon.
+knows how big the thing is and is slightly wrong about where — and at the time this was first
+written, `core/vision/locate.ts`'s checks did NOT catch it: the box is in-frame, plausibly sized,
+and tight, so it passed everything and became a marker ~20px off the icon.
 
-That is tolerable for the "point, don't click" design in a way it would not be for auto-click —
-being 20px off a 39px icon is a marker the user can still read, not a misfired action, which is
-precisely the margin the milestone bought by keeping a human as the executor. But it is a real
-limit: **this is reliable for buttons and text controls, and marginal for small icons.** Whether
-that wants a minimum-target-size refusal, or a bias correction, is a decision for a later
-milestone with more than one fixture behind it — not something to tune from four samples.
+**M15.1 closed that gap with a REFUSAL, not a correction.** `SMALL_TARGET_PX` (40, in image
+pixels, checked on the box's shorter side) now refuses rather than points below that size —
+labelled `imprecise`, a fourth `PointingRefusal` distinct from `not-found`: the thing genuinely
+is on screen, the model just cannot be trusted to aim at it, so the message says "click it
+yourself" rather than "try rephrasing". The number is explicitly a **placeholder from four
+samples**, commented as such in the code, not a bias correction — nudging the box by +20px would
+require confidence this milestone does not have, where refusing requires only knowing where the
+measured failures started. That is tolerable for the "point, don't click" design in a way it
+would not be for auto-click: an unhelpful refusal costs a rephrase or a manual click, not a
+misfired action.
+
+**What is still open:** whether 40px is the right line for real (non-fixture) application icons,
+and whether a single flat threshold is even the right SHAPE of fix once there is more than four
+samples behind it. Revisit both from evidence, the way `EDGE_TOLERANCE` and `MAX_FRAME_FRACTION`
+were tuned, not from this fixture alone.
 
 **Latency is the other cost.** 7-46s per call, typically ~20s, against the planner's own 6-13s.
 The "Thinking…" indicator covers it, but a "where is X" that takes half a minute is a different
@@ -1565,7 +1575,7 @@ interaction from one that takes three seconds.
 
 ### M15 — proven vs. live-only
 
-**Proven deterministically (84 new tests, no screen captured and no image sent anywhere).** The
+**Proven deterministically (96 new tests, no screen captured and no image sent anywhere).** The
 whole pointing flow runs under vitest against `FakeScreen` and `FakeVisionLocator`: the
 image-px→DIP mapping at four scale factors and three display origins including a negative one;
 every refusal in `core/vision/locate.ts` and the exact wording of each; the response parser
@@ -1598,9 +1608,11 @@ frame would have shipped with.
 
 What remains genuinely unverified:
 
-- **Small-icon accuracy is a known limit, not an unknown.** A systematic ~(+20, +12)px offset puts
-  the marker outside a 39px icon 4 times out of 4, and none of `locate.ts`'s checks catch it
-  because the box is in-frame, well-sized and tight. Fine for buttons, marginal for icons.
+- **Small-icon accuracy is a known limit, and now a known REFUSAL rather than a silent miss.** A
+  systematic ~(+20, +12)px offset put the marker outside a 39px icon 4 times out of 4 before
+  `SMALL_TARGET_PX` existed; `checkLocation` now declines below ~40px instead of drawing there.
+  The threshold itself is still a 4-sample placeholder, not a measured line — whether 40px is
+  right for real application icons, not just this fixture, is unverified.
 - **Anthropic has never been run at all.** It is implemented against the same `VisionApi` seam and
   typechecks, and its frame rule in `core/vision/frame.ts` is read from documentation rather than
   measured — which is exactly the kind of assumption that just cost OpenAI 4/4 misses. Treat

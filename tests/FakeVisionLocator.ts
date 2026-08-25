@@ -82,4 +82,12 @@ export const VISION: Record<string, LocateResult> = {
     box: { x: 1850, y: 1000, width: 60, height: 30 },
     label: "Close",
   },
+  // A settings gear, sized and positioned the way the real M15.1 probe found one: a well-formed,
+  // in-frame, correctly-labelled 39px box that core/vision/locate.ts's older checks all pass —
+  // and that its SMALL_TARGET_PX gate exists specifically to catch anyway.
+  smallIcon: {
+    kind: "found",
+    box: { x: 1487, y: 60, width: 39, height: 39 },
+    label: "Settings",
+  },
 };

@@ -90,17 +90,27 @@ export function calendarAuthError(reason: CalendarAuthReason): CalendarAuthError
 // Why the app declined to point at something (M15).
 //
 // Not a malfunction and not a missing tool — the request was understood, vision ran, and the
-// answer was one we will not act on. Three reasons, kept apart for the reason every other
-// enum in this file is: "it isn't on your screen", "there are four of them", and "I got an
-// answer I don't trust" are different facts, and only the second one is fixed by the user
-// rephrasing.
+// answer was one we will not act on. Kept apart for the reason every other enum in this file
+// is: these are different FACTS, and telling them apart is what lets the message tell the user
+// something they can actually act on, rather than one generic "no".
 //
-// `untrustworthy` is the one that earns its keep. It is what a model hedging — boxing an entire
-// window, or answering in some other coordinate space — comes out as, and turning that into a
-// refusal instead of a marker is the single safety property of this milestone. Pointing
-// confidently at the wrong control is worse than admitting we cannot tell, because the user
-// clicks what we point at.
-export type PointingRefusal = "not-found" | "ambiguous" | "untrustworthy";
+// `untrustworthy` is what a model hedging — boxing an entire window, or answering in some other
+// coordinate space — comes out as. Turning that into a refusal instead of a marker is the single
+// safety property M15 shipped with. Pointing confidently at the wrong control is worse than
+// admitting we cannot tell, because the user clicks what we point at.
+//
+// `imprecise` (M15.1) is a NARROWER version of the same idea, added after live measurement found
+// a failure `untrustworthy`'s checks do not catch: a box that is well-formed in every geometric
+// sense — in-frame, sensibly sized, tight — can still be wrong on a SMALL target. Measured
+// against toolbar-icon-sized elements (~40px): the model was confident and correct about the
+// box's SIZE and consistently off on its POSITION, landing the centre outside the actual icon
+// every time. `untrustworthy`'s checks (edge tolerance, frame-fraction, minimum area) all pass
+// cleanly on exactly this kind of answer, because none of them measure precision — they measure
+// whether the shape of the answer looks like a hedge or a coordinate-space mismatch. This one
+// measures something else: "the answer is plausible, but this app has evidence it can't be
+// trusted at this size." It is also a genuinely different FACT for the user than `not-found`:
+// the thing IS on screen, unlike `not-found`, and the fix is "click it yourself", not "rephrase".
+export type PointingRefusal = "not-found" | "ambiguous" | "untrustworthy" | "imprecise";
 
 export class ElementNotFoundError extends UserFixableError {
   constructor(

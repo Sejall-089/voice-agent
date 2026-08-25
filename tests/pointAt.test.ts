@@ -188,6 +188,30 @@ describe("refusing rather than guessing", () => {
     expect(screen.pointed).toEqual([]);
     expect(outcome.status).toBe("refused");
   });
+
+  it("refuses a small icon end to end, with a message distinct from 'not found'", async () => {
+    // M15.1: proves the size gate fires through the WHOLE tool, not just the pure function
+    // tests/visionLocate.test.ts already covers. The model here answers cleanly — in-frame,
+    // sensibly labelled, tight box — exactly the shape of answer every OTHER check in
+    // core/vision/locate.ts would pass. Only SMALL_TARGET_PX catches it.
+    const { planner, screen, shell } = setup({
+      answer: VISION["smallIcon"]!,
+      choice: { kind: "tool", name: "pointAt", input: { target: "the settings icon" } },
+    });
+
+    const outcome = await planner.run("where's the settings icon?");
+
+    expect(screen.pointed).toEqual([]);
+    expect(outcome.status).toBe("refused");
+    expect(shell.results[0]).toBe(
+      `I can see something that's probably "the settings icon", but it's small enough on ` +
+        `screen that I can't point at it reliably — you may need to find it and click it yourself.`,
+    );
+    // The distinction the task cares about: this reads as "it's there, but I can't trust my
+    // aim" — never as "I couldn't find it", which is a different fact with a different fix
+    // (rephrase vs. just click it yourself).
+    expect(shell.results[0]).not.toContain("couldn't find");
+  });
 });
 
 describe("when the machinery itself is unavailable", () => {
