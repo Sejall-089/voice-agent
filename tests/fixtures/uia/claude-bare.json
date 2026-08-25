@@ -1,0 +1,16 @@
+[
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":false,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"Claude","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":1715,"y":0,"width":206,"height":54},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Button","name":"Minimize","rect":{"x":1715,"y":0,"width":68,"height":54},"enabled":true,"offscreen":false,"focusable":true,"automationId":""},
+{"controlType":"Button","name":"Restore","rect":{"x":1782,"y":0,"width":69,"height":54},"enabled":true,"offscreen":false,"focusable":true,"automationId":""},
+{"controlType":"Button","name":"Close","rect":{"x":1851,"y":0,"width":69,"height":54},"enabled":true,"offscreen":false,"focusable":true,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""},
+{"controlType":"Pane","name":"","rect":{"x":0,"y":0,"width":1920,"height":1008},"enabled":true,"offscreen":false,"focusable":false,"automationId":""}
+]
