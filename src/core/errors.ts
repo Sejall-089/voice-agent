@@ -143,6 +143,74 @@ export class ElementNotFoundError extends UserFixableError {
   }
 }
 
+// The ways ASKING which control was meant can fail (M16).
+//
+// A separate family from `ElementNotFoundError` on purpose, and the line between them is worth
+// stating because it is easy to blur: `ElementNotFoundError` means WE COULD ASK AND THE ANSWER
+// MEANS WE SHOULD NOT POINT — the model said none of these, or two candidates are
+// indistinguishable. Those are answers, and the user can act on them. `ChooserError` means the
+// question could not be put or the reply was not an answer at all. Different facts, different
+// fixes, and collapsing them would tell someone to rephrase when the real problem was an
+// unreachable API.
+//
+// `unparseable` is the one that matters here and it is deliberately NOT the same outcome as the
+// model saying "none of these". A model that correctly declines is the design working; a model
+// that replies with prose is a contract violation. See core/screen/prompt.ts.
+export type ChooserReason =
+  | "unparseable" // it answered, but not in a form the contract allows
+  | "empty" // it answered with nothing at all
+  | "unreachable" // network, timeout, 5xx
+  | "denied" // the key was rejected or is not permitted
+  | "rate-limited";
+
+export class ChooserError extends UserFixableError {
+  constructor(
+    public readonly reason: ChooserReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ChooserError";
+  }
+}
+
+export function chooserError(reason: ChooserReason, detail = ""): ChooserError {
+  switch (reason) {
+    case "unparseable":
+      // Deliberately does NOT quote the model's reply. This message reaches the screen, and the
+      // reply is about the contents of the user's window — the same restraint M15's
+      // parseLocateResponse applied for the same reason.
+      return new ChooserError(
+        reason,
+        "I read the controls on screen but couldn't make sense of the answer about which one " +
+          "you meant. Try naming it a little differently.",
+      );
+    case "empty":
+      return new ChooserError(
+        reason,
+        "I read the controls on screen but got no answer about which one you meant.",
+      );
+    case "denied":
+      return new ChooserError(
+        reason,
+        `I couldn't ask which control you meant — the API key was rejected${suffix(detail)}`,
+      );
+    case "rate-limited":
+      return new ChooserError(
+        reason,
+        "I couldn't ask which control you meant — the model is rate-limited right now. Try again in a moment.",
+      );
+    case "unreachable":
+      return new ChooserError(
+        reason,
+        `I couldn't reach the model to ask which control you meant${suffix(detail)}`,
+      );
+  }
+}
+
+function suffix(detail: string): string {
+  return detail.trim().length > 0 ? `: ${detail.trim()}` : ".";
+}
+
 // The ways looking at the screen can fail (M15).
 //
 // Split into two families on purpose, because they have two different fixes: `ScreenCaptureError`
