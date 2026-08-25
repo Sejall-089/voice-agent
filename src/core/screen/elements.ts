@@ -116,7 +116,7 @@ export function buildCandidates(window: WindowElements): Candidate[] {
 // one that only exposes its title bar: there is nothing here to point at, and the caller should
 // refuse for the same reason. Stated here because vacuous truth is a thin thing to rest a
 // user-visible branch on, and it is asserted in the tests so it cannot change silently.
-export function isChromeOnly(candidates: Candidate[]): boolean {
+export function isChromeOnly(candidates: readonly Candidate[]): boolean {
   return candidates.every((candidate) => WINDOW_CHROME.has(candidate.name.toLowerCase()));
 }
 
