@@ -228,9 +228,10 @@ It refuses rather than guessing, and says which kind of "no" it is:
 |---|---|
 | **can't read that window right now** | the window exposes only its title bar to the accessibility layer. Some apps do this transiently — one measured flat for 9.4 seconds and fully populated an hour later — so the message is present-tense, not a claim about the app. |
 | **still loading** | the control list was still changing. It waits, and refuses rather than answering against a half-built list. |
-| **several things could be that** | two controls the model had no way to tell apart. It names them ("the 1st, 2nd, 3rd and 4th from the left") instead of picking. |
+| **several things could be that** | two controls the model had no way to tell apart. It names them by the labelled container each sits in when one exists ("the one under 'Date modified'"), or by left-to-right position otherwise — never picks for you. |
 | **couldn't find it** | and it says how many controls it actually looked at — a claim you can check, which the vision version could never make. |
-| **you've switched away** | you changed windows while it was working. The marker is always-on-top, so drawing anyway would put it over the wrong app. |
+| **it's there, but disabled** | a genuinely different fact from "couldn't find it" — the control exists and is greyed out, so there's nothing to click yet. |
+| **you've switched away** | you changed windows while it was working, or the window moved. The marker is always-on-top, so drawing anyway would put it over the wrong app. |
 
 
 ## Running it
@@ -510,7 +511,7 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (597 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
+**Verified deterministically (675 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
@@ -689,78 +690,71 @@ working and failing phrasings behave identically; it now mirrors the real AND-of
 the model reliably turns "tomorrow at 3" into a correct ISO instant now that the prompt carries
 a clock. That change is proven to *render*, not proven to *work*.
 
-**M15 — the machinery is proven; the model's judgement is not, and that gap is bigger than
-usual.** 84 tests cover the whole pointing flow against `FakeScreen` and `FakeVisionLocator`
-with no screen captured and no image sent anywhere: the image-pixel→DIP mapping at four scale
-factors and three display origins including a negative one, every refusal and its exact wording,
-the response parser against every malformed shape, the transport's failure classification for
-400/401/403/429/5xx and a bare network error, and the tool's tier, narration order, registry
-gate, and log contents. The load-bearing assertion is that **`screen.pointed` is empty on every
-refusal path** — an answer the checks don't trust must never become a marker, because the user
-clicks what we point at.
+**M15 was rejected and rebuilt as M16 — vision proposing coordinates directly was measured wrong,
+so grounding moved to Windows' own accessibility layer.** M15's numbers stayed true to what was
+tested (they're preserved in git history and in `spec.md`'s M15 write-up as the record of why the
+approach was rejected), but the pipeline they describe no longer exists in this tree: no
+screenshot, no `VisionLocator`, no `SMALL_TARGET_PX`. What follows is what replaced it.
 
-Two things were proven by measurement rather than by test. `scripts/screen-recon.mjs` answered
-the capture questions against the real API first: `setContentProtection` really does exclude the
-app's own windows from its own capture (98.4% of a probe window visible unprotected, 0.0%
-protected, effective on the very next frame), which is what makes it safe to photograph the
-screen while the command bar is open in front of it. And the overlay was checked by drawing at a
-known rect and photographing the result — the marker landed within 2px, interior see-through.
-That check earned its keep twice: it caught the highlight's border being drawn outside the rect
-(correct, but accidental until it was measured), and before that it caught *itself* — a colour
-filter loose enough to pick up desktop content and report a wildly misplaced marker. A loose
-measurement produces a confident wrong answer, which is precisely the failure this milestone is
-about.
+**The inversion.** UI Automation — the same accessibility layer screen readers use — enumerates
+the target window's controls with exact rects, deterministically. Code filters, deduplicates and
+numbers them. The model's *entire* output is one integer, picking a candidate off a list this
+process built. It can still be the wrong integer — a semantic error — but it can no longer be off
+by 208 pixels, which is what M15's model did on real Windows chrome: pointed at the tab one over,
+or ~208px onto a neighbouring toolbar icon, confidently.
 
-**The central question has now been answered — on OpenAI, not Anthropic.** Anthropic billing was
-blocked upstream, so the probe ran against `gpt-5`. Three things came out of it.
+**Proven deterministically (100+ tests, no PowerShell for most of the build).** Filtering, dedup
+and numbering against eight fixtures — six transcribed from real UI Automation dumps, two
+synthetic and labelled as such — including a byte-for-byte proof that the narrowing condition
+used in production loses zero real candidates against pulling the whole tree. The settle decision
+(is this window's control list still loading, or genuinely this small?) as a pure state machine
+with no clock. The choose prompt and its parser against every malformed reply shape. Native-pixel
+→ DIP geometry with hand-derived literals on the machine's real 1.5×-scaled display, including a
+test that asserts the *specific wrong answer* an un-translated origin would produce. The
+load-bearing assertion, carried over from M15 unchanged: **`screen.pointed` stays empty on every
+refusal path** — an answer the gate doesn't trust must never become a marker.
 
-**It declines honestly.** Asked for something not on screen — both an obviously-absent thing and
-the harder case of something plausible for that UI but not actually present — it answered
-`notFound` rather than inventing a box. Asked for something with several matches it answered
-`ambiguous` and named them, including spotting that "the red button" could mean either Discard or
-the red window-close circle. This is the assumption the whole design rests on, and it holds.
+**Then proven against the real PowerShell host, not just fakes.** All three of M15's failure
+cases — the File menu, a specific tab, a toolbar button — re-verified at their exact rects on
+live Notepad and Explorer. This step alone found two real bugs no fixture could: PowerShell's
+`-Command -` invocation does not reliably deliver commands over stdin (fixed by writing the host
+script to a file instead), and enumerating a window's whole control tree costs *seconds*, not
+milliseconds, until the query is narrowed at the source — an 11× speedup with a proof that
+nothing real was lost by narrowing it.
 
-**The decoy case is correct.** Send and Discard side by side, same size, same shape, 119px apart.
-Asked for each specifically, both landed on the right one — confirmed by drawing the returned box
-over the screenshot and looking at it, not by trusting that a box came back.
+**Then driven through the actual app — real global hotkey, real keypress, not a script.** All
+nine live-verification checks passed by hand, but getting there found two more bugs that only a
+human at the keyboard could have caught:
 
-**The provider swap was not cosmetic, and this is the finding worth keeping.** GPT-5 answers pixel
-coordinates in the space OpenAI *resized* the image to, not the space we sent — with
-`detail: "high"` it scales the shortest side to 768. On the original 1568-long-edge frame, **0 of
-4 boxes landed inside the target button**; consistently ~36px high. On a pre-sized 1463x768 frame,
-**4 of 4**. Normalised 0–1 coordinates were tried instead and were worse — 2 of 4, with both
-failures on a *different button*. The fix removes the mismatch at source rather than compensating
-for it: `src/core/vision/frame.ts` holds the per-provider frame rule and it travels with the
-locator, so the capture size and the provider that will rescale it cannot be picked separately.
+- **The foreground-window snapshot was reading the app's own command bar, every single time.**
+  It fired-and-forgot before the bar opened; the read always resolved *after* the bar had already
+  taken focus, so the app answered every question about itself. Not a race — it could never have
+  worked. Fixed by awaiting the snapshot (pre-warming the reader at startup so that costs ~15ms,
+  not ~1s), and having the reader refuse to name one of the app's own windows even if asked.
+- **The marker was one call behind.** Its position travelled in a URL hash; a hash-only change is
+  a same-document navigation in Chromium, so the overlay's script — which reads its position once
+  at load — never re-ran, and the marker kept showing the *previous* answer. Every new question
+  wrong, every identical repeat right — more dangerous than "always wrong," because a first
+  answer looks authoritative and nothing on screen suggests it's stale. Fixed by moving the
+  position into the query string instead (forces a real navigation) plus a nonce.
 
-**The real limit, stated plainly: this is reliable for buttons and marginal for small icons —
-and now that limit is a REFUSAL, not a silent miss.** Boxes carry a systematic offset of roughly
-+20px right and +12px down. A 95–130px button absorbs that. A 39px settings gear does not —
-asked for one, the marker centre landed *outside* the icon 4 times out of 4, even though the box
-*size* was near-perfect, and at the time that was measured, none of the safety checks caught it:
-the box is in-frame, sensibly sized and tight, so it passed everything.
+Live testing also reshaped two refusal messages: a raw COM exception was reaching the UI
+verbatim through the `unreadable` path (the host now returns classified codes, never engine
+text, and retries once); and a disabled control was being filtered out of the candidate list
+entirely, which collapsed "it's there but greyed out" into "I couldn't find it" — disabled
+controls are now kept, shown to the model marked as disabled, and refused with their own honest
+wording. A five-column Explorer window also showed that naming ambiguous candidates by
+left-to-right ordinal ("3rd from the left") technically worked but made the reader count
+columns; candidates inside a labelled container are now named by it ("under \"Date modified\"")
+instead.
 
-`core/vision/locate.ts` now declines below ~40px on a box's shorter side (`SMALL_TARGET_PX`)
-instead of drawing there — a fourth, distinct refusal (`imprecise`) that tells the user the thing
-IS on screen but can't be aimed at reliably, rather than reusing the "I couldn't find it" wording,
-which would be a different and wrong fact. It **refuses rather than nudges**: correcting the box
-by the measured offset would need confidence this milestone does not have from four samples,
-where refusing only needs to know where the measured failures started. That is survivable here
-in a way it would not be for auto-clicking — a refusal costs a rephrase or a manual click, not a
-misfired one.
-
-The threshold itself is still exactly what it was before: a **placeholder from four samples**,
-commented as such in the code, not a proven line. Whether 40px is right for real (non-fixture)
-application icons is unverified.
-
-**Still not verified:** Anthropic has never been run at all (its frame rule is read from docs, not
-measured — the same kind of assumption that just cost OpenAI 4/4 misses); everything was measured
-on a *synthetic* fixture rather than real application chrome; multi-monitor and locked-session
-behaviour; and the in-app path end to end. Latency is 7–46s per call, typically ~20s.
-
-`FakeVisionLocator`'s fixtures are now transcribed from that run rather than imagined — and its
-"native-resolution coordinates" case stopped being hypothetical the moment a wrongly-sized frame
-made every real answer look exactly like it.
+**Still not verified: multi-monitor**, for lack of a second display to test on — the arithmetic
+is unit-tested against hand-derived values including the specific wrong answer a buggy version
+would produce, but nothing has run against real hardware. **One refusal's live wording was never
+provoked**: every attempt to catch a window's accessibility tree in its bare, pre-population
+state found the tree had already woken up by the time the hotkey landed — the same "populated an
+hour later" behaviour that is *why* the refusal is worded in the present tense rather than as a
+permanent claim about an app.
 
 ---
 

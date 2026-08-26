@@ -1,193 +1,144 @@
-# Project Context — Update 8 (M16 built through M16.10, live human verification in progress)
+# Project Context — Update 8 (M16: vision replaced with UI Automation, built and live-verified)
 
-Read alongside `PROJECT_CONTEXT_UPDATE_7.md` (M15's failure and the decision to
-rebuild on UI Automation), `spec.md`, `ARCHITECTURE.md`, `CLAUDE.md`, and
-`docs/M16-plan.md`. This covers the entire M16 build session — recon through
-M16.10 — plus the M16.11 live human verification pass, which found and fixed
-two real bugs and surfaced two more still being investigated.
+Read alongside `PROJECT_CONTEXT_UPDATE_7.md` (M15's failure and the decision to rebuild),
+`spec.md` (§6d, and the M16 sections of §9), `ARCHITECTURE.md` §4e, and `CLAUDE.md`. Supersedes
+Update 7's "M16 decided, not yet started" — M16 is built, deleted its own predecessor's code, and
+has been live-verified through the real app by a human at the keyboard, including bugs that
+verification found and this session fixed.
 
 ## Status
 
-M16.2 through M16.10 are built and committed on branch `m16-uia-grounding`.
-667 tests pass (after the two live-testing bug fixes below), both typechecks
-clean throughout. **M16.11 (live verification via actual hotkey/keypress) is
-in progress, not done.** Two real bugs were found live and fixed. Two more
-were just found and reported to Claude Code, not yet fixed. M16.12 (final
-docs) still waits on the checklist closing out clean.
+M16 is complete. All twelve build steps (M16.1 through M16.12) are done. 675 tests pass, both
+typechecks clean. The live-verification checklist (M16.11) closed with all nine items confirmed
+by hand, one honest gap held rather than chased (below).
 
 ## What M16 actually is
 
-Vision grounding (M15) is fully replaced. UI Automation enumerates a target
-window's interactive elements with exact rects; the model's only job is to
-pick a candidate number from a text list (semantic matching); code resolves
-that candidate's real rect. Coordinates never come from the model — this
-closes the exact gap M15 failed on (vision was both proposing *and* disposing
-coordinates, the one place "model proposes, code disposes" was broken).
+Vision grounding (M15) is fully replaced, not extended. UI Automation enumerates a target
+window's interactive elements with exact rects; the model's only job is to pick a candidate
+number from a text list — semantic matching, never spatial localization; code resolves that
+candidate's real rect. Coordinates never come from the model. This closes the exact gap M15
+failed on: vision was both proposing *which* control and disposing *where* it is, the one place
+in the codebase where "the model proposes, the planner disposes" was broken.
 
-**No screenshot is ever sent.** This fell out of recon, not the original
-plan — 26–97 named candidates fit as text in a prompt, so the entire
-coordinate-space problem class from M15 (frame policy, provider rescaling,
-three pixel spaces) is deleted by construction, not fixed.
+**No screenshot is ever sent.** This fell out of recon, not the original plan — 26–97 named
+candidates fit as text in a prompt, so the entire coordinate-space problem class from M15 (frame
+policy, provider rescaling, three simultaneous pixel spaces) is deleted by construction. All
+vision code is gone from the tree (`src/core/vision/`, ~2,900 lines) — not retained as a
+fallback. The original framing (vision as fallback for windows with no usable UIA tree) was
+superseded during planning: refuse instead, since the fallback's trigger condition is exactly the
+condition vision measured worst under.
 
-**No vision fallback.** The original framing (vision as fallback for windows
-with no usable UIA tree) was superseded during planning. Decision: refuse
-instead, since the fallback's trigger condition (no accessibility tree) is
-exactly the condition vision measured worst under. All vision code is
-deleted (`src/core/vision/`, ~2,900 lines), not retained as a fallback path.
+## What building it found
 
-## Key findings from the build (M16.2–M16.10), summarized
+**Settle detection** (M16.3b) exists because "is this app supported?" isn't an answerable
+question — Claude desktop's own accessibility tree was measured flat for 9.4 seconds, then fully
+populated an hour later in the same process. Two independent triggers (window class, cheap; and
+chrome-only content, needs a full read) fire at different points because a magnitude-only check
+would have missed both a Chromium window mid-load (VS Code: 13 elements, then 613 a second later)
+and a genuinely sparse-but-real dialog.
 
-Full detail lives in the build commit history; the essentials:
+**Identical-twin candidates** at the same rect (VS Code's activity-bar icons, exposed as both a
+`TabItem` and a `Group`) needed tree-order tiebreaking — proven to only ever affect *which label*
+shows, never *where* the marker points, since a tie only occurs between rects that are already
+equal.
 
-- **Settle detection** (M16.3b): two independent triggers — window class
-  (cheap, off the probe) and chrome-only content (needs a full enumerate) —
-  fire at different points, driven by the discovery that "is this app
-  supported" isn't answerable, only "is it settled right now."
-- **Real bugs found only by building/measuring:** identical-twin candidates
-  at the same rect (fixed via tree-order tiebreaking, proven to only ever
-  affect *which label* shows, never *where* the marker points); a control
-  name that was an entire 10,973-character source file (added
-  `MAX_NAME_CHARS`); an ambiguity gate too blunt on first pass — refused
-  whenever two candidates shared a name, even when type or position told
-  them apart — narrowed to "indistinguishable across every field the model
-  was shown"; a DPI trap where native origin isn't simply
-  `x * scaleFactor` (agrees with the correct formula on this single-display
-  machine, would silently diverge on a second monitor) — fixed via
-  `screen.dipToScreenPoint`, and `ScreenRect` is now phantom-branded so a
-  raw native rect can't compile as a screen rect (M15's same mitigation, a
-  different type name, was documentation only under TypeScript's structural
-  typing).
-- **The `stale` refusal** (M16.9): if the foreground window changes between
-  snapshot and overlay draw, the tool refuses rather than drawing —
-  explicitly recognized as **M15's exact failure mode reappearing through a
-  different door** (a technically-correct rect drawn over the now-wrong
-  foreground app, via an always-on-top overlay, is exactly as misleading as
-  a wrong rect in the right window).
-- **Real-host findings** (M16.8, first real UIA on Windows): a PowerShell
-  `-Command -` invocation pattern doesn't reliably deliver commands via
-  stdin (filed as a note, not treated as proof shipped dictation is
-  broken); full-tree enumeration cost 9.5s on a real window, cut to 826ms
-  via the narrowing condition already used for the cheap probe, with
-  proven zero data loss; the settle budget was charging only the sleep
-  delay, not the full round trip, which could have authorized far more
-  real wall-clock time than intended.
+**The ambiguity gate was too blunt on its first pass**, refusing whenever two candidates shared a
+name even when control type or position told them apart. `scripts/choose-recon.ts` produced the
+counterexample live: asked for "the column header for when things were last changed", the model
+correctly picked Explorer's `Date modified` SplitButton, and the gate refused it because Explorer
+also has a `Date modified` filter Edit. Narrowed to "indistinguishable across every field the
+model was shown."
 
-## M16.11 — live verification, in progress
+**A DPI trap of M15's exact shape**: the native origin is not `x * scaleFactor` — correct on this
+single-display machine, would silently diverge the moment a second monitor has a different scale
+factor. Fixed via `screen.dipToScreenPoint` rather than arithmetic. `ScreenRect` is now
+phantom-branded so a raw native rect cannot compile as a screen rect — M15's same mitigation
+(giving it a different type name) was documentation only, defeated by TypeScript's structural
+typing.
 
-**Two real bugs found live and already fixed:**
+**Real-host findings** (M16.8, first contact with real UIA): PowerShell's `-Command -` invocation
+does not reliably deliver commands over stdin — the host printed `READY` and then answered
+nothing, reproduced against `WindowsInputInjector`'s own unmodified script. M16's host uses
+`-File` instead; M12 was left alone (shipped dictation works, runs under Electron's spawn, where
+the behaviour may differ), with a note filed in that file for what to watch for if it ever
+misbehaves. Full-tree enumeration cost 9.5s on a real VS Code window; narrowing the query at the
+source cut that to 826ms with a proven byte-for-byte zero loss of real candidates. And the settle
+budget was originally charging only the sleep delay, not the full probe round trip — a real probe
+costs 60–370ms depending on tree size, not the smaller number a synthetic bench first suggested,
+so the budget now charges wall-clock time for the whole round.
 
-**Bug 1 — foreground snapshot captured the app's own window, every single
-press, on every call.** Not a race — a guarantee. `snapshotPointTarget()`
-started an async read; `showInput()` ran synchronously in the same tick and
-stole focus before the read resolved. The read always landed after the bar
-had taken focus, so it always reported the bar itself. First live repro:
-asking Notepad "where is the File menu" returned a refusal naming
-"Voice-Action Agent" (the app's own window), not Notepad.
+## M16.11 — live verification, closed
 
-*Why the existing ordering test missed it:* the fake was synchronous
-(`snapshotPointTarget: () => events.push(...)`), so it could record *that*
-the call happened before `showInput()`, but not *whether the read itself*
-resolved first — a fake that's synchronous where the real thing is async
-cannot test ordering at all. This is now a named lesson: when a fake
-replaces something async, the fake must be async too, or ordering tests
-against it prove nothing.
+Two real bugs were found through the real hotkey that no fixture, host-level test, or log-only
+check could have caught, and both are now standing lessons in `CLAUDE.md`.
 
-*Fix:* `snapshotPointTarget()` now returns a Promise the hotkey awaits
-before `showInput()`. The host is pre-warmed at startup so the await is a
-~15ms round trip, not the ~918ms first-call cold start. Bounded at 250ms.
-Defense in depth: the foreground read walks past this app's own window
-handles in the Z-order, so the bug is now structurally inexpressible, not
-just fixed. Also added: one `[main] <status>: <result>` log line per
-instruction — this bug produced a perfectly plausible-looking wrong
-refusal, and nothing had recorded which window was actually read.
+**Bug 1 — the foreground snapshot always captured the app's own command bar.** Not a race, a
+guarantee: `snapshotPointTarget()` was fire-and-forget, `showInput()` ran synchronously in the
+same tick and took focus before the async read resolved, so the read always landed after and
+always reported the bar. First live repro: "where is the File menu" in Notepad answered that it
+could not read the controls in "Voice-Action Agent". The existing ordering test was green
+throughout, because its fake was synchronous — it could prove the *call* happened before
+`showInput()`, not whether the *read* did, which is a different and weaker property. Fixed by
+awaiting the snapshot (pre-warming the reader at startup so the await is ~15ms, not the ~918ms
+cold-start cost), bounding it at 250ms, and — defence in depth — having the reader refuse to name
+one of the app's own window handles even if asked.
 
-**Bug 2 — the marker always showed the *previous* question's answer, every
-new/changed question, correcting only on an exact repeat.** Worse than bug
-1: not always-wrong, but *always-wrong-then-right-on-retry*, which is more
-dangerous in practice since a user who doesn't know to distrust the first
-result and repeat their question would consistently be pointed at the
-wrong control with no indication anything was off.
+**Bug 2 — the marker always showed the *previous* question's answer.** Worse than bug 1: not
+always-wrong but always-wrong-then-right-on-an-exact-repeat, which is more dangerous in practice,
+since a first answer looks authoritative and nothing on screen suggests it's stale. Cause: the
+marker's position travelled in the URL hash, and a hash-only change is a same-document navigation
+in Chromium — the overlay's script, which reads its position once at load, never re-ran. A
+comment in `overlay.html` had asserted the opposite as a fact, unverified. Invisible to every
+log-based check, including the one added for bug 1: the planner computed the right answer every
+time, only the render was stale. Verified by reading the overlay's live computed CSS under
+Electron, both pre-fix (deliberately reproduced, to confirm the check would have caught it) and
+post-fix. Fixed by moving the position to the query string (forces a real navigation) plus a
+monotonic nonce (so even an identical repeated question is a distinct URL). Both fixes forced a
+re-grading of earlier "passing" checks: the three that ended in a refusal were unaffected; the
+three that ended in a marker needed re-verification with eyes on the actual screen, which followed
+and confirmed correct.
 
-Exact reproduced pattern: ask A → correct; ask B → shows A (previous); ask
-B again → correct; ask A → shows B (previous); ask A again → correct.
+**Three refusal-wording fixes**, each from a live finding: a raw COM exception
+(`Exception calling "FindAll"...: "Unrecognized error."`) was reaching the user verbatim through
+the `unreadable` path — the host now returns classified codes, never engine text, and retries a
+`FindAll` fault once; a disabled control was being filtered out of the candidate list entirely,
+collapsing "present but unusable" into "not found" — disabled controls are now kept, shown to the
+model marked as disabled, and refused with their own wording; and ambiguity refusals on a
+five-column Explorer window named candidates by left-to-right ordinal ("3rd from the left"), which
+technically worked but made the reader count columns — candidates inside a labelled container
+(a column header) are now named by it, ordinals kept as the fallback when no clean landmark
+exists.
 
-*Cause:* the marker's position traveled in the URL hash. `overlay.html`'s
-script was an IIFE reading the hash once at document load. A hash-only URL
-change is a same-document navigation in Chromium — the script never re-ran,
-so the marker kept the previous question's rectangle. A comment in
-`overlay.html` had stated the opposite as a fact ("each `point()` is a
-fresh navigation, so the window cannot end up displaying a stale
-position") — an assumption stated as a guarantee, never checked.
+**One honest gap, held rather than chased.** The `unreadable` refusal's live *wording* was never
+provoked — every cold-Electron-launch attempt found the target's tree had already populated by
+the time the hotkey landed. Not blocking: the refusal path is proven deterministically and its
+sibling paths (`unsettled`, `disabled`, `stale`, `ambiguous`) all fired live. The reason it
+resists forcing is the same populate-then-go-bare timing that is *why* the message is worded in
+the present tense rather than as a permanent claim about an app.
 
-*Why nothing caught it, and why it matters more broadly:* invisible to
-every log-based verification method, including the one added for bug 1 —
-a log line proves what the app *decided*, not what the user *saw*. Verified
-via live DOM inspection (reading the overlay's actual computed CSS under
-Electron) rather than trusting the main process's log.
+**One design question raised and left undecided, deliberately.** The overlay auto-dismisses after
+10s regardless of whether the target window stays foreground — so a stale (but correct-when-drawn)
+marker can sit over whatever app the user switched to for up to that long. Considered against
+building focus-loss detection (rejected: no blur event exists for a non-focusable window, and
+polling `GetForegroundWindow` risks a marker vanishing mid-use when a notification steals focus
+transiently). Recommendation on record: shorten the timer to ~5s rather than build detection.
+Not acted on; needs a decision before `spec.md`/`README.md` numbers would need touching again.
 
-*Fix:* position now travels in the query string (a real document load) plus
-a monotonic nonce, so even an identical repeated question is also a
-distinct URL. Verified pre-fix (deliberately reproduced to confirm the
-probe catches it) and post-fix (all renders matched what was sent).
-Permanent regression test added asserting no two calls produce the same
-query string, over the exact alternating sequence that broke it.
+## Two standing lessons (now in `CLAUDE.md`)
 
-*Re-assessment this forced:* the 6 checks previously reported as "passing"
-via log output needed re-grading. The 3 that ended in a refusal (drew
-nothing) were unaffected and stand. The 3 that ended in a marker (decision
-was correct, but *display* was unverified) had to be re-run visually.
-
-**Visual re-verification, confirmed by hand:** File menu (Notepad), the
-alternating File/Advice.txt pattern (specifically re-run several times
-since that pattern is what broke it originally), and New button on a
-File Explorer Desktop tab — all confirmed correct with eyes on the marker,
-after both fixes above landed.
-
-**Two more issues found live, reported to Claude Code, not yet fixed:**
-
-**Issue 3 — intermittent raw UIA exception leaks to the user.** One attempt
-at "where is the New button" (Explorer, Home tab) returned an unhandled,
-untranslated error directly in the UI: `Exception calling "FindAll" with
-"2" argument(s): "Unrecognized error."` Did not reproduce on immediate
-retry. Regardless of reproducibility, this is a gap: every other failure
-mode in this milestone (`unreadable`, `unsettled`, `stale`, `not-found`,
-ambiguity) surfaces as a designed sentence; a raw exception string should
-never reach the user.
-
-**Issue 4 — misleading wording when a matched control is disabled.**
-Same Explorer window, retried: "I couldn't find 'the New button' among the
-70 controls I can see" — but the New button was visibly greyed out and
-manually unclickable at the time (the window showed "Account disconnected,"
-likely OneDrive-related). **Confirmed, not just suspected**: the identical
-instruction on a different Explorer window (Desktop tab, New enabled)
-correctly resolved and pointed at it. So candidate filtering is very likely
-excluding disabled controls deliberately (reasonable — pointing at a
-disabled button is unhelpful) — but the refusal wording ("couldn't find...
-among the controls") implies absence, when the real fact is "present but
-excluded because disabled." Same category of imprecision already fixed
-once for `unreadable` vs. `unsettled`. Both issues reported to Claude Code
-together, not yet resolved.
-
-## What's still needed to close M16.11
-
-- Claude Code's response to issues 3 and 4 above.
-- The Chromium settle-delay subjective judgment (~1.5–2s on VS Code) — not
-  yet explicitly confirmed as acceptable or not.
-- `unreadable` refusal still never seen live (not blocking, but noted as
-  unexercised).
-- Multi-monitor stays out of scope, hardware-blocked, unchanged.
+- **A fake that is synchronous where the real thing is async cannot test ordering — only
+  call-sequence.** If the real implementation of something under test is async, the fake must be
+  too, with its own artificial delay, or an ordering assertion against it proves nothing.
+- **A log line proves what the app decided, not what the user saw.** Anything ending in something
+  drawn, played, or otherwise rendered needs a check on the rendered thing itself — not a log of
+  the decision that produced it.
 
 ## Carry forward into next chat
 
-- Ask what Claude Code's response to issues 3 and 4 was, if not already
-  known, before doing anything else on this milestone.
-- Once those are resolved and re-verified live (same visual-check standard
-  as bugs 1 and 2 — do not accept a log-only "fixed" claim for anything
-  that produces a marker), the settle-delay judgment call is the last
-  subjective item, then M16.12 (docs) can start.
-- **Standing lesson from this session, worth being in `CLAUDE.md` if it
-  isn't already**: a fake that is synchronous where the real thing is
-  async cannot test ordering, only call-sequence — a different and weaker
-  property. And: log-based verification proves what the app decided, not
-  what the user saw — anything producing a visible marker needs an actual
-  human eye on the actual screen, not just a clean log line.
+- M16 is closed. The next milestone is whatever comes after it — nothing here blocks starting it.
+- If the overlay-dismiss question above is ever revisited, the recommendation on record is ~5s
+  with focus-loss detection left unbuilt, not the reverse.
+- The multi-monitor gap (native→DIP arithmetic unit-tested including the specific wrong answer a
+  bad formula would produce, never run against real hardware) and the `unreadable` live-wording
+  gap are both named honestly in `spec.md`'s M16 sections — check there before re-deriving either.

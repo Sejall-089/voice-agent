@@ -57,6 +57,23 @@ patterns behind them — each cost a real debugging session.
   time someone runs the app; failure-path fakes are rarely exercised for real, so they rot
   quietly. **Whenever a fake raises an error, check it raises the same TYPE the real
   implementation would** — and re-check at the step where the real thing first runs.
+- **A fake that is synchronous where the real thing is async cannot test ordering — only
+  call-sequence, a different and weaker property.** M16.9's snapshot-before-focus test used a
+  fake `snapshotPointTarget()` that recorded its call and returned instantly. That proved the
+  call happened before `showInput()`, which was true and worthless: the real implementation
+  reads a window handle over an async PowerShell round trip, so what mattered was whether the
+  *read* landed before focus moved, not whether the *call* did. `showInput()` ran synchronously
+  in the same tick, the read always resolved after, and the shipped app answered every question
+  about its own command bar — a bug the test was green through the whole time. Found only by a
+  human at the keyboard (M16.11). **When the real implementation of something a test fakes is
+  async, the fake must be too**, with its own artificial delay, or an ordering test against it
+  proves nothing about ordering.
+- **A log line proves what the app decided, not what the user saw.** M16.11's second live bug (a
+  marker showing the *previous* answer, not the current one) was invisible to every check that
+  read `[main]`-style outcome logs — the planner had computed the right answer every time; only
+  the render was stale. Any code path ending in something drawn, played, or otherwise rendered
+  needs a check that inspects the rendered thing itself (the live DOM, a screenshot, a person's
+  eyes), not a log of the decision that produced it.
 - **When a RULE changes, re-justify its existing tests — do not just re-run them.** A test can
   keep passing after a rule changes for a reason that has nothing to do with the new rule being
   correct. M16.5 narrowed the ambiguity gate from "any shared name refuses" to "refuse only when

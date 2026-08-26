@@ -84,30 +84,31 @@ Fuzzy human sentence  →  exact function call.
   refusable; guessing from pixels is not. See §6a, §6b. **M15 split that remaining half
   again** — see the next entry.
 - ~~Screenshot/vision-driven interaction with any app.~~ **The POINTING half moved into scope
-  in M15; the CLICKING half is still explicitly out, and is the part that matters.** M15 adds
-  `pointAt`: capture the screen, ask a vision model where the named control is, draw a marker
-  over it, and stop. The user clicks it. Nothing is ever clicked, typed, or dragged on their
-  behalf. The objection that kept this out was never "pixels are icky" — it was that an
-  unverifiable guess must not drive an irreversible action. Here the guess drives a
-  *suggestion* and a person is the executor, so the app can be wrong the way a colleague
-  pointing at your screen can be wrong. The refusability that the DOM path got for free from
-  role+name is manufactured deliberately instead (`core/vision/locate.ts`): a box that runs
-  off the frame, covers half the screen, or is too small to be a control is REFUSED rather
-  than drawn. See §4e and §6d.
-  - **This is the first capability that sends the user's screen off the machine**, and that
-    is a real departure recorded here rather than left implicit. Voice input and voice output
-    are both local by deliberate choice (§3) — "nothing leaves the machine" was load-bearing
-    for both. It is not for this one, and there is no local UI-grounding model in this stack
-    to make it so. What that bought instead: an explicit opt-in flag (`VISION_ENABLED` in M15,
-    `POINTING_ENABLED` since M16 — and since M16 what it authorises is reading one window's
-    control NAMES, not a screenshot) rather than
-    the "is it configured?" gate every other capability uses, because `ANTHROPIC_API_KEY` is
-    usually already present for the planner and its presence must never be read as consent to
-    screen capture; a `caution` tier so every capture is announced as it happens; nothing
-    written to disk, logged, or kept after the run; and the app's own windows excluded from
-    the picture.
-- Auto-clicking anything the vision model identifies. Deliberately not built, and not a
-  stepping stone that M15 is halfway across — it is the thing M15 is the alternative to.
+  in M15 and was rebuilt on different grounding in M16; the CLICKING half is still explicitly
+  out, and is the part that matters.** `pointAt` reads the target window's real controls (UI
+  Automation — exact rects, names, control types), asks the planner's own model to pick ONE
+  by number, and draws a marker over it. The user clicks it. Nothing is ever clicked, typed,
+  or dragged on their behalf. **M15 tried this by asking a vision model to answer the
+  coordinate directly, and live testing found it confidently wrong** on ordinary Windows
+  chrome — one tab over, ~208px onto a neighbour — which was the one place in this codebase
+  where "the model proposes, the code disposes" was broken: vision was proposing WHICH
+  control and disposing WHERE it is, unaudited. M16 restores the split: the model answers a
+  bounded semantic question (which numbered entry), and code — never the model — resolves
+  that choice's actual rect (`core/screen/resolve.ts`). The refusability the DOM path got for
+  free from role+name is available here too, and for a stronger reason than M15 had: the
+  candidate list is exact, not inferred, so "is this candidate real" is a lookup, not a
+  heuristic. See §4e and §6d.
+  - **M15 was the first capability that sent the user's screen off the machine; M16 removed
+    that, not merely reduced it.** No screenshot is captured or sent — what reaches the model
+    is a list of control names. What survived is the posture: `POINTING_ENABLED` remains its
+    own explicit opt-in (`VISION_ENABLED` under M15) rather than the "is it configured?" gate
+    every other capability uses, because reading the contents of whichever window the user
+    was last looking at is still a disclosure worth a flag of its own, and a `caution` tier so
+    every read is announced as it happens.
+- Auto-clicking anything the model identifies. Deliberately not built, and not a stepping
+  stone that pointing is halfway across — it is the thing pointing is the alternative to, and
+  M16 additionally closed the one way that decision could still be silently wrong (a
+  model-emitted coordinate), which auto-click would reintroduce by construction.
 - macOS or Linux shells (architect for them via the interface, implement Windows only).
 - More than one external connector.
 - Multi-step / autonomous agent loops.
@@ -580,7 +581,7 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -939,53 +940,77 @@ belong on the menu the model chooses from (§8's rule about keeping the miss log
 
 ---
 
-### 4e. The screen (M15) — a surface, not a shell contract
+### 4e. The screen and window-reading surfaces (M15, regrounded on UI Automation in M16)
 
 Voice input (§4a) and voice output (§4d) both got a *parallel shell contract* next door to
 `OSShell`, on the grounds that `/core` has no business knowing a microphone or a speaker exists.
-The screen does not follow that pattern, and the reason is worth stating because it looks like an
+Pointing does not follow that pattern, and the reason is worth stating because it looks like an
 inconsistency and is not.
 
 Speech reaches `/core` as a fire-and-forget `LocalAction`: the planner says "say this" and never
-hears back. Capture is a **request/response** — the `pointAt` handler needs the picture *back* —
-so the shape that fits is the one Gmail, Notion and Calendar already use: an interface declared
-in `core/types.ts`, injected through `ToolDeps`, with an `Unavailable*` default so a tool can
-never reach a screen this install was not configured for.
+hears back. Reading a window's controls is a **request/response** — the `pointAt` handler needs
+the candidate list *back* — so the shape that fits is the one Gmail, Notion and Calendar already
+use: interfaces declared in `core/types.ts`, injected through `ToolDeps`, each with an
+`Unavailable*` default so a tool can never reach a capability this install was not configured
+for.
 
 ```ts
 // core/types.ts, beside GmailSurface / NotionSurface / CalendarSurface
 export interface ScreenSurface {
-  capture(): Promise<Screenshot>;              // SAFE — our own windows are excluded
-  point(target: PointerTarget): Promise<void>; // draws only; never clicks, never moves the cursor
-  clearPointer(): void;                        // idempotent
+  point(target: PointerTarget): Promise<void>;         // draws only; never clicks
+  clearPointer(): void;                                // idempotent
+  displayForNative(rect: NativeRect): Promise<DisplayBounds>;
 }
 
-export interface VisionLocator {
-  locate(shot: Screenshot, target: string): Promise<LocateResult>;
+export interface ElementSurface {
+  probe(): Promise<WindowProbe>;                        // cheap: count + window class
+  enumerate(): Promise<WindowElements>;                 // the real read: names, types, rects
+  verifyTarget(): Promise<TargetCheck>;                 // still the right window, unmoved?
+}
+
+export interface ElementChooser {
+  choose(
+    candidates: readonly Candidate[],
+    target: string,
+    windowTitle: string,
+  ): Promise<ChoiceResult>;
 }
 ```
 
-`OSShell` is untouched. `MockShell` is untouched. Two interfaces rather than one, for the same
-reason `SpeechShell` and `SpeechSynthesizer` are two: they fail for different reasons and have
-different fixes — the screen can be un-capturable while the model is perfectly reachable, and the
-model can be unreachable while the screen is fine — so one class per surface means the message
-the user gets names the thing that is actually wrong.
+**`ScreenSurface` no longer captures anything.** Through M15 it also owned `capture(): Promise<
+Screenshot>` — `desktopCapturer`, a downscale, a per-provider frame-size policy — all of it
+deleted at M16.10 along with the vision model that was its only caller. What is left is the
+overlay and a display lookup, because the native→DIP conversion below needs to know which
+physical display a rect landed on and the caller only has native pixels to give it.
 
-**Three pixel spaces are live at once, and only one ratio spans the two that matter.** This
-machine is 1280x720 DIP at `scaleFactor` 1.5, captured at 1920x1080 native, then downscaled to
-1568x882 before sending. The mapping `core/vision/geometry.ts` implements is:
+**Three interfaces rather than one**, for the same reason `SpeechShell` and `SpeechSynthesizer`
+are two: `ScreenSurface`, `ElementSurface` and `ElementChooser` fail for different reasons and
+have different fixes — a window can be unreadable while the model is perfectly reachable, and the
+model can be unreachable while the window is fine — so one class per capability means the message
+the user gets names the thing that is actually wrong. `ElementChooser` rides the planner's own
+`LLMClient.complete()` rather than a new transport: the request is text (a numbered list) and the
+reply is a few tokens, so there is no per-provider adapter to write, unlike M15's `VisionApi`.
+
+**Native pixels and DIP are the two live spaces, and the mapping is derived, never stored.** UI
+Automation answers in physical screen pixels; the overlay places windows in DIP. On this machine
+that is 1280x720 DIP at `scaleFactor` 1.5 over a 1920x1080 panel. `core/screen/geometry.ts`
+derives the ratio the same way M15's image-px mapping did:
 
 ```
-display.width (DIP) / shot.width (image px)
+display.width (DIP) / display.nativeWidth (native px)
 ```
 
-At native resolution that ratio happens to equal `1 / scaleFactor`, which is exactly what makes
-`x / scaleFactor` so tempting — and it is correct right up until the downscale that every real
-request goes through. **`Screenshot.display` therefore carries no `scaleFactor` field at all**,
-so the wrong version cannot be spelled. The rounding rule matters too: edges are rounded and the
-extent derived from them, never position and size rounded independently, because
-`round(x) + round(w)` can land a pixel off `round(x + w)` and on a small control that is the
-difference between framing a button and clipping it.
+`DisplayBounds` still carries no `scaleFactor` field, for the identical reason M15 left it out:
+it invites `x * scaleFactor`, which agrees with the correct formula on a single display and
+silently diverges the moment a second monitor has a different scale factor. What M16 added is
+the **origin**: native rects can come from anywhere on the desktop, not just (0,0), so
+`nativeX`/`nativeY` are read from the OS via `screen.dipToScreenPoint` — never computed — and
+`toScreenRect` translates the physical origin *before* scaling and adds the DIP origin *after*.
+`ScreenRect` is additionally phantom-branded, so `toScreenRect` is the only function that can
+produce one: M15 relied on a separate type name alone to keep a native/image rect from reaching
+the overlay, and that was documentation, not enforcement, under TypeScript's structural typing.
+The rounding rule is unchanged from M15: edges are rounded and the extent derived from them,
+never position and size rounded independently.
 
 **The pointing overlay.** A transparent, frameless, `focusable: false` window covering one
 display, shown with `showInactive()` and `setAlwaysOnTop(true, "screen-saver")`. Three of its
@@ -996,16 +1021,34 @@ options are load-bearing rather than cosmetic:
   Without it the overlay eats the click and the app looks broken in the most confusing way
   available.
 - **`setContentProtection(true)`** — so one marker is never in the screenshot taken for the next
-  question, by the same mechanism that keeps the command bar out of the first.
+  question, by the same mechanism that keeps the command bar out of the first. (This protection
+  predates and is independent of M15's vision capture, which is why it survived that capture
+  code being deleted: it also keeps the marker out of screenshots any OTHER application takes.)
 - **`focusable: false`** — pointing at a control in another app must not take focus from it; a
   text field the user was typing in has to keep receiving their keystrokes.
 
-It carries **no preload and no IPC**: the rect and label ride in the URL hash, so each `point()`
-is a fresh navigation and a stale marker cannot survive a reload. The 3px border is drawn
-*outside* the reported rect (content-box, deliberately) so the highlight frames the control
-rather than covering its own edge pixels — on a 20px toolbar icon an inset border would eat a
-third of the thing it is pointing at. Verified by drawing at a known rect and photographing the
-result: the drawn box landed within 2px of the request, with a see-through interior.
+It carries **no preload and no IPC** for the rect itself — `ScreenRect`'s compile-time brand never
+crosses a process boundary where it could be stripped, because there is no channel for a
+position; every consumer of it is a main-process Electron call.
+
+**The rect and label reach the renderer as URL QUERY STRING parameters, not the hash — and this
+was a real, live bug, not a stylistic choice.** Through M16.10 they rode in the hash, on the
+documented claim that "each `point()` is a fresh navigation, so a stale marker cannot survive a
+reload." That claim was false and went unverified until a human caught it live at M16.11: a
+hash-only URL change is a *same-document* navigation in Chromium, so `overlay.html`'s script —
+which reads its position once, at load — never re-ran, and the marker kept showing the
+**previous** question's answer. Every new question wrong; only repeating a question verbatim
+(which happens to produce an identical, "already-loaded" URL that Chromium reloads anyway)
+showed the right one. Fixed by moving the parameters into the query string, which forces a real
+navigation on every call, plus a monotonic nonce, so an *exact* repeat is also a distinct URL
+rather than depending on that same-URL-reload behaviour. If this ever moves back into the hash,
+the script must listen for `hashchange` or the bug returns.
+
+The 3px border is drawn *outside* the reported rect (content-box, deliberately) so the highlight
+frames the control rather than covering its own edge pixels — on a 20px toolbar icon an inset
+border would eat a third of the thing it is pointing at. Verified at M15 by drawing at a known
+rect and photographing the result: the drawn box landed within 2px of the request, with a
+see-through interior.
 
 It **dismisses itself after 10s**, and is cleared by Escape and by either hotkey. That is the
 same reasoning that makes `SpeechSession` drop utterances older than 8s rather than say them
@@ -1014,6 +1057,13 @@ since scrolled away is worse than none. There is deliberately **no "press Esc to
 on it — the bar owns the global Escape only while the bar itself is visible, and the expected
 next move (clicking the thing) blurs and hides the bar, releasing the key. A hint that stops
 working the moment the user does what the marker is for is worse than no hint.
+
+**Open, not acted on:** the 10s dismiss timer does not shorten if the user switches away from the
+target window before it elapses, so a correct-when-drawn marker can sit over the wrong
+(now-foreground) app for up to that long. Raised during M16.11; the recommendation on record is
+to shorten the timer to ~5s rather than build focus-loss detection, which would need to poll
+`GetForegroundWindow` through the UIA host and risks dismissing a marker mid-use when a
+notification steals focus transiently. Not decided.
 
 ---
 
@@ -1200,7 +1250,7 @@ invitations.
 
 ---
 
-## 6d. The pointing flow (M15)
+## 6d. The pointing flow (M16, regrounded from M15's vision)
 
 One tool, `pointAt`, in the same registry as everything else. The LLM proposes it with a
 `target`; the planner disposes — registry check, validation, risk gate, execute, record.
@@ -1208,74 +1258,99 @@ One tool, `pointAt`, in the same registry as everything else. The LLM proposes i
 ```
 "where's the send button?"
   -> planner picks pointAt { target: "the send button" }
-  -> narrate: "Looking at your screen to find the send button…"   (caution tier, said first)
-  -> screen.capture()        1568x882 PNG, our own windows excluded
-  -> vision.locate()         one bounded question: WHERE is this?
-  -> checkLocation()         the deterministic gate — refuses, or hands back a box
-  -> toScreenRect()          image px -> screen DIP
+  -> narrate: "Checking the controls on screen for the send button…"   (caution tier, said first)
+  -> readSettledWindow()     probe -> wait -> enumerate, until the control list stops moving
+                             (native: 0 delay. Chromium: one 350ms settle, on class alone)
+  -> buildCandidates()       filter + dedup + number, PURE — no model has run yet
+  -> chooser.choose()        one bounded question: WHICH numbered entry?
+                             the model never emits a coordinate
+  -> resolveChoice()         the deterministic gate — refuses, or hands back a candidate
+  -> verifyTarget()          still the same window? still at the same rect? (else: stale)
+  -> toScreenRect()          native px -> screen DIP, via a display looked up from the OS
   -> screen.point()          the marker; the user clicks it themselves
-  -> "Pointing at \"Send\" — the top right of your screen."
+  -> "Pointing at \"Send\" — top right of Gmail - Compose."
 ```
 
-**Why a tool and not a mode.** A separate hotkey was the alternative, and it was rejected: it
-would make the user decide *before* opening the bar which kind of request they were about to
-make — exactly what M8 collapsed away for typing-vs-speaking — and it would create a second path
-where a model decides something outside the registry.
+**Why this replaced M15's vision pipeline.** M15 sent a screenshot to a vision model and asked
+it to answer WHERE the target was — a bounding box. Live testing found it returning the wrong
+control on ordinary Windows chrome, confidently: one tab over on a tab strip, ~208px onto a
+neighbouring toolbar icon. Not imprecision — the model proposing an action's coordinates was the
+one place in this codebase where "the LLM proposes, the planner disposes" was broken, because
+vision was proposing WHICH control *and* disposing WHERE it is. M16 inverts it: UI Automation
+enumerates the window's real controls with exact rects (deterministic), and the model's entire
+output is one integer picking an entry off a list this process built. An integer cannot be off
+by 208 pixels. It can be the *wrong* integer — a semantic error, which is the error class models
+are actually good at, and the class the deterministic gate below is built to catch.
 
-**"The model proposes, the code disposes" is intact, and here is the load-bearing part.** The
-vision model never selects an action. Tool selection is still the planner's text LLM choosing
-from a closed menu. The vision model answers one bounded question and hands back a rectangle
-that our own code then validates and may refuse — structurally the same as `gmailScript.ts`
-resolving a control by role + accessible name and declining when it cannot.
+**A consequence worth stating plainly: no screenshot is taken.** What reaches the model is
+control *names*, as text — "File", "Edit", "Advice.txt", "New" — plus the user's own words. M15's
+whole privacy posture existed because a picture of the screen left the machine; that capability
+is gone from the tree, not merely unused.
 
-**The deterministic gate** (`core/vision/locate.ts`) is this milestone's replacement for the
-checkability the DOM gave M10 for free. None of its rules prove an answer is *right*; all of them
-catch answers that are certainly *wrong*, and every one refuses rather than clamping toward a
-plausible-looking marker:
+**Why a tool and not a mode.** Unchanged from M15: a separate hotkey was the alternative and was
+rejected for the same reason M8 collapsed typing-vs-speaking into one path — it would make the
+user decide, before opening the bar, which kind of request they were about to make, and it would
+create a second route where a model decides something outside the registry.
+
+**The settle step exists because the window's own control list can be caught mid-load.** Recon
+measured a real Electron window (VS Code) reporting 13 elements on the first UIA touch and 613 a
+second later — Chromium activates its accessibility tree lazily. Answering during that window
+would match the user's words against 2% of the real candidates and return something confident
+and wrong: M15's exact failure class, relocated from coordinate space into enumeration timing.
+`core/screen/settle.ts` is a pure decision over a probe sequence (no clock, no PowerShell) that
+distinguishes three states a raw element count cannot: `lazy-shell` (Chromium by class, content
+unknown), `chrome-only` (settled, and there is genuinely nothing but the window frame), and
+`sparse` (few candidates, but real — a Save/Discard dialog, which must be answered from and never
+retried into the ground).
+
+**The deterministic gate** (`core/screen/resolve.ts`) is this milestone's counterpart to M15's
+`locate.ts`, and the contrast says what the redesign bought: `locate.ts` had to *manufacture*
+checkability out of properties a wrong box tends to violate — none of which prove an answer
+right. Here the answer is an index into a list this process wrote, so every check is exact:
 
 | The answer | What it means | What happens |
 |---|---|---|
-| `notFound` | it isn't on screen | refuse, and repeat the model's own reason if it gave one |
-| `ambiguous` | several things match | refuse, and NAME them so the rephrase is one word |
-| box runs off the frame (>1% slack) | the model answered in some other coordinate space — most likely the native resolution we downscaled away from | refuse |
-| box > 50% of the frame | the hedge: it could not find the thing and boxed the whole window | refuse |
-| box < 64px² | it is pointing at nothing | refuse |
-| off-schema / no box / non-finite | we cannot act on it | refuse |
+| `none` | the model looked and it is not there | refuse, naming how many controls WERE looked at — a checkable claim, unlike vision's |
+| `ambiguous` (model-volunteered) | several things match | refuse, and name them |
+| a number outside the list | the model lost track of a long list | refuse (`untrustworthy`) — **never clamped** to the nearest valid index |
+| two candidates identical in every field the model saw (name, type, position) | a coin flip the model had no basis for | refuse (`ambiguous`), naming both — by column/landmark where one exists, ordinal otherwise |
+| the chosen control is disabled | it exists but cannot be clicked | refuse (`disabled`) — a different fact from "not found," and said as one |
+| the window is no longer the one just enumerated, or has moved | the user switched away, or the window was dragged, while the app was working | refuse (`stale`) — checked immediately before drawing, the latest possible moment |
 
-The tolerance is not zero, deliberately: an element flush against the edge of the screen really
-is reported a pixel or two past it, and refusing to point at the window close button would be a
-silly way to be principled. Inside the tolerance the box is clamped — *after* the answer has
-already been judged credible, so clamping can never rescue a wrong one.
+**A refusal is `refused`, not a miss.** Unchanged from M15: §8's miss list is a ranked backlog
+of tools worth building, and "that control isn't there" is not a missing tool. Every one of the
+above is thrown as a `UserFixableError` (`ElementNotFoundError`), so the planner shows the
+tool's own wording verbatim and logs `refused`.
 
-**A refusal is `refused`, not a miss.** §8 defines the miss list as a ranked backlog of tools
-worth building, and "it isn't on your screen" is not a missing tool. It is thrown as a
-`UserFixableError`, so the planner shows the tool's own wording verbatim and logs `refused` —
-the same distinction M9 drew for a truncated model response.
+**Why `caution`.** Unchanged in shape, changed in what it is protecting: not `safe`, because it
+reads the contents of whatever window the user was last looking at, and it draws. Not
+`reversible`: the overlay itself qualifies (`clearPointer()` un-draws it completely), but the
+control names have already gone to a model by the time that runs, and the tier has to describe
+the worse half. Not `dangerous`: nothing reaches another person, nothing is written anywhere, and
+a confirm dialog in front of every "where's the send button?" would make the capability unusable
+for the one thing it is for. So it narrates — and the narration says the true, smaller thing now:
+"Checking the controls on screen for X…", never "looking at your screen", because nothing is
+photographed.
 
-**Why `caution`.** Not `safe`: it draws, and it sends. Not `reversible`: `risk.ts` reserves that
-for things recoverable by mechanisms this app owns, and while `clearPointer()` un-draws the
-marker completely, a screenshot that has left the machine is not recoverable — the tier has to
-describe the worse half. Not `dangerous`: nothing reaches another person and nothing is written
-anywhere, and a yes/no dialog in front of every "where's the send button?" would make the one
-thing this is for unusable. So it narrates, and given the privacy posture the announcement is the
-*point* of the tier rather than a cost of it — narration is what stands in for the undo that does
-not exist.
+**`resolvesReferences: false`.** Unchanged from M15. `target` is a literal description of
+something visible, not a reference to look up; letting memory near it would rewrite "my inbox"
+into a URL and then hunt the screen for one.
 
-**`resolvesReferences: false`.** `target` is a literal description of something visible, not a
-reference to look up. Memory resolution exists to turn "my dashboard" into a URL; letting it near
-this argument would rewrite "my inbox" into `https://mail.google.com/…` and then hunt the screen
-for a URL. Same reasoning as the memory-writing tools, opposite direction.
-
-**The result sentence stands on its own.** "Pointing at "Send" — the top right of your screen"
-is derived from the same box the marker is drawn at, so the words and the highlight can never
-describe different places. That matters twice: the marker is the disposable channel and the text
-is the durable one (§4d), so the answer survives being spoken, missed, or timed out; and naming
-what the app *thinks* it found makes a marker sitting on "Discard" while the label says "Send"
-visible as a disagreement rather than trusted as an answer.
+**The result sentence stands on its own.** Unchanged in principle: "Pointing at "Send" — top
+right of Gmail - Compose" is derived from the same candidate the marker is drawn at, so the words
+and the highlight can never describe different places — the marker is the disposable channel and
+the text is the durable one (§4d), so the answer survives being spoken, missed, or timed out; and
+naming what the app *thinks* it found makes a marker sitting on "Discard" while the label says
+"Send" visible as a disagreement rather than trusted as an answer. Now it also names the
+*window*, not just a screen quadrant — because a candidate list is scoped to one window, "top
+right" of which window is part of the claim being made.
 
 **What is deliberately not here:** clicking, typing, dragging, scrolling to find something
-off-screen, or pointing at more than one thing. Also no retry-with-a-bigger-image on a refusal —
-a second guess after a rejected first one is a worse guess dressed up as diligence.
+off-screen, or pointing at more than one thing. No fallback to vision for a window with no usable
+control tree — that case is refused honestly (`unreadable`/`unsettled`), because a fallback's
+engagement condition (canvas apps, unlabelled UI) is exactly the condition vision was measured
+worst at. No retry-with-a-different-model on a refusal, for the same reason M15 rejected it: a
+second guess after a rejected first one is a worse guess dressed up as diligence.
 
 ---
 
@@ -1462,15 +1537,38 @@ Post-v0:
       > kept because the MEASUREMENTS that killed the approach are the most valuable thing M15
       > produced; the architecture it describes no longer exists in the tree.
 
-**v0 status: complete.** **597 tests green** (`npm test`) across 43 files. Through M12.1 that
+- [x] **M16 — Regrounding `pointAt` on UI Automation.** Replaces M15's vision-model grounding
+      entirely, not just its accuracy. Deletes `core/vision/` (~2,900 lines: the locator, both
+      provider adapters, the prompt/parser, the geometry, `SMALL_TARGET_PX`) and
+      `ScreenSurface.capture()`. Adds `core/screen/` (`elements.ts` — the pure filter/dedup/
+      numbering step; `settle.ts` — the pure growing-vs-stuck decision; `prompt.ts` and
+      `resolve.ts` — the choose contract and its deterministic gate; `geometry.ts` — native px
+      → DIP; `ModelElementChooser`, riding the planner's own `LLMClient` rather than a new
+      transport); `src/main/uia/WindowsElements.ts` (a persistent PowerShell host over UI
+      Automation, modelled on M12's `WindowsInputInjector`); and the `ElementSurface`/
+      `ElementChooser` interfaces (§4e). `pointAt`'s registry entry, the overlay, and
+      `setContentProtection` all carry over unchanged — this changes where coordinates come
+      from, nothing else about what the tool does. Renames the opt-in flag
+      `VISION_ENABLED` → `POINTING_ENABLED`, because what it authorises shrank from a
+      screenshot to a list of control names. Live testing (M16.11) found and fixed two real
+      bugs no fixture or host-level test could reach — a foreground snapshot that always
+      captured the app's own command bar, and a marker that always showed the previous
+      question's answer — see "M16 — proven vs. live-only" below and
+      `docs/context/PROJECT_CONTEXT_UPDATE_8.md` for the full account.
+
+**v0 status: complete.** **675 tests green** (`npm test`) across 45 files. Through M12.1 that
 was 242 — 63 for v0, 24 added by M7, 37 by M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by
 M12.1 (M12.2 added no new tests — all four fixes are covered by existing coverage, adjusted
 where a fix changed an assertion's shape; see §9's M12.2 for specifics). M13 and M14 added 259
-between them, and M15 (including M15.1's provider swap and its size-confidence gate) added 96.
-(Against `MockShell`, fake Gmail/Notion tabs, jsdom fixtures, a `MockInputInjector` standing in
-for real `SendInput`, and — from M15 — `FakeScreen` and `FakeVisionLocator`; no browser, inbox,
-Notion account, OS keystroke, screen capture, or outbound image is ever touched by the test
-suite.) The eval harness
+between them. M15 (including M15.1's provider swap and its size-confidence gate) added 96, all
+of which were later deleted with M15 itself at M16.10; M16 nets +78 over the pre-M15 total —
+built up through the milestone, cut down by M16.10's deletions, then built back up again by
+M16.11's live-bug fixes and the tests they added. (Against `MockShell`, fake Gmail/Notion tabs,
+jsdom fixtures, a `MockInputInjector` standing in for real `SendInput`, and — from M16 —
+`FakeElements`, `FakeChooser`, and a `FakeScreen` with no screenshot fixture left to carry; no
+browser, inbox, Notion account, OS keystroke, or screen capture is ever touched by the test
+suite, and — unlike M15 — no image is ever constructed to be sent, because none is sent.) The
+eval harness
 (`npm run eval`, `tests/eval/`) runs the memory story as one continuous scenario — cold memory
 refuses →
 teaching fixes it → a correction versions it → recall reveals it — plus the seven demo tasks
@@ -1622,6 +1720,67 @@ have to rediscover.
 
 - **The taskbar, the desktop, and open popup menus are out of scope.** They are separate
   top-level windows, and enumeration is scoped to the foreground window.
+
+### M16 — proven vs. live-only
+
+**Proven deterministically (over 100 new tests, no PowerShell and no desktop for most of the
+build).** Filtering, dedup and numbering against eight fixtures — six transcribed from real
+recon dumps, two synthetic and labelled as such — including a byte-for-byte proof that the
+narrowing UIA condition used in production loses zero real candidates against pulling the whole
+tree (measured live at M16.8: 85 candidates either way). The settle decision as a pure state
+machine with no clock. The choose prompt and parser against every malformed reply shape. Native
+px → DIP geometry with hand-derived literals on the actual 1.5×-scaled machine, including a test
+asserting the *specific wrong answer* an un-translated origin would produce. And the safety
+property the whole milestone rests on: **on every refusal path, `FakeScreen.pointed` stays
+empty** — an answer the gate does not trust must never become a marker.
+
+**Proven against the real PowerShell host, not just fakes (M16.8).** All three regression
+targets re-verified at their exact fixture rects on live Notepad and Explorer. Two real bugs
+found this way that no fixture could have shown: `-Command -` does not reliably deliver stdin
+commands (fixed with `-File`; see the limitation above), and enumerating a real window's whole
+tree costs seconds, not milliseconds, until narrowed at the source.
+
+**Live-verified through the actual app — real hotkey, real keypress, not a script (M16.11).**
+All nine checklist items confirmed by a human at the keyboard, including markers re-checked
+visually after two further bugs were found and fixed *by that same process*:
+
+- **The foreground snapshot was reading the command bar, every time.** `snapshotPointTarget()`
+  was fire-and-forget; the read always resolved after `showInput()` had already taken focus, so
+  the app answered every question about itself. Root cause was async-vs-sync ordering, not a
+  race — it could never have worked. Fixed by awaiting the snapshot, pre-warming the reader at
+  startup so that await is cheap, and having the host refuse to name one of the app's own window
+  handles even if asked.
+- **The marker was one call behind.** Its position travelled in the URL hash; a hash-only change
+  is a same-document navigation, so the overlay's script — which reads its position once, at
+  load — never re-ran, and the marker kept showing the *previous* question's answer. Every new
+  question wrong, every identical repeat right, which is a more dangerous shape than "always
+  wrong": a first answer looks authoritative and nothing on screen suggests it is stale. Fixed by
+  moving the position into the query string (a real navigation) plus a nonce (so even an
+  identical question forces a fresh load).
+- Two live-only findings became refusal-wording fixes: a raw COM exception (`"Unrecognized
+  error."`) was reaching the user verbatim through the `unreadable` path — the host now returns
+  classified codes, never engine text, and retries a `FindAll` fault once; and a disabled control
+  was being filtered out of the candidate list entirely, collapsing "present but unusable" into
+  "not found" — disabled controls are now kept, marked, and refused with their own wording
+  (`disabled`).
+- The ambiguity refusal's wording was refined after a live five-column Explorer window: naming
+  candidates by left-to-right ordinal ("3rd from the left") technically worked but made the
+  reader count columns against their own view. Candidates that sit inside a labelled container
+  (a column header) are now named by it ("under \"Date modified\""); ordinals remain the
+  fallback when no clean landmark exists, never mixed with landmarks in one sentence.
+
+**One honest gap held rather than chased.** The `unreadable` refusal's live wording was never
+provoked: every cold-Electron-launch attempt found the target app's tree had already populated
+by the time the hotkey landed. The refusal path itself is proven deterministically and was
+exercised live in its *sibling* form (`unsettled`, and `disabled`/`stale`/`ambiguous` all fired
+live); only this one specific message's live appearance is unconfirmed. Not blocking — the code
+path is identical to the ones that did fire, and PROJECT_CONTEXT_UPDATE_8 records why it
+resisted forcing (the same populate-then-go-bare timing R1a measured).
+
+**Still not verified: multi-monitor**, for lack of a second display — see the limitation above.
+The overlay-dismiss timing question (should switching away from the target window cut the
+10-second auto-dismiss short, rather than letting a stale marker sit over the new foreground app
+for up to that long) was raised and left as a documented, undecided trade rather than acted on.
 
 ### M15 — proven vs. live-only
 

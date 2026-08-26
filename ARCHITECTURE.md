@@ -44,8 +44,8 @@ flowchart TB
     LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
     Calendar["Google Calendar<br/>REST API · read, create, move"]
-    Vision["Vision model (Anthropic)<br/>where is this control? · opt-in;<br/>the one thing that sees your screen"]
-    Screen["Screen capture + pointing overlay<br/>photograph · draw a marker · never click"]
+    UIA["Windows UI Automation<br/>via a PowerShell host · exact rects,<br/>names, control types · opt-in"]
+    Screen["Pointing overlay<br/>draw a marker · never click"]
     OS["OS &amp; target apps<br/>browser, clipboard, any focused window"]
 
     User --> Shell
@@ -56,7 +56,7 @@ flowchart TB
     Core --> Slack
     Core <--> Chrome
     Core <--> Calendar
-    Core <--> Vision
+    Core <--> UIA
     Shell --> Screen
     Core <--> Screen
 ```
@@ -67,11 +67,16 @@ same string the command bar would have returned and hands it to the same call si
 it requests speech as an *action*, exactly as it requests a notification, and a machine with no
 synthesizer accepts that action and stays quiet.
 
-**Where vision sits (M15):** the screen is a *surface* the core reaches through `ToolDeps`,
-not a shell contract like the microphone — because capture is a request/response and the
-`pointAt` handler needs the picture back, where speech is fire-and-forget. Note what the arrows
-say about privacy: `Whisper` and `Piper` never leave the machine, and `Vision` is the one box
-that receives a picture of your screen. It is off unless `VISION_ENABLED=1`.
+**Where pointing sits (M15, regrounded on UI Automation in M16):** the window reader is a
+*surface* the core reaches through `ToolDeps`, not a shell contract like the microphone —
+because reading a window is a request/response and the `pointAt` handler needs the candidate
+list back, where speech is fire-and-forget. Note what changed about the arrows: M15 had a
+`Vision` box that received a picture of the user's screen. It is gone. `UIA` receives no image
+at all — it is asked for one window's control names and rects, over a local PowerShell process,
+and answers with text. It is still off unless `POINTING_ENABLED=1`: a smaller disclosure than a
+screenshot, but still reading the contents of whatever window the user was last looking at, so
+it keeps the same explicit opt-in `VISION_ENABLED` had rather than inheriting one from config
+that exists anyway.
 
 **Read it as:** you sit at the top; the stacked boxes are *your* app; the boxes on
 the right are things the app uses but does not own. The shell is the only part that
@@ -110,15 +115,20 @@ knows it's on Windows.
   `SpeechShell` (`src/main/shell/`) plays it and can stop it. `SpeechSession` sits between them
   holding the queue. What is said is *derived* from what is shown (`core/speech.ts`), never
   authored twice — see §4d.
-- **Screen + vision (M15)** — two interfaces again, and split for the same reason speech's are:
-  they fail differently and have different fixes. `ScreenSurface` (`src/main/screen/`) takes the
-  picture and draws the marker; `VisionLocator` (`core/vision/`) answers *where is this*. Both
-  are *surfaces* injected through `ToolDeps`, not shell contracts like the microphone, because
-  the handler needs the picture back. Between them sits the part that matters:
-  `core/vision/locate.ts`, which refuses an answer it cannot trust rather than pointing at it.
-- **LLM / Slack / Chrome / Calendar / Vision / OS** — rented reasoning, the external actions, and
-  the things the shell's hands touch. Vision is the only one that is sent a picture of your
-  screen, and the only one behind an explicit opt-in rather than "did you configure it".
+- **Screen + UIA (M15, regrounded M16)** — two interfaces, split for the same reason speech's
+  are: they fail differently and have different fixes. `ScreenSurface` (`src/main/screen/`)
+  draws the marker and knows which display a rectangle falls on; `ElementSurface`
+  (`src/main/uia/WindowsElements.ts`) reads a window's controls over a persistent PowerShell
+  host. Between them sit two things that matter: `core/screen/elements.ts`, which turns a raw
+  UIA tree into a filtered, numbered candidate list *before* any model is asked; and
+  `core/screen/resolve.ts`, which refuses an answer it cannot trust rather than pointing at it.
+  Inverted from M15 on purpose — the model picks a NUMBER off a list this process built, and
+  never emits a coordinate, because M15 measured a vision model proposing coordinates directly
+  and getting the wrong control on ordinary Windows chrome.
+- **LLM / Slack / Chrome / Calendar / UIA / OS** — rented reasoning, the external actions, and
+  the things the shell's hands touch. UIA is the only one gated behind an explicit opt-in rather
+  than "did you configure it" — even though, unlike M15's `Vision`, it is never sent a picture of
+  anything; reading a window's contents is still a smaller version of the same disclosure.
 
 ---
 
@@ -425,14 +435,24 @@ text is on screen — which is what makes barge-in safe rather than destructive.
 
 ---
 
-## 4e. Pointing — a guess a person checks (M15)
+## 4e. Pointing — a guess a person checks (M15, regrounded on UI Automation in M16)
 
 Every other surface this app acts through resolves its target *structurally*: Gmail by role and
 accessible name, Notion by `data-block-id` and document order, the calendar by event id. That is
 what makes them refusable — a control that can't be identified is never touched.
 
-Pixels offer nothing equivalent, so M15 changes what the answer is allowed to *do* instead of
-pretending the identification is as good. It draws a marker. A person clicks.
+**M15 tried to get the same property out of pixels, and couldn't.** A vision model was asked to
+answer WHERE a target was directly — a bounding box — and live testing found it confidently
+wrong on ordinary Windows chrome: one tab over on a tab strip, ~208px onto a neighbouring
+toolbar icon. That made vision the one place in the codebase where "the model proposes, the code
+disposes" was broken: it was proposing WHICH control *and* disposing WHERE it is, in one
+unauditable step.
+
+**M16 gets the structural property back by inverting who does what.** UI Automation — the same
+accessibility layer screen readers use — enumerates the target window's controls with EXACT
+rects, deterministically. Code filters, deduplicates and numbers them. The model's entire output
+is one integer, picking a numbered entry. It still draws a marker; a person still clicks it. What
+changed is that a coordinate can no longer come from a guess.
 
 ```
 "where's the send button?"
@@ -440,37 +460,54 @@ pretending the identification is as good. It draws a marker. A person clicks.
         ▼
    planner picks pointAt { target: "the send button" }
         │
-        ├─ narrate ─────────► "Looking at your screen to find the send button…"
-        │                      (caution tier — said BEFORE the capture, not after)
+        ├─ narrate ─────────► "Checking the controls on screen for the send button…"
+        │                      (caution tier — said BEFORE the window is read, not after)
         ▼
-   screen.capture()          1568px long edge · our own windows excluded from it
+   readSettledWindow()       probe → wait → enumerate, until the control list stops
+        │                    moving (native: instant · Chromium: one 350ms settle)
+        ▼
+   buildCandidates()         filter + dedup + number — PURE, no model involved yet
         │
         ▼
-   vision.locate()           one bounded question: WHERE is this?
-        │                    the model never chooses an action
+   chooser.choose()          one bounded question: WHICH numbered entry?
+        │                    the model never emits a coordinate
         ▼
-   checkLocation()  ──────►  refuse: not on screen / several match / off the frame /
-        │                            half the screen / too small / off-schema
+   resolveChoice()  ──────►  refuse: none of these / ambiguous / out of range /
+        │                            disabled / stale (switched away, or moved)
         ▼                            (and `screen.point` is never called)
-   toScreenRect()            image px → screen DIP
+   verifyTarget()             still the right window, at the right rect? (else: stale)
+        │
+        ▼
+   toScreenRect()            native px → screen DIP, via a display looked up from the OS
         │
         ▼
    screen.point()            click-through overlay · never takes focus · self-dismisses
         │
         ▼
-   "Pointing at \"Send\" — the top right of your screen."
+   "Pointing at \"Send\" — top right of Gmail - Compose."
 ```
 
-**The tier is about the capture, not the marker.** `clearPointer()` un-draws the highlight
-completely, which would make it `reversible` — but a screenshot that has left the machine is not
-recoverable, and the tier has to describe the worse half. Hence `caution`, and hence the
-narration, which for this one capability is the *point* of the tier rather than a cost of it.
+**The tier is about reading the window, not the marker.** `clearPointer()` un-draws the
+highlight completely, which would make it `reversible` — but the control names have already gone
+to a model by the time that runs, and the tier has to describe the worse half. Hence `caution`,
+and hence the narration — which says the true, smaller thing now: nothing is photographed, so it
+no longer claims to be "looking at your screen".
 
-**Three pixel spaces are live at once** — 1280×720 DIP, a 1920×1080 native capture, a 1568×882
-downscale — and only `display.width / shot.width` spans the two that matter. At native resolution
-that ratio equals `1 / scaleFactor`, which is what makes the wrong version so tempting; it is
-correct right up until the downscale every real request goes through. `Screenshot.display`
-carries no `scaleFactor` field so the wrong version cannot be written.
+**No screenshot exists in this pipeline at all.** M15's privacy posture was built around a
+picture of the screen leaving the machine. M16 sends control *names*, as text. That capability —
+`ScreenSurface.capture()`, the vision locator, the frame-size policy — is deleted from the tree,
+not merely unused.
+
+**Two pixel spaces are live, native and DIP, and the mapping is derived, never stored.**
+`display.width / display.nativeWidth` spans them, the same shape M15's
+`display.width / shot.width` used for image-px → DIP. `DisplayBounds` still carries no
+`scaleFactor` field, for the same reason: it invites `x / scaleFactor`, which is correct on a
+single display and silently wrong the moment a second one has a different scale factor. What
+changed is the *origin*: M15 needed only a ratio, because both display and image origins were
+effectively (0,0). M16's native rects can come from any point on the desktop, so the mapping
+translates the physical origin (read from the OS, never computed) before scaling and adds the
+DIP origin after — the multi-monitor case that is still unverified for lack of a second display,
+same category of gap as the Mac shell.
 
 ---
 
@@ -551,10 +588,12 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
   + accessible name, Notion (no roles on body content, confirmed live) by `data-block-id` and
   document order. Expect each new app to need its own recon pass, not a copy-paste.
 - Mac and Linux shells behind the same `OSShell` + `VoiceShell` interfaces.
-- ~~Screenshot-driven interaction with any app.~~ **Half of it built in M15** — the app points,
-  the user clicks (§4e). The other half, auto-clicking what the vision model identifies, is not a
-  next step on this path: it is the thing M15 is the alternative to. Building it would need a
-  fail-closed design for "the model was confidently wrong", which pointing sidesteps entirely by
-  keeping a person as the executor.
+- ~~Screenshot-driven interaction with any app.~~ **Half of it built in M15, regrounded in M16**
+  — the app points, the user clicks (§4e), and it no longer even takes a screenshot to do it. The
+  other half, auto-clicking what is found, is not a next step on this path: it is the thing
+  pointing is the alternative to. Auto-click would need a fail-closed design for "the model
+  picked the wrong candidate", which pointing sidesteps entirely by keeping a person as the
+  executor — and M16 additionally removed the one way that decision *could* still be silently
+  wrong (a model-emitted coordinate), which auto-click would reintroduce by construction.
 - Multi-step plans and a real agent loop (the closed→open world jump).
 - Point the memory engine at the Postgres/Neon personal OS instead of local SQLite.

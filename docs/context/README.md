@@ -8,14 +8,16 @@ for *status*, not for reasoning or philosophy.
 **Current status: see `PROJECT_CONTEXT_UPDATE_8.md`.** M0–M14 shipped and
 live-tested (memory, voice in/out, Gmail, Notion, Calendar, dictation). M15
 (vision-guidance) was built and honestly tested to failure — see Update 7
-for why. M16 (UI Automation-based redesign) is built through M16.10 and
-proven against fixtures and the real PowerShell/UIA host — but **not yet
-verified by a human at the keyboard**. That live pass (M16.11) is the one
-open item; M16.12 (final docs) waits on it.
+for why. M16 (UI Automation-based redesign) is **complete**: built, its
+predecessor's vision code deleted, and live-verified through the real app
+by a human at the keyboard, including two real bugs verification found and
+this session fixed. One honest gap (a refusal's live wording never
+provoked) and one undecided design question (overlay-dismiss timing) are
+held, not chased — both named in Update 8.
 
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
-2. `PROJECT_CONTEXT_UPDATE_8.md` — current status and the one open item
+2. `PROJECT_CONTEXT_UPDATE_8.md` — current status
 3. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_7.md` in numeric order, plus
    `future_scope_post_m14.md`
