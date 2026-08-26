@@ -254,10 +254,16 @@ describe("ambiguity, detected by CODE after the pick", () => {
     }
   });
 
-  it("names them by left-to-right order when the position phrase cannot separate them", () => {
-    // All four are "top", so four identical phrases would be useless to answer.
+  // WORDING CHANGED AT M16.11, from live testing on a five-column Explorer window.
+  //
+  // These four used to be named "1st / 2nd / 3rd / 4th from the left" — correct, and work: it
+  // makes the reader count columns and match that count against their own view, which fails the
+  // moment the window is scrolled. Each filter sits INSIDE its own column header ("Name" spans
+  // 240-699, its filter 674-697), so the header is a landmark the person is already looking at.
+  it("names them by their column header, not by counting from the left", () => {
     const candidates = cands("explorer");
     const filters = candidates.filter((c) => c.name === "Filter dropdown");
+    // The precondition: the position phrase cannot separate them, so something else must.
     expect(new Set(filters.map((c) => c.position)).size).toBe(1);
 
     const error = refusalOf(() =>
@@ -268,8 +274,71 @@ describe("ambiguity, detected by CODE after the pick", () => {
         "File Explorer",
       ),
     );
-    expect(error.message).toContain("1st from the left");
-    expect(error.message).toContain("4th from the left");
+    expect(error.message).toContain('under "Name"');
+    expect(error.message).toContain('under "Date modified"');
+    expect(error.message).toContain('under "Type"');
+    expect(error.message).toContain('under "Size"');
+    expect(error.message).not.toContain("from the left");
+  });
+
+  // THE ORDERING THAT WAS WRONG FIRST TIME. Searching same-row and above-row landmarks together
+  // answered "under Sort" and "under More options" for two of the four — toolbar buttons on the
+  // row ABOVE, which are narrower than the column headers (Sort 126 wide, Name 459) and so won
+  // the narrowest-wins test. A control sharing your row and containing you is your container;
+  // one merely above you must never outrank it.
+  it("prefers the container on its own row over anything on the row above", () => {
+    const candidates = cands("explorer");
+    const filters = candidates.filter((c) => c.name === "Filter dropdown");
+    const error = refusalOf(() =>
+      resolveChoice(candidates, { kind: "picked", number: filters[0]!.number }, "filter", "Explorer"),
+    );
+    expect(error.message).not.toContain("Sort");
+    expect(error.message).not.toContain("More options");
+  });
+
+  // ALL OR NOTHING. A sentence mixing "under Name" with "3rd from the left" would make the
+  // reader translate between two schemes mid-list.
+  it("falls back to ordinals for the WHOLE group when any one has no landmark", () => {
+    const at = (n: number, x: number, y: number, w: number, name: string): Candidate => ({
+      number: n,
+      name,
+      controlType: "Button",
+      position: "top",
+      enabled: true,
+      rect: { x, y, width: w, height: 20 },
+    });
+    // Two icons inside a labelled container, one stranded on its own with nothing enclosing it.
+    const candidates = [
+      at(1, 0, 0, 200, "Toolbar"),
+      at(2, 10, 0, 20, "More"),
+      at(3, 40, 0, 20, "More"),
+      at(4, 900, 0, 20, "More"),
+    ];
+
+    const error = refusalOf(() =>
+      resolveChoice(candidates, { kind: "picked", number: 2 }, "more", "App"),
+    );
+    expect(error.message).toContain("from the left");
+    expect(error.message).not.toContain("under");
+  });
+
+  it("falls back to ordinals when two candidates share one landmark", () => {
+    // Resolving both to "Toolbar" would read as a distinction and be none.
+    const at = (n: number, x: number, name: string): Candidate => ({
+      number: n,
+      name,
+      controlType: "Button",
+      position: "top",
+      enabled: true,
+      rect: { x, y: 0, width: n === 1 ? 200 : 20, height: 20 },
+    });
+    const candidates = [at(1, 0, "Toolbar"), at(2, 10, "More"), at(3, 40, "More")];
+
+    const error = refusalOf(() =>
+      resolveChoice(candidates, { kind: "picked", number: 2 }, "more", "App"),
+    );
+    expect(error.message).toContain("from the left");
+    expect(error.message).not.toContain("under");
   });
 
   // NARROWED FROM "SHARED NAME" BY MEASUREMENT (M16.5). The first version of this gate refused on

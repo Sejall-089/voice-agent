@@ -49,7 +49,7 @@ export function resolveChoice(
     const named = choice.numbers
       .map((number) => candidates.find((c) => c.number === number))
       .filter((c): c is Candidate => c !== undefined);
-    throw ambiguity(quoted, named);
+    throw ambiguity(quoted, named, candidates);
   }
 
   // --- The model picked a number ---
@@ -121,7 +121,7 @@ export function resolveChoice(
   // refused. The four "Filter dropdown" buttons are still caught — identical on all three fields.
   const twins = candidates.filter((c) => indistinguishable(c, candidate));
   if (twins.length > 1) {
-    throw ambiguity(quoted, twins);
+    throw ambiguity(quoted, twins, candidates);
   }
 
   return candidate;
@@ -138,8 +138,12 @@ function indistinguishable(a: Candidate, b: Candidate): boolean {
   );
 }
 
-function ambiguity(quoted: string, candidates: readonly Candidate[]): ElementNotFoundError {
-  if (candidates.length === 0) {
+function ambiguity(
+  quoted: string,
+  group: readonly Candidate[],
+  all: readonly Candidate[],
+): ElementNotFoundError {
+  if (group.length === 0) {
     return new ElementNotFoundError(
       "ambiguous",
       `I can see more than one thing that could be ${quoted}. Can you be more specific?`,
@@ -147,24 +151,111 @@ function ambiguity(quoted: string, candidates: readonly Candidate[]): ElementNot
   }
   return new ElementNotFoundError(
     "ambiguous",
-    `I can see ${candidates.length} things that could be ${quoted}: ` +
-      `${list(candidates.map(describe))}. Which one?`,
+    `I can see ${group.length} things that could be ${quoted}: ` +
+      `${list(describeGroup(group, all))}. Which one?`,
   );
 }
 
-// How a candidate is named back to the user when we decline to choose between several.
+// How a set of indistinguishable candidates is named back to the user.
 //
-// The position phrase alone is not always enough — Explorer's four "Filter dropdown" buttons are
-// all "top" — so where it does not separate them, fall back to left-to-right ordering, which
-// always does. A list that reads "the 1st, 2nd, 3rd and 4th from the left" is something a person
-// can answer; four identical phrases is not.
-function describe(candidate: Candidate, _index: number, all: readonly Candidate[]): string {
-  const positions = new Set(all.map((c) => c.position));
-  if (positions.size === all.length) return `"${candidate.name}" (${candidate.position})`;
+// Three ways of telling them apart, in descending order of how easy they are to ACT on. The
+// whole point of this sentence is that a person can answer it by looking at their screen, so the
+// question at every step is "what would they actually use to pick one out".
+//
+//   1. THE POSITION PHRASE, when it separates them. "top left" vs "bottom right" needs no
+//      counting and no reading.
+//   2. A LANDMARK — the enclosing control each one sits in. Added at M16.11 after live testing
+//      on a five-column Explorer window: the four "Filter dropdown" buttons each sit INSIDE
+//      their own column header ("Name" spans 240-699, its filter 674-697), so "the one under
+//      Date modified" names the thing a person is already looking at.
+//   3. LEFT-TO-RIGHT ORDINAL, as the fallback that always works.
+//
+// Ordinals were the previous fallback and they are the weakest of the three: they make the
+// reader count columns and match that count against their own view, which fails the moment the
+// window is scrolled or their eye lands somewhere else. Correct, but work.
+//
+// ALL OR NOTHING PER GROUP. If any one candidate has no clean landmark, the whole group falls
+// back to ordinals — a sentence that mixed "under Name" with "3rd from the left" would make the
+// reader translate between two schemes mid-list.
+function describeGroup(group: readonly Candidate[], all: readonly Candidate[]): string[] {
+  const positions = new Set(group.map((c) => c.position));
+  if (positions.size === group.length) {
+    return group.map((c) => `"${c.name}" (${c.position})`);
+  }
 
-  const order = [...all].sort((a, b) => a.rect.x - b.rect.x || a.rect.y - b.rect.y);
-  const place = order.indexOf(candidate) + 1;
-  return `"${candidate.name}" (${ordinal(place)} from the left)`;
+  const landmarks = group.map((c) => landmarkFor(c, all, group));
+  const named = landmarks.filter((l): l is string => l !== null);
+  // Every candidate resolved, and to a DIFFERENT landmark — two filters under one header would
+  // read as a distinction and be none.
+  if (named.length === group.length && new Set(named).size === group.length) {
+    return group.map((c, index) => `"${c.name}" (under "${landmarks[index]!}")`);
+  }
+
+  const order = [...group].sort((a, b) => a.rect.x - b.rect.x || a.rect.y - b.rect.y);
+  return group.map((c) => `"${c.name}" (${ordinal(order.indexOf(c) + 1)} from the left)`);
+}
+
+// The narrowest candidate that ENCLOSES this one and is not itself in the ambiguous group.
+//
+// Narrowest, because enclosure nests: Explorer's filter button sits inside its column header
+// ("Name", 459 wide) which sits inside the whole header row ("Header", 1680 wide). The narrowest
+// one is the most specific, and the only one that tells the columns apart.
+function landmarkFor(
+  candidate: Candidate,
+  all: readonly Candidate[],
+  group: readonly Candidate[],
+): string | null {
+  const encloses = (other: Candidate): boolean =>
+    other !== candidate &&
+    // A member of the same group cannot be the landmark for another — "the Filter dropdown
+    // under Filter dropdown" distinguishes nothing.
+    !group.includes(other) &&
+    other.rect.width > candidate.rect.width &&
+    enclosesHorizontally(other, candidate);
+
+  // SAME ROW FIRST, AND THIS ORDERING IS LOAD-BEARING (found while building it).
+  //
+  // Searching both together got two of Explorer's four filters wrong: it answered "under Sort"
+  // and "under More options" — toolbar buttons on the row ABOVE, which happen to be narrower
+  // than the column headers (Sort is 126 wide, Name is 459) and so won the narrowest-wins test.
+  // A control that shares your row and contains you is your container; something merely above
+  // you is a weaker signal and must never outrank it.
+  const sameRow = all.filter((other) => encloses(other) && overlapsVertically(other, candidate));
+  const above = all.filter((other) => encloses(other) && sitsAbove(other, candidate));
+
+  const pool = sameRow.length > 0 ? sameRow : above;
+  // Narrowest wins: enclosure nests, and the tightest box is the most specific label.
+  const best = pool.reduce<Candidate | null>(
+    (winner, other) => (winner === null || other.rect.width < winner.rect.width ? other : winner),
+    null,
+  );
+
+  return best?.name ?? null;
+}
+
+// Is `candidate` horizontally inside `outer`? Tolerant by a pixel or two at each edge — the
+// Explorer filter ends at 697 against a header ending at 699, and a strict test would still pass
+// there, but control edges are not guaranteed to line up that neatly.
+function enclosesHorizontally(outer: Candidate, candidate: Candidate): boolean {
+  const slack = 4;
+  return (
+    candidate.rect.x >= outer.rect.x - slack &&
+    candidate.rect.x + candidate.rect.width <= outer.rect.x + outer.rect.width + slack
+  );
+}
+
+function overlapsVertically(outer: Candidate, candidate: Candidate): boolean {
+  return (
+    outer.rect.y < candidate.rect.y + candidate.rect.height &&
+    outer.rect.y + outer.rect.height > candidate.rect.y
+  );
+}
+
+// Directly above, for the layouts where a header really is a separate row. Bounded, so a wide
+// control far up the window cannot become the landmark for something near the bottom.
+function sitsAbove(outer: Candidate, candidate: Candidate): boolean {
+  const gap = candidate.rect.y - (outer.rect.y + outer.rect.height);
+  return gap >= 0 && gap <= candidate.rect.height * 2;
 }
 
 function ordinal(n: number): string {

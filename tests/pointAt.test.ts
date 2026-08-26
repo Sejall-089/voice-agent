@@ -278,7 +278,10 @@ describe("refusals reach the user, and never draw", () => {
     // surviving the trip out is itself part of what this file is checking.
     expect(outcome.status).toBe("refused");
     expect(outcome.result).toContain("Filter dropdown");
-    expect(outcome.result).toContain("from the left");
+    // Named by column header since M16.11, not by counting from the left — see
+    // choosePrompt.test.ts for the live finding behind the wording.
+    expect(outcome.result).toContain('under "Name"');
+    expect(outcome.result).toContain('under "Date modified"');
     expect(screen.pointed).toEqual([]);
   });
 
