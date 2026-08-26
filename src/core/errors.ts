@@ -123,7 +123,13 @@ export type PointingRefusal =
   // The user switched away between the question and the answer (M16.9). Its own refusal because
   // it is its own fact and it has its own fix — ask again, and the app will look at whatever is
   // in front NOW. See core/tools/pointAt.ts for why this is detected rather than ignored.
-  | "stale";
+  | "stale"
+  // The control is right there and cannot be used (M16.11). Its own refusal because it is its
+  // own fact: `not-found` says the thing is not in this window, and saying that about a button
+  // the user can SEE, greyed out, in front of them is simply false. Found live — asked for a
+  // disabled "New" button in File Explorer, the app said it could not find it among the 70
+  // controls it could see.
+  | "disabled";
 
 export class ElementNotFoundError extends UserFixableError {
   constructor(

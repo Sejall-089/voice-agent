@@ -410,6 +410,15 @@ export interface Candidate {
   // understood — the model READS position and never REPORTS it, which is the whole inversion in
   // one field.
   position: string;
+  // Whether the control can actually be used right now (M16.11).
+  //
+  // Disabled controls are KEPT as candidates rather than filtered out, and that is a change of
+  // mind with a live finding behind it. They used to be dropped, which meant asking for a
+  // greyed-out button produced "I couldn't find it among the 70 controls I can see" — a sentence
+  // that says the thing is not there, when it is there and simply cannot be clicked. Two
+  // different facts deserve two different answers; the model needs to see the control to tell
+  // them apart, and the gate refuses on this flag afterwards.
+  enabled: boolean;
   // Never shown to the model. Resolved by code once a number comes back.
   rect: NativeRect;
 }

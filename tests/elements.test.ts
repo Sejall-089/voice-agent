@@ -100,8 +100,21 @@ describe("buildCandidates — the filter", () => {
     expect(buildCandidates(win({ ...base, rect: { ...base.rect, width: 0 } }))).toHaveLength(0);
   });
 
-  it("drops a disabled control — not a place to send someone", () => {
-    expect(buildCandidates(win({ ...base, enabled: false }))).toHaveLength(0);
+  // RULE CHANGED AT M16.11 — this test used to assert the opposite, and re-running it was not
+  // enough. Disabled controls WERE dropped here, on the reasoning that a greyed-out control is
+  // not a place to send someone. True about pointing, false about answering: live testing found
+  // the app telling a user it "couldn't find the New button among the 70 controls I can see"
+  // about a button they could see, greyed out, in front of them. They are kept and marked now;
+  // core/screen/resolve.ts refuses on the flag with a sentence that says which fact it is.
+  it("KEEPS a disabled control, marked — 'not there' and 'not usable' are different answers", () => {
+    const candidates = buildCandidates(win({ ...base, enabled: false }));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.enabled).toBe(false);
+    expect(candidates[0]!.name).toBe("Send");
+  });
+
+  it("marks an ordinary control as enabled", () => {
+    expect(buildCandidates(win(base))[0]!.enabled).toBe(true);
   });
 
   it("drops a scrolled-out control", () => {
@@ -299,6 +312,7 @@ describe("no control-type allowlist", () => {
   it("still lands well inside a promptable list", () => {
     // The permissive rule's real cost on the densest window measured. There is no size problem
     // here to trade accuracy against, which is the whole argument for staying permissive.
+    // (84 since M16.11, not 83: keeping disabled controls added one.)
     expect(buildCandidates(TREES["vscode"]!).length).toBeLessThan(100);
   });
 });

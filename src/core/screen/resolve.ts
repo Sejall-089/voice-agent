@@ -71,6 +71,23 @@ export function resolveChoice(
     );
   }
 
+  // FOUND, BUT NOT USABLE (M16.11).
+  //
+  // Checked before the ambiguity gate, because "it is greyed out" is the more specific and more
+  // useful thing to say: if the user can see the control, telling them it is ambiguous or
+  // missing are both worse answers than telling them why it will not work.
+  //
+  // No marker is drawn. Pointing at something the user cannot click would be answering a
+  // question they did not ask, and the sentence already tells them where it is by naming the
+  // window and the control.
+  if (!candidate.enabled) {
+    throw new ElementNotFoundError(
+      "disabled",
+      `${quoted} is there in ${windowTitle}, but it's greyed out right now — so there's ` +
+        `nothing to click yet.`,
+    );
+  }
+
   // THE DUPLICATE-NAME GATE, and the reason it is here rather than left to the model.
   //
   // The model answers with a NUMBER, so unlike M13's moveEvent — where a NAME was searched for

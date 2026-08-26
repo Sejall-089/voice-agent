@@ -96,6 +96,7 @@ export function buildCandidates(window: WindowElements): Candidate[] {
     name: truncateName(element.name.trim()),
     controlType: element.controlType,
     position: positionIn(element.rect, window.windowRect),
+    enabled: element.enabled,
     rect: element.rect,
   }));
 }
@@ -131,8 +132,15 @@ function isPointable(element: UiElement, windowRect: NativeRect): boolean {
   if (![x, y, width, height].every(Number.isFinite)) return false;
   if (width <= 0 || height <= 0) return false;
 
-  // A greyed-out control is not a place to send someone.
-  if (!element.enabled) return false;
+  // DISABLED CONTROLS ARE KEPT (M16.11). They used to be dropped here, on the reasoning that a
+  // greyed-out control is not a place to send someone — which is true about POINTING and false
+  // about ANSWERING. Live testing found the cost: asked for a greyed-out "New" button, the app
+  // said it could not find it among the 70 controls it could see, which reads as "that button
+  // does not exist". It did exist. It just could not be clicked.
+  //
+  // So they stay in the list, marked, and core/screen/resolve.ts refuses on the flag with a
+  // sentence that says which fact it is. Same reasoning that keeps `unreadable` and `unsettled`
+  // apart.
 
   // Scrolled out of view. Necessary and NOT SUFFICIENT — see the window check below.
   if (element.offscreen) return false;

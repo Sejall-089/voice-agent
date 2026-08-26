@@ -97,7 +97,8 @@ describe("failure mode 2: a number that does not exist", () => {
     // NOT a theoretical edge case. VS Code's candidate list runs to 83 entries and an index
     // hallucinated a little past the end is exactly the mistake to expect on a long list.
     const candidates = cands("vscode");
-    expect(candidates).toHaveLength(83);
+    // 84 since M16.11 — disabled controls are kept as candidates now, and this window has one.
+    expect(candidates).toHaveLength(84);
 
     const error = refusalOf(() =>
       resolveChoice(candidates, { kind: "picked", number: 104 }, "the source control icon", "VS Code"),
@@ -203,6 +204,7 @@ describe("ambiguity, detected by CODE after the pick", () => {
       name,
       controlType,
       position,
+      enabled: true,
       rect: { x: number * 10, y: 0, width: 20, height: 20 },
     });
 
@@ -417,5 +419,60 @@ describe("renderChooseRequest", () => {
   it("tells the model to decline rather than offer the nearest thing", () => {
     expect(CHOOSE_CONTROL_SYSTEM).toContain("NONE");
     expect(CHOOSE_CONTROL_SYSTEM).toContain("worse in every case");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FOUND, BUT GREYED OUT (M16.11).
+//
+// From live testing on File Explorer: with the "New" button visibly disabled, the app answered
+// `I couldn't find "the New button" among the 70 controls I can see` — which says the button is
+// not there, about a button sitting on screen in front of the user. The same instruction on a
+// window where New was enabled resolved correctly, which is what pinned the cause.
+//
+// Disabled controls were being filtered out of the candidate list entirely, so "present but
+// unusable" and "absent" collapsed into one sentence. They are now kept, marked, and refused
+// here with a sentence that says which fact it is.
+// ---------------------------------------------------------------------------
+describe("a control that is there but disabled", () => {
+  const disabled = (name: string): Candidate => ({
+    number: 1,
+    name,
+    controlType: "Button",
+    position: "top left",
+    enabled: false,
+    rect: { x: 9, y: 123, width: 129, height: 67 },
+  });
+
+  it("refuses with its own kind, not not-found", () => {
+    const error = refusalOf(() =>
+      resolveChoice([disabled("New")], { kind: "picked", number: 1 }, "the New button", "Home - File Explorer"),
+    );
+    expect(error.refusal).toBe("disabled");
+  });
+
+  it("says it is THERE, and never says it could not be found", () => {
+    const error = refusalOf(() =>
+      resolveChoice([disabled("New")], { kind: "picked", number: 1 }, "the New button", "Home - File Explorer"),
+    );
+    expect(error.message).toContain("is there in Home - File Explorer");
+    expect(error.message).toContain("greyed out");
+    // The exact wording that was wrong live.
+    expect(error.message).not.toContain("couldn't find");
+    expect(error.message).not.toContain("controls I can see");
+  });
+
+  it("still points at the same control once it is enabled", () => {
+    const enabled = { ...disabled("New"), enabled: true };
+    expect(
+      resolveChoice([enabled], { kind: "picked", number: 1 }, "the New button", "Desktop - File Explorer").rect,
+    ).toEqual({ x: 9, y: 123, width: 129, height: 67 });
+  });
+
+  it("is reported to the model, so it can pick it at all", () => {
+    // The refusal above is only reachable if the disabled control is IN the list. A filter that
+    // dropped it would make this branch dead and restore the misleading not-found.
+    const rendered = renderChooseRequest([disabled("New")], "the New button", "Home - File Explorer");
+    expect(rendered).toContain('1. "New" (Button, top left, disabled)');
   });
 });

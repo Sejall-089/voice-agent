@@ -35,6 +35,10 @@ export const CHOOSE_CONTROL_SYSTEM = [
   "  AMBIGUOUS <n>,<n>      - several entries match and you cannot tell which was meant",
   "",
   "No explanation, no punctuation, no other text.",
+  "",
+  "Some entries are marked `disabled`. Prefer an enabled entry when one matches. If the only",
+  "thing that matches is disabled, still pick it — the app will tell them it is greyed out,",
+  "which is a better answer than pretending it is not there.",
   "Answer NONE rather than offering the closest thing you can see — a confident wrong answer",
   "sends someone to the wrong part of their own screen, which is worse in every case than",
   "saying it is not here.",
@@ -52,8 +56,12 @@ export function renderChooseRequest(
   target: string,
   windowTitle: string,
 ): string {
+  // Disabled controls are LISTED, marked. They are still the answer to "where is X" — the app
+  // just will not point at one, and it needs to know which entry the person meant in order to
+  // say so. See core/screen/elements.ts for the live finding behind this.
   const lines = candidates.map(
-    (c) => `${c.number}. "${c.name}" (${c.controlType}, ${c.position})`,
+    (c) =>
+      `${c.number}. "${c.name}" (${c.controlType}, ${c.position}${c.enabled ? "" : ", disabled"})`,
   );
   return [
     `Window: ${windowTitle}`,

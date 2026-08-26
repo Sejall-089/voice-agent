@@ -100,6 +100,19 @@ function To-B64([string]$s) {
   return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($s))
 }
 
+# UIA's FindAll can fail transiently with "Unrecognized error" while a window is busy, closing,
+# or rebuilding its tree — observed live once on File Explorer, and NOT reproducible on the
+# immediate retry. One retry costs a few hundred milliseconds on a path that was about to fail
+# anyway, and turns the most likely case (a window mid-redraw) into a normal answer.
+function Find-Retrying($el, $cond) {
+  try {
+    return $el.FindAll($DESC, $cond)
+  } catch {
+    Start-Sleep -Milliseconds 250
+    return $el.FindAll($DESC, $cond)
+  }
+}
+
 function Get-Target([string]$raw) {
   $h = [IntPtr]::Zero
   if ($raw -eq "0") { $h = [VaUia]::GetForegroundWindow() } else { $h = [IntPtr][int64]$raw }
@@ -133,7 +146,7 @@ while ($true) {
   try {
     if ($cmd -eq "PROBE") {
       $el = Get-Target $arg
-      $n = $el.FindAll($DESC, $NARROW).Count
+      $n = (Find-Retrying $el $NARROW).Count
       $cls = ""
       try { $cls = $el.Current.ClassName } catch { }
       Write-Output ("PROBE {0} {1}" -f $n, (To-B64 $cls))
@@ -147,7 +160,7 @@ while ($true) {
       # exactly the ones core/screen/elements.ts drops anyway, so this is a pre-filter rather than
       # a second opinion, and isPointable still re-checks offscreen and enabled on what arrives.
       $rows = New-Object System.Collections.ArrayList
-      foreach ($e in $el.FindAll($DESC, $NARROW)) {
+      foreach ($e in (Find-Retrying $el $NARROW)) {
         try {
           $c = $e.Current
           [void]$rows.Add(@{
@@ -203,7 +216,19 @@ while ($true) {
       Write-Output ("ERR {0}" -f (To-B64 ("unknown command: " + $cmd)))
     }
   } catch {
-    Write-Output ("ERR {0}" -f (To-B64 $_.Exception.Message))
+    # CLASSIFIED, NOT ECHOED (M16.11). This used to emit the raw exception text, and live testing
+    # produced a genuinely useless one straight into the user's face:
+    #
+    #   Exception calling "FindAll" with "2" argument(s): "Unrecognized error."
+    #
+    # That is COM noise. It is not this project's "surface the engine's own words" rule — that
+    # rule exists where the engine's words HELP (Piper naming a missing voice file); "Unrecognized
+    # error" tells a person nothing and reads as a crash. So failures become codes here and the
+    # TypeScript side turns them into sentences.
+    $m = $_.Exception.Message
+    if ($m -match "no target window") { Write-Output "ERR no-target" }
+    elseif ($m -match "that window is gone") { Write-Output "ERR window-gone" }
+    else { Write-Output "ERR uia-failed" }
   }
 }
 `;
@@ -307,11 +332,32 @@ export class WindowsElements implements ElementSurface {
   // Every failure the HOST reports becomes an `unreadable` refusal, not a crash. From the user's
   // side "that window is gone" and "this build cannot read windows" want the same thing said:
   // the controls could not be read, click it yourself.
+  // Host failures become one of a small vocabulary of sentences. NOTHING THE HOST SAYS IS PASTED
+  // INTO THE UI (M16.11): a raw COM message reached a user once — `Exception calling "FindAll"
+  // with "2" argument(s): "Unrecognized error."` — which reads as a crash and tells them nothing
+  // they can act on. Every other refusal in this milestone is a designed sentence; this one was
+  // the exception and should not have been.
+  //
+  // Unrecognised codes fall through to the same honest sentence rather than being echoed, so a
+  // future host change cannot leak engine text by default.
   private hostError(line: string): ElementNotFoundError {
-    const detail = line.startsWith("ERR ") ? decode(line.slice(4)) : line;
+    const code = line.startsWith("ERR ") ? line.slice(4).trim() : "";
+
+    if (code === "no-target") {
+      return new ElementNotFoundError(
+        "unreadable",
+        "I couldn't tell which window you were looking at — click the one you mean and ask again.",
+      );
+    }
+    if (code === "window-gone") {
+      return new ElementNotFoundError(
+        "unreadable",
+        "That window closed while I was reading it — ask me again and I'll look at what's in front now.",
+      );
+    }
     return new ElementNotFoundError(
       "unreadable",
-      `I couldn't read that window's controls${detail ? `: ${detail}` : "."}`,
+      "I couldn't read that window's controls just then. Ask me again — it usually works on a second try.",
     );
   }
 
