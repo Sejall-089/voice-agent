@@ -27,9 +27,15 @@ export interface InstructionHotkeyShell {
   // window.focus() and this app becomes the foreground.
   //
   // This is the same problem DictationSession solved by capturing getForegroundWindow() before
-  // opening the microphone, and it has the same one-line answer: the moment the bar appears, the
-  // question "which window did they mean" is unanswerable. A no-op when pointing is off.
-  snapshotPointTarget(): void;
+  // opening the microphone. A no-op when pointing is off.
+  //
+  // RETURNS A PROMISE, AND THE CALLER MUST AWAIT IT (fixed at M16.11). It was `void` at M16.9,
+  // called fire-and-forget — and the read behind it is asynchronous, so it always resolved AFTER
+  // showInput() had already given focus to the command bar. Every single press recorded the bar
+  // as the target window. Not a race: `showInput()` runs synchronously in the same tick, so the
+  // read could never win. Implementations must bound their own wait; the bar must not hang
+  // waiting for a window handle.
+  snapshotPointTarget(): Promise<void>;
 }
 
 export interface VoiceLike {
@@ -96,14 +102,21 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
     //    and should not silently clear the answer to the question still on screen.
     shell.clearPointer();
 
-    // 5. Snapshot the target window BEFORE the bar takes focus (M16.9). Deliberately after the
-    //    guards above — a press that was ignored must not move the target — and deliberately
-    //    before showInput(), which is the call that makes this app the foreground window.
-    //    Fire-and-forget: it must not delay the bar appearing, and a failed snapshot degrades to
-    //    "whatever is in front", which is the same answer it would have had anyway.
-    shell.snapshotPointTarget();
-
     void (async () => {
+      // 5. Snapshot the target window BEFORE the bar takes focus (M16.9, fixed at M16.11).
+      //
+      //    AWAITED, and that is the whole fix. This was fire-and-forget, which meant the
+      //    foreground was read a tick (or, on the first press, ~918ms) after showInput() had
+      //    already focused the command bar — so the app recorded ITSELF as the target every
+      //    time. M16.11 found it by hand: asked about Notepad's File menu, it answered that it
+      //    could not read the controls in "Voice-Action Agent".
+      //
+      //    Deliberately after the guards above — a press that was ignored must not move the
+      //    target — and deliberately before showInput(), which is the call that steals focus.
+      //    The implementation bounds its own wait, so a slow or dead reader delays the bar by a
+      //    known small amount rather than hanging it.
+      await shell.snapshotPointTarget();
+
       const typed = shell.showInput(); // resolves on Enter/Escape with whatever was typed
       void voice?.begin(); // ...and it is already listening
 

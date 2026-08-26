@@ -26,7 +26,18 @@ export function createRunInstruction(
     // anything faster; it makes the time legible.
     shell.showThinking(true);
     try {
-      await planner.run(instruction); // captures context, plans, and shows the result
+      const outcome = await planner.run(instruction); // captures context, plans, shows the result
+      // ONE LINE OF GROUND TRUTH, added at M16.11.
+      //
+      // Until now the only place an outcome appeared was the command bar, in the renderer — and
+      // the bar's own accessibility tree exposes nothing but "Chrome Legacy Window", so there
+      // was no way to see what the app had decided except by watching the screen. That is how
+      // the M16.9 snapshot bug survived: it produced a perfectly reasonable refusal naming the
+      // wrong window, and nothing recorded which window it had actually read.
+      //
+      // Deliberately the OUTCOME and not the instruction: what was typed may be personal, and
+      // the action log already records that with the user's consent. This is what the app did.
+      console.log(`[main] ${outcome.status}: ${outcome.result ?? ""}`);
     } finally {
       // finally, not after: a thrown planner must not leave the bar claiming to think
       // forever. There is no path out of here that keeps the indicator up.

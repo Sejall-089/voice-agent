@@ -84,6 +84,22 @@ let inputInjector: WindowsInputInjector | null = null;
 let speechEngine: PiperSynthesizer | null = null;
 // And again for the pointing overlay (M15): a transparent always-on-top window that would
 // otherwise outlive the app exactly as the input host and the Piper process both once did.
+// How long the hotkey will wait for the foreground window to be read before giving up and
+// opening the bar anyway. The read is a ~15ms round trip on a warm reader; this is the ceiling
+// for a reader that is slow, restarting, or wedged, and it is deliberately short — a bar that
+// takes a quarter-second to appear is a worse bug than a pointing question that has to be asked
+// twice.
+const SNAPSHOT_TIMEOUT_MS = 250;
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("snapshot timed out")), ms),
+    ),
+  ]);
+}
+
 let screenSurface: WindowsScreen | null = null;
 let elementsSurface: WindowsElements | null = null;
 
@@ -230,17 +246,26 @@ app.whenReady().then(() => {
   if (screenSurfaceOrNull) shell.attachPointer(() => screenSurfaceOrNull.clearPointer());
   // M16.9. Before the bar steals focus, remember which window the user is looking at.
   if (elements) {
-    shell.attachTargetSnapshot(() => {
-      void elements
-        .snapshotForeground()
-        .then((handle) => {
-          pointTarget = handle;
-        })
-        .catch(() => {
-          // A failed snapshot degrades to "whatever is in front", which is what the answer would
-          // have been anyway. Never blocks the bar from opening.
-          pointTarget = null;
-        });
+    // PRE-WARMED AT STARTUP (M16.11). The reader spawns PowerShell and compiles a P/Invoke on
+    // first use — ~918ms measured. That cost used to land on the first hotkey press, where it
+    // was the difference between reading the user's window and reading our own bar. Paying it
+    // here, once, at launch, makes the snapshot below a ~15ms round trip.
+    void elements.probe().catch(() => {
+      // Nothing to do: a reader that cannot start will say so when a question is actually asked.
+    });
+
+    shell.attachTargetSnapshot(async () => {
+      // AWAITED by the hotkey, so it is bounded here rather than left to run late. The bar must
+      // appear promptly whatever the reader is doing; a snapshot that has not answered within
+      // SNAPSHOT_TIMEOUT_MS is abandoned and the target left null.
+      pointTarget = null;
+      try {
+        pointTarget = await withTimeout(elements.snapshotForeground(), SNAPSHOT_TIMEOUT_MS);
+      } catch {
+        // Degrades to "whatever is in front when the question is asked". Still wrong if the bar
+        // has focus by then — which is why WindowsElements refuses to return one of our own
+        // windows as the target at all.
+      }
     });
   }
   const tools = buildRegistry({

@@ -27,9 +27,26 @@ function harness(options: { confirmPending?: boolean; dictating?: boolean; typed
       return Promise.resolve(options.typed ?? "");
     },
     clearPointer: () => events.push("clearPointer"),
-    // M16.9. Recorded so the ORDER can be asserted: the snapshot has to happen before
-    // showInput(), because showInput() is what makes this app the foreground window.
-    snapshotPointTarget: () => events.push("snapshotTarget"),
+    // M16.9, CORRECTED AT M16.11. This fake used to be SYNCHRONOUS, and that is exactly why the
+    // test below passed while the shipped app was broken.
+    //
+    // The real implementation asks a PowerShell host for GetForegroundWindow(), which is
+    // asynchronous — and on the first press it also spawns that host (~918ms). Recording only
+    // that the CALL happened before showInput() proves nothing: what has to happen first is the
+    // READ. A synchronous fake cannot tell those apart, so it reported a green test on a code
+    // path that captured the command bar every single time.
+    //
+    // Now async, resolving on a later tick, and it records the resolution separately from the
+    // call. CLAUDE.md's rule about fakes drifting from the real thing, learned again.
+    snapshotPointTarget: () => {
+      events.push("snapshotTarget:called");
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          events.push("snapshotTarget:read");
+          resolve();
+        }, 0);
+      });
+    },
   };
   const voice = {
     begin: () => {
@@ -214,8 +231,13 @@ describe("the target snapshot", () => {
     onHotkey();
     await settle();
 
-    expect(events.indexOf("snapshotTarget")).toBeGreaterThanOrEqual(0);
-    expect(events.indexOf("snapshotTarget")).toBeLessThan(events.indexOf("showInput"));
+    // The CALL happening first is not the property that matters.
+    expect(events.indexOf("snapshotTarget:called")).toBeLessThan(events.indexOf("showInput"));
+    // THIS is the property. The foreground has to be READ before the bar takes focus; if the
+    // read lands afterwards it records the command bar, which is what shipped and what M16.11
+    // found by hand.
+    expect(events.indexOf("snapshotTarget:read")).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf("snapshotTarget:read")).toBeLessThan(events.indexOf("showInput"));
   });
 
   it("is NOT taken when the press was ignored for a pending confirm", async () => {
@@ -225,7 +247,7 @@ describe("the target snapshot", () => {
     onHotkey();
     await settle();
 
-    expect(events).not.toContain("snapshotTarget");
+    expect(events).not.toContain("snapshotTarget:called");
   });
 
   it("is NOT taken while dictation is running", async () => {
@@ -233,6 +255,6 @@ describe("the target snapshot", () => {
     onHotkey();
     await settle();
 
-    expect(events).not.toContain("snapshotTarget");
+    expect(events).not.toContain("snapshotTarget:called");
   });
 });

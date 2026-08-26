@@ -73,7 +73,11 @@ using System.Runtime.InteropServices;
 public static class VaUia {
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
     public static IntPtr PerMonitorV2 = new IntPtr(-4);
+    public const uint GW_HWNDNEXT = 2;
 }
 '@
 [void][VaUia]::SetProcessDpiAwarenessContext([VaUia]::PerMonitorV2)
@@ -168,7 +172,24 @@ while ($true) {
       Write-Output ("ENUM {0}" -f (To-B64 $json))
     }
     elseif ($cmd -eq "FG") {
-      Write-Output ("FG {0}" -f ([VaUia]::GetForegroundWindow()).ToInt64())
+      # ARG IS A COMMA-SEPARATED LIST OF THIS APP'S OWN WINDOW HANDLES, AND SKIPPING THEM IS
+      # DEFENCE IN DEPTH RATHER THAN THE PRIMARY FIX (M16.11).
+      #
+      # The primary fix is that the caller now AWAITS this before its bar takes focus. But the
+      # bug that made it necessary — the app recording ITSELF as the target window — was bad
+      # enough that it is worth being unable to express at all. If the foreground is one of ours,
+      # walk down the Z-order to the first visible, titled window that is not.
+      $own = @()
+      if ($arg -ne "0") { $own = $arg.Split(",") | ForEach-Object { [int64]$_ } }
+      $h = [VaUia]::GetForegroundWindow()
+      $guard = 0
+      while ($h -ne [IntPtr]::Zero -and $guard -lt 50) {
+        $isOurs = $own -contains $h.ToInt64()
+        if (-not $isOurs -and [VaUia]::IsWindowVisible($h) -and [VaUia]::GetWindowTextLength($h) -gt 0) { break }
+        $h = [VaUia]::GetWindow($h, [VaUia]::GW_HWNDNEXT)
+        $guard += 1
+      }
+      Write-Output ("FG {0}" -f $h.ToInt64())
     }
     elseif ($cmd -eq "CHECK") {
       # Cheap, and deliberately so: this runs immediately before the marker is drawn, so it must
@@ -225,7 +246,9 @@ export class WindowsElements implements ElementSurface {
   // handle is held until the next snapshot; `target` in the options is what M16.9's wiring reads
   // it back through.
   async snapshotForeground(): Promise<number | null> {
-    const line = await this.send("FG", PROBE_TIMEOUT_MS);
+    // Our own handles go with the request, so the host can refuse to name one of them.
+    const own = this.options.ownWindows().filter((h) => Number.isSafeInteger(h) && h !== 0);
+    const line = await this.send(`FG ${own.length > 0 ? own.join(",") : "0"}`, PROBE_TIMEOUT_MS);
     const parts = line.split(" ");
     if (parts[0] !== "FG") return null;
     const handle = Number(parts[1] ?? 0);
