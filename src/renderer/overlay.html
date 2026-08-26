@@ -8,8 +8,16 @@
 
       Deliberately a plain page with no React, no preload and no IPC. Everything it needs arrives
       in the URL hash, which means: no addition to the contextBridge surface, no new IPC channel,
-      and no way for a stale marker to survive a reload — each point() is a fresh navigation, so
-      the window cannot end up displaying a position from a previous question.
+      and no way for a stale marker to survive a reload.
+
+      THE POSITION ARRIVES IN THE QUERY STRING, NOT THE HASH, AND THAT IS NOT COSMETIC (M16.11).
+      It used to be the hash, and the script below runs ONCE at document load — but a hash-only
+      change is a same-document navigation, so Chromium never reloaded and the script never
+      re-ran. Every new question drew the PREVIOUS question's marker; only repeating a question
+      verbatim produced the right one, because an identical URL IS treated as a reload. A query
+      string makes each call a different document, and PointerOverlay adds a nonce so even an
+      identical question is a distinct URL. If this is ever moved back into the hash, this script
+      must handle `hashchange` or the same bug returns.
 
       It is also, structurally, incapable of interacting with anything. The window is created with
       setIgnoreMouseEvents(true, { forward: true }), so every click passes straight through to the
@@ -93,7 +101,7 @@
 
     <script>
       (function () {
-        var params = new URLSearchParams(location.hash.slice(1));
+        var params = new URLSearchParams(location.search);
         var x = Number(params.get("x"));
         var y = Number(params.get("y"));
         var w = Number(params.get("w"));
