@@ -1058,12 +1058,14 @@ on it — the bar owns the global Escape only while the bar itself is visible, a
 next move (clicking the thing) blurs and hides the bar, releasing the key. A hint that stops
 working the moment the user does what the marker is for is worse than no hint.
 
-**Open, not acted on:** the 10s dismiss timer does not shorten if the user switches away from the
-target window before it elapses, so a correct-when-drawn marker can sit over the wrong
-(now-foreground) app for up to that long. Raised during M16.11; the recommendation on record is
-to shorten the timer to ~5s rather than build focus-loss detection, which would need to poll
-`GetForegroundWindow` through the UIA host and risks dismissing a marker mid-use when a
-notification steals focus transiently. Not decided.
+**Decided (2026-08-27): the 10s dismiss timer stays as-is.** It does not shorten if the user
+switches away from the target window before it elapses, so a correct-when-drawn marker can sit
+over the wrong (now-foreground) app for up to that long. Raised during M16.11 along with a
+recommendation to shorten it to ~5s; on reflection, kept at 10s and no focus-loss detection was
+built. Focus-loss detection would need to poll `GetForegroundWindow` through the UIA host, adding
+a background loop to a milestone that has already produced four live bugs, and would risk
+dismissing a marker mid-use when a notification steals focus transiently — a worse failure than
+the one it would fix. This is a closed decision, not a deferred one.
 
 ---
 
@@ -1709,7 +1711,10 @@ have to rediscover.
 - **Every Chromium window pays a ~460ms settle delay**, whether or not its tree was ever going to
   move, because the trigger is the window class alone. Native windows pay nothing. Accepted as a
   correctness-over-latency trade; the sound optimisation (a per-window-handle memo of "already
-  seen settled") is named but not built.
+  seen settled") is named but not built. **Confirmed live at M16.11 (2026-08-27): the wait —
+  ~1.5–2s total on a real VS Code window, one 350ms settle plus the read — is noticeable but not
+  annoying.** `SETTLE_MS` in `core/screen/settle.ts` was left at its measured value on that
+  basis, a decision rather than an open question.
 
 - **`-Command -` may not reliably deliver stdin commands to a PowerShell host** (found M16.8,
   not acted on). M16's UIA host printed `READY` and answered nothing under that invocation, and
@@ -1779,8 +1784,10 @@ resisted forcing (the same populate-then-go-bare timing R1a measured).
 
 **Still not verified: multi-monitor**, for lack of a second display — see the limitation above.
 The overlay-dismiss timing question (should switching away from the target window cut the
-10-second auto-dismiss short, rather than letting a stale marker sit over the new foreground app
-for up to that long) was raised and left as a documented, undecided trade rather than acted on.
+10-second auto-dismiss short?) and the Chromium settle-delay's subjective feel were both raised
+during M16.11 and are now decided, not open — see §4e and the M16 known-limitations entry above:
+the timer stays at 10s, no focus-loss detection was built, and the settle delay is confirmed
+acceptable as measured.
 
 ### M15 — proven vs. live-only
 

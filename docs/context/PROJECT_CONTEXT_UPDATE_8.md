@@ -117,13 +117,22 @@ sibling paths (`unsettled`, `disabled`, `stale`, `ambiguous`) all fired live. Th
 resists forcing is the same populate-then-go-bare timing that is *why* the message is worded in
 the present tense rather than as a permanent claim about an app.
 
-**One design question raised and left undecided, deliberately.** The overlay auto-dismisses after
-10s regardless of whether the target window stays foreground — so a stale (but correct-when-drawn)
-marker can sit over whatever app the user switched to for up to that long. Considered against
-building focus-loss detection (rejected: no blur event exists for a non-focusable window, and
-polling `GetForegroundWindow` risks a marker vanishing mid-use when a notification steals focus
-transiently). Recommendation on record: shorten the timer to ~5s rather than build detection.
-Not acted on; needs a decision before `spec.md`/`README.md` numbers would need touching again.
+**Two design questions raised during live verification, both now decided (2026-08-27), neither
+acted on.**
+
+- **The overlay's 10s auto-dismiss stays as-is.** It does not shorten if the user switches away
+  from the target window before it elapses, so a stale (but correct-when-drawn) marker can sit
+  over whatever app the user switched to for up to that long. A recommendation to shorten it to
+  ~5s was on record after M16.11; on reflection, kept at 10s. Focus-loss detection (polling
+  `GetForegroundWindow` through the UIA host) was considered and rejected outright, not just left
+  undone — it would add a background loop to a milestone that already produced four live bugs,
+  and risks dismissing a marker mid-use when a notification steals focus transiently, which is a
+  worse failure than the one it would fix.
+- **The Chromium settle delay stays as measured.** Checklist item 4's subjective judgement —
+  whether the ~1.5–2s wait on a real VS Code window (one 350ms settle plus the read) feels
+  acceptable — is confirmed yes. `SETTLE_MS` in `core/screen/settle.ts` was not revisited.
+
+Both are recorded in `spec.md` §4e and the M16 known-limitations list.
 
 ## Two standing lessons (now in `CLAUDE.md`)
 
@@ -136,9 +145,8 @@ Not acted on; needs a decision before `spec.md`/`README.md` numbers would need t
 
 ## Carry forward into next chat
 
-- M16 is closed. The next milestone is whatever comes after it — nothing here blocks starting it.
-- If the overlay-dismiss question above is ever revisited, the recommendation on record is ~5s
-  with focus-loss detection left unbuilt, not the reverse.
+- M16 is closed, including both design questions above. The next milestone is whatever comes
+  after it — nothing here blocks starting it.
 - The multi-monitor gap (native→DIP arithmetic unit-tested including the specific wrong answer a
   bad formula would produce, never run against real hardware) and the `unreadable` live-wording
   gap are both named honestly in `spec.md`'s M16 sections — check there before re-deriving either.

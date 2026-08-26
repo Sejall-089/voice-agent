@@ -9,11 +9,13 @@ for *status*, not for reasoning or philosophy.
 live-tested (memory, voice in/out, Gmail, Notion, Calendar, dictation). M15
 (vision-guidance) was built and honestly tested to failure — see Update 7
 for why. M16 (UI Automation-based redesign) is **complete**: built, its
-predecessor's vision code deleted, and live-verified through the real app
-by a human at the keyboard, including two real bugs verification found and
-this session fixed. One honest gap (a refusal's live wording never
-provoked) and one undecided design question (overlay-dismiss timing) are
-held, not chased — both named in Update 8.
+predecessor's vision code deleted, live-verified through the real app by a
+human at the keyboard (including two real bugs verification found and that
+session fixed), and merged to `master`. One honest gap remains — a
+refusal's live wording was never provoked, held rather than chased. Two
+design questions raised during live verification (the overlay's dismiss
+timer, the Chromium settle delay) are both decided as of 2026-08-27, kept
+as measured — see Update 8.
 
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
