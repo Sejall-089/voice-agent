@@ -102,3 +102,51 @@ describe("the system prompt", () => {
     expect(CHOOSE_SYSTEM).toContain("never guess a date");
   });
 });
+
+// M17 changed a RULE in this prompt: "pick exactly one tool" became "pick one tool, unless the
+// instruction genuinely needs several, in which case call `plan`". Per CLAUDE.md, a rule change
+// means re-justifying the tests around it rather than re-running them — the clock test above
+// still passes, but it passes for reasons that have nothing to do with the new rule, so it
+// cannot tell a correct implementation from a broken one here.
+//
+// What these have to DISTINGUISH is the lopsidedness. A prompt that merely mentions `plan` would
+// satisfy "the model can chain now" and quietly make chaining the habit — a two-step plan where
+// one tool would do turns a 6-second answer into a 20-second one, and every extra step is
+// another gate the user has to sit through. So each test below asserts a piece of the framing
+// that a naive "you may use several tools" rewrite would fail.
+describe("the system prompt on chaining (M17)", () => {
+  it("restates one-tool as the DEFAULT, not merely as one of the options", () => {
+    expect(CHOOSE_SYSTEM).toMatch(/almost every instruction is one tool/i);
+    expect(CHOOSE_SYSTEM).toMatch(/one tool is what you should reach for/i);
+  });
+
+  it("puts the default BEFORE the capability, so the frame is set before `plan` is offered", () => {
+    // Ordering is the assertion, and it is the thing a rewrite is most likely to lose: a prompt
+    // that leads with "you can run several tools" and qualifies it afterwards reads as
+    // permission with a caveat, not as an exception to a rule.
+    const theDefault = CHOOSE_SYSTEM.indexOf("Almost every instruction is one tool");
+    const theCapability = CHOOSE_SYSTEM.indexOf("`plan`");
+
+    expect(theDefault).toBeGreaterThan(-1);
+    expect(theCapability).toBeGreaterThan(-1);
+    expect(theDefault).toBeLessThan(theCapability);
+  });
+
+  it("fences the capability rather than merely permitting it", () => {
+    expect(CHOOSE_SYSTEM).toMatch(/when — and only when/i);
+    expect(CHOOSE_SYSTEM).toMatch(/never put a single step in a plan/i);
+  });
+
+  it("states the prompt-chaining contract: no second consultation", () => {
+    // A model that expects a follow-up turn plans "then send it to whoever replied", and nothing
+    // downstream can rescue that. The arguments have to be writable now.
+    expect(CHOOSE_SYSTEM).toMatch(/not be consulted\s+again/i);
+    expect(CHOOSE_SYSTEM).toMatch(/cannot write down now/i);
+  });
+
+  it("never mentions the gates, so the model cannot plan around them", () => {
+    // The tiers and the confirm gate are the planner's business and fire per step on resolved
+    // arguments. A model told about them might start optimizing for fewer dialogs.
+    expect(CHOOSE_SYSTEM).not.toMatch(/confirm|dangerous|risk tier/i);
+  });
+});

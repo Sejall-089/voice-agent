@@ -8,6 +8,7 @@ import type {
   ToolSchema,
 } from "../types.ts";
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
+import { PLAN_TOOL, PLAN_TOOL_NAME, PLAN_UNREADABLE, parsePlan } from "./plan.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
@@ -15,6 +16,17 @@ const PLANNER_MODEL = "gpt-5";
 
 // Reasoning tokens come out of the same allowance as the tool call itself (§3a).
 const CHOOSE_MAX_TOKENS = 4096;
+
+// A JSON string that may not be JSON. Returns null rather than throwing, so the caller can
+// report a malformed plan as one — `parsePlan(null)` is already null, so the two failures
+// converge on one message without a second branch.
+function safeParse(text: string): unknown {
+  try {
+    return JSON.parse(text || "{}");
+  } catch {
+    return null;
+  }
+}
 
 // Real LLM client. The planner and handlers only see the LLMClient interface, so tests
 // swap in a fake with no network/API key.
@@ -56,7 +68,9 @@ export class OpenAILLMClient implements LLMClient {
         { role: "system", content: CHOOSE_SYSTEM },
         { role: "user", content: renderRequest(instruction, context, previousTurn) },
       ],
-      tools: tools.map((t) => ({
+      // The registry's tools, plus the `plan` meta-tool (M17) — see the note in anthropic.ts
+      // for why it is appended here and never added to the registry.
+      tools: [...tools, PLAN_TOOL].map((t) => ({
         type: "function",
         // Adapt the vendor-neutral JSONSchema to the SDK's function schema at this boundary.
         function: {
@@ -72,6 +86,20 @@ export class OpenAILLMClient implements LLMClient {
     const message = choice?.message;
     const call = message?.tool_calls?.[0];
     if (call && call.type === "function") {
+      // Arguments arrive as a JSON STRING here, unlike Anthropic's already-parsed object — so
+      // this provider has one failure the other does not: a truncated or malformed string.
+      //
+      // Only the PLAN path swallows it. On the single-tool path `JSON.parse` throwing is the
+      // behaviour every milestone since M2 has shipped, and quietly turning it into empty
+      // arguments would convert a loud failure into a "missing required information" refusal
+      // that names the wrong problem. A malformed plan, by contrast, has a sentence written for
+      // exactly this — from where the user sits, "couldn't read the plan" is what happened.
+      if (call.function.name === PLAN_TOOL_NAME) {
+        const steps = parsePlan(safeParse(call.function.arguments));
+        return steps === null
+          ? { kind: "none", text: PLAN_UNREADABLE }
+          : { kind: "plan", steps };
+      }
       return { kind: "tool", name: call.function.name, input: JSON.parse(call.function.arguments || "{}") as ToolInput };
     }
 

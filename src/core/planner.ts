@@ -12,17 +12,29 @@ import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
 import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts";
+import {
+  previewPlan,
+  resolveStepArgs,
+  spokenPlan,
+  stoppedMessage,
+  validatePlan,
+} from "./chain.ts";
+import { InMemoryChainState } from "./chainState.ts";
+import type { ChainState } from "./chainState.ts";
 import type { DraftStore } from "./draft.ts";
 import type { SpokenText } from "./speech.ts";
 import type { SpeechStore } from "./speechStore.ts";
 import type {
   ActionLog,
+  ActionStatus,
   CalendarSurface,
+  CapturedContext,
   GmailSurface,
   LLMClient,
   Memory,
   MessageSender,
   NotionSurface,
+  PlannedStep,
   PlannerOutcome,
   ScreenSurface,
   ElementSurface,
@@ -40,6 +52,25 @@ const REFUSAL = "I can't do that yet — I don't have a tool for that.";
 const TRUNCATED =
   "I couldn't work out what to do — the model ran out of room before it answered. " +
   "Try a shorter, more direct instruction.";
+// What a cancelled step contributes as a stop reason. The `cancelled` outcome carries no
+// message of its own (there is nothing to explain — the user just said no), but a chain still
+// has to account for the steps that consequently did not run.
+const DECLINED = "You didn't approve that, so I stopped there.";
+
+// Where one call sits, and therefore how it reports itself (M17). A single instruction and a
+// step inside a chain run the SAME code; this is the whole of the difference between them.
+interface StepPosition {
+  // Prefixed to the narration and the confirm summary. Empty outside a chain.
+  label: string;
+  // Say the result out loud? False for a chain's intermediate steps — see `runStep`.
+  speak: boolean;
+  // Show and speak a FAILURE here? False inside a chain, where `runChain` composes one message
+  // about the whole plan instead of letting the tool's refusal and the accounting arrive as two.
+  report: boolean;
+}
+
+// The shape every milestone before M17 had, and the shape a lone instruction still has.
+const SINGLE: StepPosition = { label: "", speak: true, report: true };
 
 // The planner loop (spec.md §5). It is generic: it never names a specific tool. The LLM
 // PROPOSES a tool; the planner DISPOSES — registry check, resolve, validate, confirm gate,
@@ -81,6 +112,11 @@ export class Planner {
     // M16. The settle loop's delay, injected so it is a dependency rather than a wall-clock
     // fact. Tests pass one that resolves immediately.
     private readonly sleep: (ms: number) => Promise<void> = defaultSleep,
+    // M17. Whether a chain is running, and where it has got to. Injected rather than owned
+    // outright because the HOTKEY HANDLERS read it — main.ts hands the same instance to the
+    // planner and to both guards, which is the only way a handler outside this class can know
+    // that a `run()` is partway through a sequence. See core/chainState.ts.
+    private readonly chain: ChainState = new InMemoryChainState(),
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -107,18 +143,43 @@ export class Planner {
     if (choice.kind === "none") {
       return await this.refuse(instruction, choice.text);
     }
+    // 3a. A chained plan (M17). Its own branch, and everything below step 3 is shared with it:
+    //     `runChain` calls the SAME `runStep` this path does, once per step, so a step inside a
+    //     chain goes through memory resolution, validation, tier resolution and both gates in
+    //     exactly the order a lone instruction does. There is deliberately no second
+    //     implementation of the gate for chains to drift away from.
+    if (choice.kind === "plan") {
+      return await this.runChain(instruction, choice.steps, context);
+    }
     const tool = this.registry.find((t) => t.name === choice.name);
     if (!tool) {
       return await this.refuse(instruction);
     }
 
+    return await this.runStep(instruction, tool, choice.input, context, SINGLE);
+  }
+
+  // ONE step: everything from memory resolution to the recorded outcome. Extracted at M17 so a
+  // chain runs the identical code a single instruction does — see `runChain`.
+  //
+  // `step` says where this call sits. `SINGLE` is the shape every milestone before M17 had, and
+  // it must stay behaviourally identical: no prefix, the result is spoken, and a failure is
+  // shown and said here. Inside a chain the reporting moves out to `runChain`, which has to
+  // compose one message about the whole plan rather than emitting two about the same event.
+  private async runStep(
+    instruction: string,
+    tool: Tool,
+    proposed: ToolInput,
+    context: CapturedContext,
+    step: StepPosition,
+  ): Promise<PlannerOutcome> {
     // 4. Resolve vague argument references via memory — unless the tool declares its args are
     //    literals to store rather than references to look up (memory-writing tools). Declarative,
     //    like the risk gates below: the planner reads a property, it never knows the tool.
     const args: ToolInput =
       tool.resolvesReferences === false
-        ? choice.input
-        : await this.memory.resolveArgs(choice.input);
+        ? proposed
+        : await this.memory.resolveArgs(proposed);
 
     // 5. Validate — required args present and concrete (generic; no tool-specific logic).
     const missing = missingRequired(tool, args);
@@ -128,6 +189,7 @@ export class Planner {
         tool.name,
         args,
         `Missing required information: ${missing.join(", ")}.`,
+        step.report,
       );
     }
 
@@ -191,10 +253,14 @@ export class Planner {
       try {
         narration = await tool.narrate(args, deps);
       } catch (error) {
-        return await this.failOrRefuse(instruction, tool.name, args, error);
+        return await this.failOrRefuse(instruction, tool.name, args, error, step.report);
       }
-      await this.shell.executeAction({ kind: "notify", payload: narration });
-      await this.say(toSpokenNarration(narration));
+      // Prefixed inside a chain ("Step 2 of 3: "). The status line is a single slot, so without
+      // it the plan preview is replaced by a narration with no indication of where in the plan
+      // it belongs — and a chain's whole premise is that the user can follow along.
+      const announced = `${step.label}${narration}`;
+      await this.shell.executeAction({ kind: "notify", payload: announced });
+      await this.say(toSpokenNarration(announced));
     }
 
     // 6b. Confirm gate — a call that resolved to `dangerous` must pass shell.confirm() first.
@@ -210,14 +276,19 @@ export class Planner {
           : `Run ${tool.name}?`;
       } catch (error) {
         // If we cannot even describe what would happen, we certainly do not do it.
-        return await this.failOrRefuse(instruction, tool.name, args, error);
+        return await this.failOrRefuse(instruction, tool.name, args, error, step.report);
       }
+      // Prefixed inside a chain, like the narration above and for a sharper reason: a confirm
+      // dialog that appears with no warning partway through a plan is the single most confusing
+      // moment this feature can produce. The prefix goes in FRONT, which keeps the decisive
+      // fact ("Send this reply to...") in the first paragraph that toSpokenConfirm speaks.
+      const asked = `${step.label}${summary}`;
       // Before the dialog, deliberately. Once showMessageBox is up it owns the user's
       // attention, and a question asked after the thing it is about has appeared is not a
       // question. Only the first paragraph is spoken — never the draft body (core/speech.ts).
-      await this.say(toSpokenConfirm(summary));
+      await this.say(toSpokenConfirm(asked));
 
-      const approved = await this.shell.confirm(summary);
+      const approved = await this.shell.confirm(asked);
       if (!approved) {
         this.log.logAction({
           ts: new Date().toISOString(),
@@ -250,11 +321,177 @@ export class Planner {
         status: "ok",
       });
       this.shell.showResult(result);
-      await this.say(spoken);
+      // SPOKEN ONLY WHEN IT IS THE ANSWER. Inside a chain the intermediate steps are shown but
+      // not said: mid-chain the app is working rather than answering, and `toSpokenResult`'s
+      // "want me to read the rest?" offer would be a lie when the hotkey that would answer it
+      // is deliberately blocked for the duration of the chain.
+      //
+      // `spoken` is still COMPUTED above for every step, and that is not waste — it preserves
+      // the invariant that a tool whose `speakResult` throws fails the step rather than leaving
+      // the screen and the voice disagreeing. Skipping `say` also leaves the SpeechStore alone,
+      // so an "and the rest?" after the chain refers to the chain's actual answer.
+      if (step.speak) await this.say(spoken);
       return { status: "ok", tool: tool.name, result };
     } catch (error) {
-      return await this.failOrRefuse(instruction, tool.name, args, error);
+      return await this.failOrRefuse(instruction, tool.name, args, error, step.report);
     }
+  }
+
+  // A chained plan (M17): one planning call, a fixed sequence, deterministic execution.
+  //
+  // The model is NOT consulted again from here. Everything below is code deciding what may run
+  // and what the user is told — which is the line between this milestone and the agent loop that
+  // comes after it.
+  private async runChain(
+    instruction: string,
+    steps: readonly PlannedStep[],
+    context: CapturedContext,
+  ): Promise<PlannerOutcome> {
+    // Everything structurally knowable is settled BEFORE the plan is narrated. Announcing a
+    // plan and then dying on step 2 because step 2 named a tool that does not exist would have
+    // told the user something untrue at the one moment they were counting on it.
+    const check = validatePlan(steps, toToolSchemas(this.registry));
+    if (!check.ok) {
+      return await this.refusePlan(instruction, steps.length, check.reason);
+    }
+
+    // A one-step "plan". The prompt tells the model not to do this twice over, but if it does,
+    // running it as an ordinary single call is better than narrating "One step:" at someone —
+    // and it cannot carry a placeholder, because validation refuses a step referring to itself.
+    const only = steps.length === 1 ? steps[0] : undefined;
+    if (only !== undefined) {
+      const tool = this.registry.find((t) => t.name === only.tool);
+      // Validation established this; the check is for the type system, not for the world.
+      if (tool === undefined) return await this.refuse(instruction);
+      return await this.runStep(instruction, tool, only.arguments, context, SINGLE);
+    }
+
+    // Set before the first await, so "a chain is running" and "the hotkey guards know" can
+    // never be observed in different states — WindowsShell.confirm()'s own rule for
+    // `confirmPending`, applied to the flag that has to hold for very much longer.
+    this.chain.begin(steps.length);
+    try {
+      // Decision 2: the whole plan, up front, for transparency. NOT approval — the gates still
+      // fire per step, on real arguments, when execution reaches them.
+      await this.shell.executeAction({ kind: "notify", payload: previewPlan(steps) });
+      await this.say(toSpokenNarration(spokenPlan(steps)));
+
+      // The results of the steps that have run, in order. A LOCAL, deliberately: nothing
+      // outside this loop has any business reading them, and a store would let one chain's
+      // output reach the next one (core/chainState.ts).
+      const results: string[] = [];
+
+      for (const [index, step] of steps.entries()) {
+        this.chain.step(index + 1);
+        const tool = this.registry.find((t) => t.name === step.tool);
+        if (tool === undefined) return await this.refuse(instruction);
+
+        // Substituted HERE — after the earlier steps have actually run, and before this step's
+        // own gate. The confirm dialog therefore describes the real argument, never a
+        // placeholder and never a guess at what an earlier step would produce.
+        const resolved = resolveStepArgs(step.arguments, results);
+        if (!resolved.ok) {
+          // No step ran, so nothing has logged this: record it before reporting it.
+          this.log.logAction({
+            ts: new Date().toISOString(),
+            instruction,
+            tool: step.tool,
+            arguments: step.arguments,
+            result: resolved.reason,
+            status: "refused",
+          });
+          return await this.stopChain(steps, index, resolved.reason, "refused", step.tool);
+        }
+
+        const position: StepPosition = {
+          label: `Step ${index + 1} of ${steps.length}: `,
+          speak: index === steps.length - 1,
+          report: false,
+        };
+        const outcome = await this.runStep(
+          instruction,
+          tool,
+          resolved.args,
+          context,
+          position,
+        );
+
+        // STOP ON REFUSAL, never partial silent continuation (decision 5). Anything that is not
+        // a clean success ends the chain where it stands — a tool's own refusal, a zero-match,
+        // a cancelled confirm, a thrown error. The step has already logged itself.
+        if (outcome.status !== "ok") {
+          const reason = outcome.result ?? DECLINED;
+          return await this.stopChain(steps, index, reason, outcome.status, tool.name);
+        }
+        results.push(outcome.result ?? "");
+      }
+
+      // The last step's result is already on screen and already spoken — it IS the answer, so
+      // there is nothing further to announce. What the outcome adds is the accounting, for the
+      // one line of ground truth in runInstruction.ts.
+      const last = steps[steps.length - 1];
+      return {
+        status: "ok",
+        tool: last?.tool ?? null,
+        result: results[results.length - 1] ?? null,
+        chain: { completed: steps.length, total: steps.length },
+      };
+    } finally {
+      // In the `finally`, not after: a chain that THREW must not leave the hotkeys blocked
+      // forever with nothing running. Same reasoning as confirm()'s own finally.
+      this.chain.end();
+    }
+  }
+
+  // The plan itself could not run — too many steps, a tool that isn't on the menu, a reference
+  // pointing forwards. Nothing has happened and nothing was announced.
+  //
+  // Logged as `refused` with no tool, and deliberately NOT through `logMiss`: spec §8 defines
+  // the miss list as a ranked backlog of tools worth building, and "that was four steps" is not
+  // a missing tool. Same status, same table, backlog uncorrupted — the precedent
+  // `refuseIncomplete` set for exactly this reason.
+  private async refusePlan(
+    instruction: string,
+    total: number,
+    reason: string,
+  ): Promise<PlannerOutcome> {
+    this.log.logAction({
+      ts: new Date().toISOString(),
+      instruction,
+      tool: null,
+      arguments: null,
+      result: reason,
+      status: "refused",
+    });
+    this.shell.showResult(reason);
+    await this.say(toSpokenResult(reason));
+    return {
+      status: "refused",
+      tool: null,
+      result: reason,
+      chain: { completed: 0, total },
+    };
+  }
+
+  // A chain that stopped partway. ONE message, composed here rather than left to the step —
+  // which is why a step inside a chain runs with `report: false`. The tool's own words lead;
+  // the accounting of what did and didn't run follows in the same paragraph (core/chain.ts).
+  private async stopChain(
+    steps: readonly PlannedStep[],
+    stoppedAt: number,
+    reason: string,
+    status: ActionStatus,
+    tool: string,
+  ): Promise<PlannerOutcome> {
+    const message = stoppedMessage(steps, stoppedAt, reason);
+    this.shell.showResult(message);
+    await this.say(toSpokenResult(message));
+    return {
+      status,
+      tool,
+      result: message,
+      chain: { completed: stoppedAt, total: steps.length },
+    };
   }
 
   // Say it, and remember anything held back so "read them out" has an answer (M14).
@@ -283,17 +520,23 @@ export class Planner {
   // can now fail. A calendar that isn't connected fails at NARRATION, before a handler is ever
   // reached, and telling someone "something went wrong" when the answer is "paste a token into
   // .env" would send them debugging the wrong thing.
+  //
+  // `report` is M17's one addition: false inside a chain, where the failure is not the whole
+  // story and `runChain` composes a single message that leads with this same text. The
+  // classification and the LOG ROW are unchanged either way — what a chain suppresses is the
+  // duplicate announcement, never the record.
   private async failOrRefuse(
     instruction: string,
     tool: string,
     args: ToolInput,
     error: unknown,
+    report = true,
   ): Promise<PlannerOutcome> {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof UserFixableError) {
-      return await this.refuseUserFixable(instruction, tool, args, message);
+      return await this.refuseUserFixable(instruction, tool, args, message, report);
     }
-    return await this.fail(instruction, tool, args, message);
+    return await this.fail(instruction, tool, args, message, report);
   }
 
   private async refuse(
@@ -341,6 +584,7 @@ export class Planner {
     tool: string,
     args: ToolInput,
     message: string,
+    report = true,
   ): Promise<PlannerOutcome> {
     this.log.logAction({
       ts: new Date().toISOString(),
@@ -350,8 +594,10 @@ export class Planner {
       result: message,
       status: "refused",
     });
-    this.shell.showResult(message); // verbatim — the tool already phrased it for a human
-    await this.say(toSpokenResult(message));
+    if (report) {
+      this.shell.showResult(message); // verbatim — the tool already phrased it for a human
+      await this.say(toSpokenResult(message));
+    }
     return { status: "refused", tool, result: message };
   }
 
@@ -360,6 +606,7 @@ export class Planner {
     tool: string,
     args: ToolInput,
     message: string,
+    report = true,
   ): Promise<PlannerOutcome> {
     this.log.logAction({
       ts: new Date().toISOString(),
@@ -370,9 +617,13 @@ export class Planner {
       status: "error",
     });
     const shown = `Something went wrong: ${message}`;
-    this.shell.showResult(shown);
-    await this.say(toSpokenResult(shown));
-    return { status: "error", tool, result: message };
+    if (report) {
+      this.shell.showResult(shown);
+      await this.say(toSpokenResult(shown));
+    }
+    // The CHAIN gets the wrapped sentence too, not the bare message: `stoppedMessage` leads with
+    // whatever it is handed, and "Something went wrong: ..." is what a person needs to see.
+    return { status: "error", tool, result: report ? message : shown };
   }
 }
 

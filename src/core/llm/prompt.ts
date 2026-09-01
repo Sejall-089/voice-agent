@@ -6,10 +6,41 @@ import type { ActionLogEntry, CapturedContext } from "../types.ts";
 
 // System prompt for the tool-choice call. The registry's descriptions/schemas do the
 // real routing work; this just frames the job.
+//
+// --- Chained plans in the prompt (added in M17) ---
+//
+// Through M16 this prompt said "pick exactly one tool", and that was the literal truth about the
+// planner: one instruction, one tool call, one gate. M17 makes a sequence possible, so the
+// sentence had to change — and changing it is the whole risk of the milestone at this layer.
+// "You may use several tools" invites several tools, and a model that chains two safe reads
+// where one would do has turned a 6-second answer into a 20-second one for nothing.
+//
+// So the framing is deliberately lopsided. The default is restated as a default ("almost every
+// instruction is one tool, and one tool is what you should reach for") BEFORE the new capability
+// is mentioned at all, and the capability is fenced with "when — and only when". The `plan`
+// tool's own description (core/llm/plan.ts) says the same thing a second time from the other
+// side, because that is the text the model reads at the moment it is deciding.
+//
+// The second clause is the prompt-chaining contract itself, stated where the model can act on
+// it: it will not be consulted again. A model that expects a follow-up turn will happily plan
+// "then send it to whoever replied", and nothing downstream can rescue that — the arguments have
+// to be writable NOW or the step does not belong in the plan.
+//
+// What is deliberately NOT here: any mention of the risk tiers or the confirm gate. The gates
+// are the planner's, they fire per step on the resolved arguments, and a model that believed it
+// could reason about them might start planning around them.
 export const CHOOSE_SYSTEM = [
   "You are the planner for a desktop assistant.",
-  "Pick exactly one tool from the provided tools that best fulfills the user's instruction,",
+  "Pick the one tool from the provided tools that best fulfills the user's instruction,",
   "given the on-screen context. Never invent a tool that is not in the list.",
+  // M17. The sentence above used to read "exactly one tool", which stopped being true — but the
+  // DEFAULT it described is unchanged, and saying so plainly is what keeps a chain a deliberate
+  // answer rather than a habit. See "Chained plans" below for the full reasoning.
+  "Almost every instruction is one tool, and one tool is what you should reach for.",
+  "When — and only when — a single instruction genuinely needs several tools run in order,",
+  "call the `plan` tool instead and give it the steps. Never put a single step in a plan, and",
+  "never plan a step whose arguments you cannot write down now: you will not be consulted",
+  "again once you answer, and the steps run exactly as you wrote them.",
   "If no tool fits: when you have something genuinely useful to tell the user — a clarifying",
   "question needed before you could act, or a specific reason this particular request can't be",
   "done — reply with that, in one or two plain sentences. If the request simply does not match",

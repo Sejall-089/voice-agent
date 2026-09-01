@@ -12,6 +12,16 @@ export interface MockShellOptions {
   // When set, play() stays pending until the test calls finishPlayback() or stopPlayback() —
   // the only way to assert what happens DURING an utterance rather than around it.
   holdPlayback?: boolean;
+  // The same idea for the confirm dialog (M17), and it exists for the same reason the async
+  // `snapshotPointTarget` fake does (CLAUDE.md): a fake that resolves synchronously where the
+  // real thing blocks cannot test ordering, only call-sequence.
+  //
+  // The real `WindowsShell.confirm()` puts a modal dialog on screen and does not return until a
+  // person answers it — and the whole M14 §8 guard is about what must be true DURING that wait.
+  // With confirms answered instantly there is no "during" to assert on, so a chain test could
+  // only ever prove the guard was consulted, never that it held. When set, confirm() stays
+  // pending until the test calls answerConfirm().
+  holdConfirm?: boolean;
 }
 
 // Headless implementation of the OSShell contract (spec.md §4) and the VoiceShell contract
@@ -51,6 +61,12 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   private stopKeyCallback: (() => void | Promise<void>) | null = null;
   private readonly holdPlayback: boolean;
   private pendingPlay: (() => void) | null = null;
+  private readonly holdConfirm: boolean;
+  private pendingConfirm: ((approved: boolean) => void) | null = null;
+  // Mirrors WindowsShell's own `confirmPending`, set synchronously before confirm() awaits
+  // anything. It is what the M17 chain tests read to prove the hotkey guard's precondition is
+  // actually true while a chain is parked at a dialog.
+  private confirmPending = false;
 
   constructor(options: MockShellOptions) {
     this.context = options.context;
@@ -59,6 +75,7 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     this.clips = [...(options.clips ?? [])];
     this.failRecording = options.failRecording;
     this.holdPlayback = options.holdPlayback ?? false;
+    this.holdConfirm = options.holdConfirm ?? false;
   }
 
   registerHotkey(): boolean {
@@ -86,7 +103,33 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
 
   confirm(message: string): Promise<boolean> {
     this.confirmMessages.push(message);
-    return Promise.resolve(this.confirms.shift() ?? false);
+    // Set BEFORE anything awaits, and cleared on every path out — the same discipline
+    // WindowsShell.confirm() follows, because "the dialog is up" and "the guard knows" must
+    // never be observable in different states.
+    this.confirmPending = true;
+    if (!this.holdConfirm) {
+      this.confirmPending = false;
+      return Promise.resolve(this.confirms.shift() ?? false);
+    }
+    return new Promise<boolean>((resolve) => {
+      this.pendingConfirm = resolve;
+    });
+  }
+
+  // Is a confirm dialog on screen awaiting an answer? The property the M14 §8 hotkey guard
+  // reads in the real app (WindowsShell.isConfirmPending), so a test can assert the same thing
+  // the running app would.
+  isConfirmPending(): boolean {
+    return this.confirmPending;
+  }
+
+  // Test helper: answer a held dialog, as a person at the keyboard would. Falls back to the
+  // queued answers so a test can use `confirms` and `holdConfirm` together.
+  answerConfirm(approved?: boolean): void {
+    const pending = this.pendingConfirm;
+    this.pendingConfirm = null;
+    this.confirmPending = false;
+    pending?.(approved ?? this.confirms.shift() ?? false);
   }
 
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }> {

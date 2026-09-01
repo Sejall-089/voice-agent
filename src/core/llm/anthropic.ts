@@ -8,6 +8,7 @@ import type {
   ToolSchema,
 } from "../types.ts";
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
+import { PLAN_TOOL, PLAN_TOOL_NAME, PLAN_UNREADABLE, parsePlan } from "./plan.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
@@ -49,7 +50,10 @@ export class AnthropicLLMClient implements LLMClient {
       model: PLANNER_MODEL,
       max_tokens: CHOOSE_MAX_TOKENS,
       system: CHOOSE_SYSTEM,
-      tools: tools.map((t) => ({
+      // The registry's tools, plus the `plan` meta-tool (M17). Appended HERE rather than in the
+      // registry because it has no handler and no risk tier — keeping it out of `registry` is
+      // what stops `plan` ever resolving as a step inside a plan.
+      tools: [...tools, PLAN_TOOL].map((t) => ({
         name: t.name,
         description: t.description,
         // Adapt the vendor-neutral JSONSchema to the SDK's InputSchema at this boundary.
@@ -60,9 +64,18 @@ export class AnthropicLLMClient implements LLMClient {
     });
 
     for (const block of response.content) {
-      if (block.type === "tool_use") {
-        return { kind: "tool", name: block.name, input: (block.input ?? {}) as ToolInput };
+      if (block.type !== "tool_use") continue;
+      // A chained plan (M17). Parsed rather than trusted: `parsePlan` answers "is this even a
+      // plan", and a garbled one becomes its own sentence instead of a wrong-looking refusal.
+      // Whether the plan is RUNNABLE — tools that exist, the step cap, backward references —
+      // is core/chain.ts's question, asked by the planner where it can refuse out loud.
+      if (block.name === PLAN_TOOL_NAME) {
+        const steps = parsePlan(block.input);
+        return steps === null
+          ? { kind: "none", text: PLAN_UNREADABLE }
+          : { kind: "plan", steps };
       }
+      return { kind: "tool", name: block.name, input: (block.input ?? {}) as ToolInput };
     }
 
     // Truncated before it got to a tool_use block — a budget failure, not a decision.

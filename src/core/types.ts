@@ -38,8 +38,35 @@ export type ToolInput = Record<string, unknown>;
 
 // --- The LLM behind an interface (real: Anthropic; test: a fake) ---
 
+// One step of a chained plan (M17) — a tool the model has already committed to, in a fixed
+// position, with the arguments it proposed for that position.
+//
+// `arguments` is NOT the final input. A string argument may carry a `{stepN}` placeholder,
+// substituted with step N's real result by `core/chain.ts` at the moment execution reaches this
+// step — after the steps before it have actually run, and before this step's own gate fires.
+// That ordering is the whole safety property: the user is never asked to approve an argument
+// that was guessed, and the model is never consulted again once the plan is fixed.
+export interface PlannedStep {
+  tool: string;
+  arguments: ToolInput;
+  // A short phrase for the plan preview ("add it to your Notion page"). Model-authored TEXT,
+  // never a model-authored action — it is displayed and spoken, and nothing reads it back.
+  // Deliberately allowed to be vaguer than the eventual real action, because a later step's
+  // real argument is not known yet when the plan is narrated.
+  describe: string;
+}
+
 export type ToolChoice =
   | { kind: "tool"; name: string; input: ToolInput }
+  // Several tools, in a fixed order, from ONE planning call (M17). Not an agent loop: the model
+  // decides the whole sequence here and is never asked again, so the step count is known before
+  // anything runs and every step is gated by the same per-tool machinery a single call is.
+  //
+  // A separate variant rather than a one-element-or-many `tool`, because the single-step path is
+  // the overwhelmingly common one and must stay exactly what it was — a chain narrates itself
+  // up front and can stop half-finished, and neither of those should be reachable by an
+  // instruction that only ever meant one action.
+  | { kind: "plan"; steps: PlannedStep[] }
   | { kind: "none"; text: string | null }
   // The model never reached an answer — it hit its token ceiling first. Distinct from
   // "none" on purpose: "I decline" and "I ran out of room" are different facts, and
@@ -656,4 +683,12 @@ export interface PlannerOutcome {
   status: ActionStatus;
   tool: string | null;
   result: string | null;
+  // Present only for a chained run (M17), and the one fact about a chain that a caller outside
+  // the planner can act on: how much of it actually happened. `runInstruction.ts` puts it on the
+  // `[main]` ground-truth line, because "refused" alone cannot distinguish a plan that died on
+  // step 1 from one that died on step 3 — and live testing has to be able to tell those apart.
+  //
+  // `completed` counts steps that ran to `ok`, so a chain that stopped at step 2 of 3 reports
+  // `{ completed: 1, total: 3 }`.
+  chain?: { completed: number; total: number };
 }
