@@ -40,6 +40,12 @@ Since **M13** a tier can also depend on the *arguments* rather than only on whic
 guests touches nobody. When that classifier can't reach an answer it **escalates**: "we couldn't
 tell" resolves to *ask*, never to *go ahead*.
 
+Since **M17** one instruction can be a short *sequence* of those calls rather than one — and the
+rule is unchanged, which is the whole design. The model answers **once**, with a fixed plan of up
+to three tools it already has; deterministic code then runs them, and every step re-enters the
+same gate a lone instruction does. It is never asked "what now?" after seeing a result. See
+[Chained instructions](#chained-instructions-m17).
+
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for diagrams and [`spec.md`](spec.md) for the decisions.
 
 ---
@@ -233,6 +239,53 @@ It refuses rather than guessing, and says which kind of "no" it is:
 | **it's there, but disabled** | a genuinely different fact from "couldn't find it" — the control exists and is greyed out, so there's nothing to click yet. |
 | **you've switched away** | you changed windows while it was working, or the window moved. The marker is always-on-top, so drawing anyway would put it over the wrong app. |
 
+
+## Chained instructions (M17)
+
+"Reply to this and send it" used to be two hotkey presses. Now it's one.
+
+One instruction can resolve to a short, ordered sequence of tools **it already has** — up to
+three. It tells you the whole plan before it starts:
+
+```
+Two steps:
+1. Read tomorrow's schedule
+2. Add it to your Notion page
+```
+
+...and then runs them, announcing where it is as it goes ("Step 2 of 2: Adding a note to
+Roadmap…").
+
+**It is a workflow, not an agent.** The model is asked once, gets the whole plan out in that one
+answer, and is never consulted again. That means the number of steps is known before anything
+happens — there is no loop that decides for itself when to stop. A later step can use an earlier
+one's output by writing `{step1}` into a text argument, and code substitutes the real text in at
+the moment that step runs, *before* its confirm dialog — so what you're asked to approve is
+always the real thing, never a placeholder.
+
+**Every step keeps its own gate.** Chaining changes nothing about what an action costs: a
+`dangerous` step still stops for an explicit yes at position 3 of 3, and three `safe` steps don't
+become risky by being chained. And a plan is never approved wholesale — the preview is there so
+you know what's coming, not so you can pre-authorise it.
+
+**It stops rather than pushing through.** If any step can't run, nothing after it does, and it
+says so plainly rather than reporting a success it didn't have:
+
+> Your Notion page isn't open. I'd already done step 1 of 3, but steps 2 and 3 didn't run.
+
+Some plans are refused before anything runs at all — more than three steps, a tool this install
+doesn't have, or a step trying to use a result from a step that hasn't happened yet. Better to
+decline the plan than to announce one that was always going to die halfway.
+
+While a chain is running, both hotkeys are blocked — and *say* they're blocked, because a hotkey
+that silently does nothing is indistinguishable from a broken app. If a chain is parked at a
+confirm dialog, it tells you about the dialog, not about the chain: that's the one you can act on.
+
+**Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
+that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
+you later.
+
+---
 
 ## Running it
 
@@ -511,7 +564,28 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**Verified deterministically (675 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
+**Chaining — the machinery is proved, the model's judgement is not (M17).** Everything
+deterministic is tested: steps run in order; `{step1}` reaches step 2 carrying the earlier step's
+real text; a skipped-back `{step1}` from step 3 resolves to step 1 and *not* step 2; the
+substitution happens before the gate, so the confirm dialog is asserted to name the real argument;
+a fourth step, an unknown tool, and a forward reference are each refused with **nothing run and
+nothing announced**; a mid-chain refusal stops the chain and reports 1 of 3 done and 2 and 3 not
+run; intermediate results are shown but provably not spoken. A chain of the **real** registry
+(`readSchedule → addToPage`, against the fake calendar and fake Notion) is asserted to carry the
+actual formatted listing across the step boundary, so the suite isn't only testing purpose-built
+tools against itself.
+
+The pending-confirm guard has its own regression test at **step N of N** — the one place a
+mistake here would reproduce the M14 near-miss. It uses a confirm that genuinely *blocks*
+(`MockShell.holdConfirm`), because a fake that answers instantly can only prove the guard was
+consulted, never that it held while the dialog was up.
+
+**What that does not prove:** that a real model chains when it should and doesn't when it
+shouldn't. The prompt is deliberately lopsided against chaining, but "does gpt-5 wrap a
+single-tool request in a plan?" is a live question, and so is whether it writes `{stepN}` into
+sensible argument positions. Unverified until someone runs it.
+
+**Verified deterministically (778 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.
@@ -808,7 +882,10 @@ free from the DOM had to be manufactured for pixels instead — a set of rules a
 *certainly wrong* answer looks like, every one of which refuses rather than nudges.
 
 **Still not built:** auto-clicking anything the vision model identifies (deliberately — see
-above), scrolling to find something off-screen, multi-step agent loops,
+above), scrolling to find something off-screen, open-ended agent loops (M17 chains a *fixed*
+plan of up to three existing tools decided in one call — what's still missing is the model
+choosing its next move after seeing each result, plus branching and anything that outlives the
+instruction),
 more than one external connector, macOS/Linux, any email app but Gmail-in-Chrome, any page editor
 but Notion-in-Chrome (and only the Chrome tab, not the Notion desktop app), search/navigation
 within either app, and any dictation cleanup/rewrite pass (raw transcript only — see `spec.md`

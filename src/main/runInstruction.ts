@@ -37,7 +37,13 @@ export function createRunInstruction(
       //
       // Deliberately the OUTCOME and not the instruction: what was typed may be personal, and
       // the action log already records that with the user's consent. This is what the app did.
-      console.log(`[main] ${outcome.status}: ${outcome.result ?? ""}`);
+      //
+      // M17 adds how much of a CHAIN ran, because `refused` alone cannot tell a plan that died
+      // on step 1 from one that died on step 3 — and live testing has to be able to tell those
+      // apart. Absent entirely for a single-step run, which is what every line before this
+      // milestone was.
+      const chain = outcome.chain ? ` (chain ${outcome.chain.completed}/${outcome.chain.total})` : "";
+      console.log(`[main] ${outcome.status}${chain}: ${outcome.result ?? ""}`);
     } finally {
       // finally, not after: a thrown planner must not leave the bar claiming to think
       // forever. There is no path out of here that keeps the indicator up.

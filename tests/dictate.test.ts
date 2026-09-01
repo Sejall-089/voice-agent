@@ -125,3 +125,55 @@ describe("combineInstructionBusy (M12.1)", () => {
     expect(busy.getState()).toBe("idle");
   });
 });
+
+// M17. A chain acts inside Chrome for the length of three steps. Dictation would grab the
+// shared microphone and start typing into whatever holds focus while it does — which, mid-chain,
+// is very likely the reply box the chain is in the middle of writing. Same reasoning as the
+// confirm case, over a much longer window.
+describe("combineInstructionBusy while a chain is running (M17)", () => {
+  const idleShell = { isInputCapturing: () => false, isConfirmPending: () => false };
+
+  it("is busy while a chain runs, even with the bar closed and voice idle", () => {
+    const busy = combineInstructionBusy({ getState: () => "idle" }, idleShell, {
+      isRunning: () => true,
+    });
+
+    expect(busy.getState()).toBe("chaining");
+  });
+
+  it("blocks the dictation hotkey for the whole chain", () => {
+    const dictation = startable("idle");
+    let chaining = true;
+    const onHotkey = createOnDictateHotkey(
+      dictation,
+      combineInstructionBusy(null, idleShell, { isRunning: () => chaining }),
+    );
+
+    onHotkey();
+    expect(dictation.calls).toBe(0);
+
+    chaining = false;
+    onHotkey();
+    expect(dictation.calls).toBe(1);
+  });
+
+  it("still reports a waiting confirm ahead of the chain it is inside", () => {
+    // Both are true at once when a chained step is parked at its gate. "confirming" is the more
+    // specific fact and the one the instruction hotkey's own ordering agrees with.
+    const busy = combineInstructionBusy(
+      { getState: () => "idle" },
+      { isInputCapturing: () => false, isConfirmPending: () => true },
+      { isRunning: () => true },
+    );
+
+    expect(busy.getState()).toBe("confirming");
+  });
+
+  it("is unchanged when no chain state is supplied at all", () => {
+    // The parameter defaults to null, so every existing caller — and any install whose planner
+    // never chains — behaves exactly as it did before M17.
+    const busy = combineInstructionBusy({ getState: () => "idle" }, idleShell);
+
+    expect(busy.getState()).toBe("idle");
+  });
+});

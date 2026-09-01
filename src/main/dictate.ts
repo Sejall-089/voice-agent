@@ -56,18 +56,31 @@ export interface InputCapturing {
   isConfirmPending(): boolean;
 }
 
+// Just enough of core/chainState.ts's ChainState to guard on (M17), declared here the same way
+// `StateHolder` and `InputCapturing` are: what this file needs, not where it comes from.
+export interface ChainRunning {
+  isRunning(): boolean;
+}
+
 // Combines "is voice mid-capture" with "is the instruction bar open at all" into the single
 // StateHolder createOnDictateHotkey expects. Necessary now that Enter is a shared global
 // trigger (M12.1): the bar's own Enter-to-submit and dictation's Enter-to-finish must never
 // both be live at once, so the dictation hotkey has to stay blocked for the bar's ENTIRE open
 // lifetime, not just the portion where voice happens to still be recording.
+//
+// M17 adds the chain. A chain acts inside Chrome for the length of three steps, and dictation
+// would grab the shared microphone and start typing into whatever holds focus while it does —
+// which, mid-chain, is very likely the reply box the chain is in the middle of writing. Same
+// reasoning as the confirm case above, over a much longer window.
 export function combineInstructionBusy(
   voice: StateHolder | null,
   shell: InputCapturing,
+  chain: ChainRunning | null = null,
 ): StateHolder {
   return {
     getState: () => {
       if (shell.isConfirmPending()) return "confirming";
+      if (chain?.isRunning() === true) return "chaining";
       if (shell.isInputCapturing()) return "capturing";
       return voice ? voice.getState() : "idle";
     },

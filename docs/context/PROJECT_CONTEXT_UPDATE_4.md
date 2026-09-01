@@ -216,6 +216,15 @@ distinction matters and shouldn't get lost:
    current one-instruction-one-tool-one-confirm model, not a bolt-on, and needs its own safety
    design (a whole-plan approval upfront, vs. today's per-step confirm) before it's built.
 
+   > **BUILT AS M17 — and the safety design in the last sentence was NOT what got built.**
+   > The parenthetical proposed a whole-plan approval upfront *instead of* the per-step confirm.
+   > M17 kept the per-step confirm and made the upfront plan **transparency, not approval**:
+   > the plan is narrated before anything runs, and each step's gate still fires when execution
+   > reaches it, with that step's real resolved arguments. Approving a three-step plan in
+   > advance would mean approving a `sendReply` whose recipient and body nobody had seen yet —
+   > the exact thing `confirmSummary` exists to prevent. The scoping in this item otherwise
+   > held: 2-3 known steps, existing tools only, not an open-ended loop. See `spec.md` §5b.
+
 Also parked here for continuity: the streaming/"type-as-you-speak" dictation idea already has
 its own write-up above *(confirmed HeyClicky feature — their dictation streams at ~450ms)* —
 it's related to this list (it's the deferred, harder version of item 1's dictation work) but

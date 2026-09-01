@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  CHAIN_RUNNING,
   CONFIRM_WAITING,
   createOnInstructionHotkey,
 } from "../src/main/instructionHotkey.ts";
@@ -15,9 +16,18 @@ import {
 // below would have failed on the commit that shipped without the guard, which is the only
 // property of this file that actually matters.
 
-function harness(options: { confirmPending?: boolean; dictating?: boolean; typed?: string } = {}) {
+function harness(
+  options: {
+    confirmPending?: boolean;
+    dictating?: boolean;
+    typed?: string;
+    // M17. A chain partway through — the second long-lived state a press can land in.
+    chaining?: boolean;
+  } = {},
+) {
   const events: string[] = [];
   let confirmPending = options.confirmPending ?? false;
+  let chaining = options.chaining ?? false;
 
   const shell = {
     isConfirmPending: () => confirmPending,
@@ -66,13 +76,19 @@ function harness(options: { confirmPending?: boolean; dictating?: boolean; typed
     dictation,
     voice,
     speech,
+    chain: { isRunning: () => chaining },
     runInstruction: (instruction: string) => {
       events.push(`run:${instruction}`);
       return Promise.resolve();
     },
   });
 
-  return { onHotkey, events, release: () => (confirmPending = false) };
+  return {
+    onHotkey,
+    events,
+    release: () => (confirmPending = false),
+    finishChain: () => (chaining = false),
+  };
 }
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
@@ -256,5 +272,112 @@ describe("the target snapshot", () => {
     await settle();
 
     expect(events).not.toContain("snapshotTarget:called");
+  });
+});
+
+// M17. The second long-lived state a press can land in. A chain is on screen for three steps
+// rather than one, so reaching for the hotkey partway through is an ordinary thing to do — and
+// without a guard it starts a second concurrent planner run over a sequence that is still
+// acting inside Chrome. Exactly the M14 §8 failure, with a much wider window to hit.
+describe("the instruction hotkey while a chain is still running", () => {
+  it("starts no second planner run", async () => {
+    const { onHotkey, events } = harness({ chaining: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events.filter((e) => e.startsWith("run:"))).toEqual([]);
+  });
+
+  it("does not open the bar or the microphone", async () => {
+    const { onHotkey, events } = harness({ chaining: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).not.toContain("showInput");
+    expect(events).not.toContain("mic");
+  });
+
+  it("says so rather than doing nothing", async () => {
+    const { onHotkey, events } = harness({ chaining: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).toContain(`narrate:${CHAIN_RUNNING}`);
+    // Spoken through the same cleaner every other utterance goes through, so this line cannot
+    // be the one that sends an em dash to the engine — the written form has one.
+    const spoken = events.find((e) => e.startsWith("speak:")) ?? "";
+    expect(spoken).toContain("partway through");
+    expect(spoken).not.toContain("—");
+    expect(CHAIN_RUNNING).toContain("—");
+  });
+
+  it("does not move the pointing target or clear the marker", async () => {
+    // Same rule as the confirm guard: a press that was IGNORED changed nothing.
+    const { onHotkey, events } = harness({ chaining: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).not.toContain("clearPointer");
+    expect(events).not.toContain("snapshotTarget:called");
+  });
+
+  it("works normally again once the chain finishes", async () => {
+    const { onHotkey, events, finishChain } = harness({ chaining: true });
+
+    onHotkey();
+    await settle();
+    finishChain();
+    onHotkey();
+    await settle();
+
+    expect(events).toContain("run:what's in my calendar today?");
+  });
+});
+
+// THE REQUIRED REGRESSION TEST (M17 plan, "Verification"): the M14 §8 guard at step N of N.
+//
+// Inside a chain, a step parked at its confirm gate makes BOTH guards' conditions true at the
+// same moment — proven at the planner level in tests/planner.chain.test.ts, where the held
+// dialog has `isConfirmPending()` and `chain.isRunning()` both reporting true. What this file
+// has to pin is which of the two ANSWERS, because only one of them names something the user can
+// act on. A chain guard that ran first would tell someone to wait for a chain that is, in fact,
+// waiting for them — a dialog they would then never think to look for.
+describe("the instruction hotkey when a chain is parked at a confirm dialog", () => {
+  it("still starts nothing", async () => {
+    const { onHotkey, events } = harness({ chaining: true, confirmPending: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events.filter((e) => e.startsWith("run:"))).toEqual([]);
+    expect(events).not.toContain("showInput");
+    expect(events).not.toContain("mic");
+  });
+
+  it("points at the dialog, not at the chain", async () => {
+    // The ordering assertion. This is what distinguishes the two guards being in the right
+    // order from them merely both existing — swap them and only this test fails.
+    const { onHotkey, events } = harness({ chaining: true, confirmPending: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).toContain(`narrate:${CONFIRM_WAITING}`);
+    expect(events).not.toContain(`narrate:${CHAIN_RUNNING}`);
+  });
+
+  it("does not cut off the confirm question it is answering about", async () => {
+    // The confirm guard's own barge-in rule has to survive being reached from inside a chain:
+    // the dialog's question may still be being read out.
+    const { onHotkey, events } = harness({ chaining: true, confirmPending: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).not.toContain("stop");
   });
 });

@@ -31,6 +31,7 @@ import { ModelElementChooser } from "../core/screen/ModelElementChooser.ts";
 import { UnavailableElements } from "../core/screen/UnavailableElements.ts";
 import { UnavailableChooser } from "../core/screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
+import { InMemoryChainState } from "../core/chainState.ts";
 import type {
   CalendarSurface,
   GmailSurface,
@@ -279,6 +280,11 @@ app.whenReady().then(() => {
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
   const draft = new InMemoryDraftStore();
+  // M17. Whether a chain is running, and where it has got to. ONE instance, shared three ways:
+  // the planner sets it, and both hotkey guards read it. That sharing is the entire reason it
+  // is constructed out here rather than owned by the planner — a handler outside `run()` has no
+  // other way to know a sequence is partway through.
+  const chain = new InMemoryChainState();
   // SqliteMemory is both the resolver and the action log.
   const planner = new Planner(
     llm,
@@ -295,6 +301,8 @@ app.whenReady().then(() => {
     screenSurfaceOrNull ?? new UnavailableScreen(),
     elements ?? new UnavailableElements(),
     chooser ?? new UnavailableChooser(),
+    undefined, // sleep — the real clock; only tests need to skip the settle delays
+    chain,
   );
 
   // The speech queue, wired both ways: the session plays THROUGH the shell, and the shell
@@ -336,6 +344,9 @@ app.whenReady().then(() => {
     dictation,
     voice,
     speech,
+    // M17. The same instance the planner sets, so a press partway through a chain is blocked
+    // and told so rather than starting a second concurrent run over the top of it.
+    chain,
     runInstruction,
   });
   const hotkey = registerHotkey(shell, onHotkey);
@@ -348,7 +359,7 @@ app.whenReady().then(() => {
   // just while voice happens to still be recording — or the bar's own Enter-to-submit and
   // dictation's Enter-to-finish could both fire from one keypress.
   const onDictate = dictation
-    ? createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell))
+    ? createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell, chain))
     : null;
   const dictateHotkey = onDictate
     ? registerDictateHotkey(shell, () => {

@@ -18,6 +18,12 @@ engine is the differentiator; this app makes it usable and visible.
 → one action → one result (with a confirm step for irreversible actions). No
 multi-step autonomous loops, no voice, no GUI computer-use. Those are later versions.
 
+> Voice arrived at M7/M12/M14 and pointing at M15/M16. **M17 took the first, narrowest bite
+> out of "no multi-step": one instruction may now resolve to a fixed, ordered sequence of up
+> to three EXISTING tools, planned in a single call and executed by code (§5b). Every step
+> still passes its own gate. What is still out is the agent loop — the model deciding its next
+> move after seeing each result.**
+
 ### The core translation
 Fuzzy human sentence  →  exact function call.
 `"send these to the team"`  →  `sendMessage(channel: "#design-team", text: "...")`
@@ -111,7 +117,12 @@ Fuzzy human sentence  →  exact function call.
   model-emitted coordinate), which auto-click would reintroduce by construction.
 - macOS or Linux shells (architect for them via the interface, implement Windows only).
 - More than one external connector.
-- Multi-step / autonomous agent loops.
+- **Open-ended** agent loops. Narrowed at M17, not lifted: a FIXED plan of up to 3 existing
+  tools, decided in one planning call and executed by deterministic code, is now in scope (§5b).
+  What stays out is the shape where the model sees each result and decides its next move — no
+  predictable step count, its own stopping-condition and ground-truth machinery, and a live
+  model decision at execution time. M17 is a workflow; that is an agent, and it is a separate
+  milestone with its own safety design.
 - Any UI beyond the command bar, a result popup, and (M15) the pointing overlay — a
   transparent, click-through, always-on-top window that draws one highlight and dismisses
   itself. It is the deliverable of that milestone rather than an expansion of the app's
@@ -518,9 +529,10 @@ Given the user's instruction and captured context, run exactly this sequence:
    schemas from the registry (§6), plus one turn of state: the single most recently
    logged action (`ActionLog.getLast()`), scoped strictly to resolving a correction or
    pronoun in the CURRENT instruction ("no, I meant..."). This is not conversation
-   history — it's one bounded fact, and it's still exactly one tool call per
-   instruction; the planner never chains actions on its own. **The current local time**
-   goes in too (M13) — see "The clock in the prompt" below.
+   history — it's one bounded fact. **The current local time** goes in too (M13) — see
+   "The clock in the prompt" below. Through M16 this step produced exactly one tool call and
+   the planner never chained anything; M17 adds a second possible answer — a fixed plan of
+   several tools — without changing anything below it. See §5b.
 2. **LLM picks a tool** — call the configured provider (§3, `LLM_PROVIDER`) with
    tool-calling. Expect a `tool_call`:
    `{ name, input }`. The model may also decline (return only text).
@@ -551,6 +563,126 @@ Given the user's instruction and captured context, run exactly this sequence:
 Key rule: **the LLM proposes, the planner disposes.** Nothing `dangerous` runs
 without the registry check + validation + confirm gate. This separation is the most
 important design decision in the app.
+
+---
+
+## 5b. Chained plans (M17) — prompt chaining, not an agent loop
+
+One instruction may resolve to a short, ordered **sequence** of existing tools, run without a
+fresh hotkey press between them. "Reply to this and send it" was two instructions; it is one now.
+
+**The shape is a workflow, not an agent.** One planning call returns a fixed, ordered plan;
+deterministic code executes it. The model is **never consulted again** — it does not see step 1's
+result and decide what to do next. That other shape has no predictable step count, needs its own
+stopping-condition and ground-truth machinery, and reintroduces a live model decision at
+execution time, which is precisely what M16 closed. It is a separate milestone.
+
+### How the plan arrives — the `plan` meta-tool
+
+`core/llm/plan.ts` defines a `plan` tool that both providers are offered alongside the registry
+but which **is never in the registry**: no handler, no risk tier, so `registry.find()` cannot
+resolve it. A model that names `plan` as a *step* inside a plan is refused by the ordinary
+unknown-tool check, with no special case anywhere. Its input is `{ steps: [{ tool, arguments,
+describe }] }`, and it produces a fourth `ToolChoice` variant, `{ kind: "plan", steps }`.
+
+Chosen over letting a provider emit several `tool_use` blocks: parallel tool use is trained for
+*independent* work, so a dependent chain would under-trigger, and the dependency between steps
+would be implicit in block order rather than stated. The meta-tool is also identical across
+providers, and it leaves the single-step path **byte-identical** to every milestone before it.
+
+`parsePlan` answers shape only — "is this even a plan". Whether the plan is *runnable* is
+`core/chain.ts`'s question, so a garbled response and a plan we decline to run reach the user as
+different sentences.
+
+### Cross-step data — `{stepN}`, whole results only
+
+A **string** argument may contain `{stepN}`, replaced by step N's whole result text.
+
+Field-level references (`{step1.attendees}`) are deliberately **not** built: every `ToolHandler`
+returns `Promise<string>`, so there are no fields to reference, and giving 15 tools a declared
+output contract is its own milestone. It is also not what the expressible chains need —
+`draftReply → reviseDraft → sendReply` passes nothing at all (state flows through `DraftStore`
+and the live compose box), and `readSchedule → addToPage` needs exactly the whole listing.
+
+**N may name ANY earlier step, not only the immediately preceding one.** "Summarize this, add it
+to my Notion page, and send the summary to the team" needs step 1 from step 3, because step 2's
+result is the confirmation sentence `Added to <page>.` and not the content. The constraint is
+*backward*, not *adjacent*: N strictly less than the current step's index, which is what keeps
+resolution deterministic and statically checkable.
+
+Detection is lenient where the documented form is strict — `{ step 1 }` is caught and either
+substituted or refused by name, never passed through as literal characters into someone's inbox.
+Substitution is a single pass, so a result that happens to contain `{step2}` is data, not an
+instruction.
+
+### The gate, and what is checked when
+
+Everything structurally knowable is settled **before the plan is narrated**, because announcing a
+plan that was always going to die on step 2 tells the user something untrue at the one moment
+they are relying on it:
+
+| Refused up front (nothing runs, nothing announced) | Stops the chain mid-flight |
+|---|---|
+| more than **3** steps — a named refusal, never a silent truncation | a step's own refusal, zero-match or error |
+| a step naming a tool not on this install's menu (`plan` included) | a cancelled confirm |
+| `{stepN}` pointing forwards, at itself, or out of range | the referenced step produced nothing to pass on |
+| `{stepN}` in a top-level argument the tool declares non-text | |
+
+Three steps, because that is what the registry can express: the longest genuinely useful chain in
+it is `draftReply → reviseDraft → sendReply`.
+
+### Execution
+
+1. **Narrate the whole plan** — a numbered list via `notify`, one spoken sentence.
+   **Transparency, not approval**: this supersedes the earlier sketch in
+   `docs/context/PROJECT_CONTEXT_UPDATE_4.md`, which proposed a whole-plan approval *replacing*
+   today's per-step confirm. It does not replace it.
+2. **Per step**, in order: substitute `{stepN}` from the results so far, then run the identical
+   `runStep` a lone instruction runs — memory resolution, validation, tier resolution, narration
+   gate, confirm gate, handler, log row. **There is no second gate implementation for chains to
+   drift away from.** Chaining changes no step's tier: a `dangerous` tool is still `dangerous` at
+   position 2 of 2, and three `safe` steps do not become risky by being chained.
+3. **Stop on refusal.** Anything that is not a clean `ok` ends the chain where it stands. Nothing
+   after it runs. The user gets **one** message: the tool's own words first, then the accounting
+   — *"Your Notion page isn't open. I'd already done step 1 of 3, but steps 2 and 3 didn't run."*
+   In one paragraph deliberately, so `toSpokenResult` does not speak only the reason and offer to
+   read the accounting as "the rest".
+
+Narration and confirm text are prefixed `Step 2 of 3: `. The status line is a single slot, so
+without it the plan preview is replaced by a narration with no indication of where it belongs —
+and a confirm dialog appearing with no warning partway through a plan is the most confusing
+moment this feature can produce. The prefix goes in front, keeping the decisive fact in the first
+paragraph `toSpokenConfirm` speaks.
+
+**Intermediate results are shown but not spoken** — only gate speech and the final step's result
+are said aloud. Mid-chain the app is working rather than answering, and `toSpokenResult`'s "want
+me to read the rest?" offer would be a lie while the hotkey that would answer it is blocked.
+
+### State, and the hotkeys
+
+`core/chainState.ts` publishes **whether a chain is running and where** — deliberately *not* the
+step results, which stay in a local inside the run so one chain's output can never reach the next.
+The flag exists only because something outside `run()` reads it: `main.ts` hands one instance to
+the planner and to **both** hotkey guards.
+
+The instruction hotkey's guard order is **dictation → confirm pending → chain running →
+barge-in**, and the ordering is load-bearing. Inside a chain, a step parked at its gate makes the
+middle two both true, and only `CONFIRM_WAITING` names something the user can act on; swapped,
+the app would tell someone to wait for a chain that is in fact waiting for them.
+`combineInstructionBusy` gains a `"chaining"` state for the same reason on the dictation side —
+dictation would grab the shared microphone and type into whatever holds focus, which mid-chain is
+likely the reply box the chain is writing.
+
+`PlannerOutcome` gains `chain?: { completed, total }`, which `runInstruction.ts` appends to the
+`[main]` ground-truth line as `(chain 2/3)` — `refused` alone cannot distinguish a plan that died
+on step 1 from one that died on step 3.
+
+### Deliberately deferred
+
+No new tools; no conditional branching mid-chain ("if I'm free at 3, book X, otherwise Y" — a
+fixed plan is a straight line, not a decision tree); no persistent background execution (the whole
+chain runs inside one instruction; a task that survives closing the bar needs a task registry, a
+notification path and cancellation, and is a larger milestone).
 
 ### The clock in the prompt (added in M13)
 
@@ -585,6 +717,12 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
+
+> **`plan` is not in this table, and that is load-bearing (M17).** The `plan` meta-tool (§5b) is
+> offered to the provider alongside these, but it has no handler and no risk tier and it is not
+> in `registry.ts` — so `registry.find()` can never resolve it, and a model that names `plan` as
+> a *step* inside a plan is refused by the ordinary unknown-tool check with no special case
+> written anywhere. The closed world of this table is exactly what it was before M17.
 
 | Tool          | Task(s) it serves                    | Reads memory? | Irreversible | Handler does |
 |---------------|--------------------------------------|---------------|--------------|--------------|
@@ -1558,7 +1696,29 @@ Post-v0:
       question's answer — see "M16 — proven vs. live-only" below and
       `docs/context/PROJECT_CONTEXT_UPDATE_8.md` for the full account.
 
-**v0 status: complete.** **675 tests green** (`npm test`) across 45 files. Through M12.1 that
+- [x] **M17 — Narrow multi-step autonomy (prompt chaining).** The first bite out of §2's
+      "no multi-step" guardrail, and deliberately the narrowest one: one instruction can resolve
+      to a FIXED, ordered plan of up to 3 tools that already exist, decided in a single planning
+      call and executed by deterministic code (§5b). Adds `core/llm/plan.ts` (the `plan`
+      meta-tool — offered to both providers, never in the registry, so a nested plan is refused
+      by the ordinary unknown-tool check), `core/chain.ts` (the pure gate: the cap, the
+      closed-world check, `{stepN}` substitution, the plan preview, and the new
+      how-much-ran-and-how-much-did-not sentence), `core/chainState.ts` (running/where — never
+      the step results), a fourth `ToolChoice` variant, and `MockShell.holdConfirm`. Extracts
+      `runStep` from `Planner.run` so a chained step goes through the SAME gates a lone
+      instruction does — there is no second gate implementation to drift. Both hotkey guards
+      gain a chain state, ordered BEHIND the M14 §8 confirm guard.
+      **What it is not:** an agent loop. The model answers once and is never consulted again;
+      the step count is known before anything runs. Nothing branches, nothing survives the
+      instruction, and no step's risk tier changes by being chained. See §5b for the full
+      design and what was deliberately deferred (field-level `{step1.attendees}` references,
+      which no tool can currently emit, and which the expressible chains turn out not to need).
+
+**v0 status: complete.** **778 tests green** (`npm test`) across 49 files (M17 added 103 over
+M16's 675: 19 for the plan parser, 32 for the chain gate, 9 for the chain state, 26 for chained
+planner runs including the pending-confirm regression at step N of N, 5 re-justifying the system
+prompt after its one-tool rule changed, and 12 across the two hotkey guards). The count below is
+the pre-M17 history. Through M12.1 that
 was 242 — 63 for v0, 24 added by M7, 37 by M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by
 M12.1 (M12.2 added no new tests — all four fixes are covered by existing coverage, adjusted
 where a fix changed an assertion's shape; see §9's M12.2 for specifics). M13 and M14 added 259
@@ -1725,6 +1885,47 @@ have to rediscover.
 
 - **The taskbar, the desktop, and open popup menus are out of scope.** They are separate
   top-level windows, and enumeration is scoped to the foreground window.
+
+### M17 — proven vs. live-only
+
+**Proven deterministically (103 new tests, no API key and no network).** The plan parser against
+every malformed shape a model can return — a non-array `steps`, an empty plan, a step with no
+tool name, arguments that are an array, and one bad step among three good ones (which fails the
+*whole* plan rather than silently running a shorter one). The chain gate: the 3-step cap as a
+named refusal, the closed-world tool check *against the menu this install actually built* (a plan
+naming `readSchedule` on a machine with no calendar is refused, not attempted), forward/self/
+out-of-range references, and a placeholder in a non-text argument — each with nothing run and
+nothing announced. `{stepN}` substitution including the skip-back case, the single-pass rule (a
+result containing the characters `{step2}` is data, not an instruction), and the loose-form
+detection that stops `{ step 1 }` reaching an inbox as literal text.
+
+Through the planner: steps run in order, one log row per step, the plan is narrated before
+anything runs, the substitution happens *before* the gate (asserted on the confirm dialog's actual
+text), a `dangerous` step still confirms at position 2 of 2, three `safe` steps produce no dialog
+at all, a mid-chain `UserFixableError` stops the chain with the accounting, and a cancelled
+confirm reports 1 of 2 done. Both hotkey guards, including the ordering when a chained step is
+parked at its dialog and *both* conditions are true.
+
+**The regression test this milestone was required to carry** (M14 §8, at step N of N) uses
+`MockShell.holdConfirm`, so the dialog genuinely blocks: while it is up, `isConfirmPending()` and
+`chain.isRunning()` are both asserted true, the confirm text is asserted to be
+`Step 3 of 3: …`, and the step after it is asserted not to have run. A confirm fake that resolved
+instantly could only ever have proved the guard was *consulted*.
+
+**One test found one real bug during the build** — `previewPlan` was capitalising the tool-name
+fallback, rendering `readSchedule` as `ReadSchedule` on screen: an identifier that no longer
+matches anything in the registry, which is the kind of small lie that sends someone looking for a
+tool that does not exist.
+
+**Live-only, and genuinely unverified.** Whether a real model *chooses* to chain when it should
+and declines to when it shouldn't. The prompt is deliberately lopsided — the one-tool default is
+restated before `plan` is mentioned, and fenced with "when — and only when" — and the tests pin
+that framing, but framing is not behaviour. Also unverified: whether the model writes `{stepN}`
+into sensible argument positions, how the plan preview and the "Step 2 of 3:" prefix actually
+read on screen and sound out loud, and whether three chained steps feel like a coherent single
+action or like the app talking over itself. Per CLAUDE.md, the rendered thing needs eyes on it —
+the `[main] … (chain 2/3)` line proves what the app decided, not what the user saw. Every
+milestone since M10 has found at least one bug the fixtures could not; budget for it.
 
 ### M16 — proven vs. live-only
 

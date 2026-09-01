@@ -16,6 +16,19 @@ import { dictationIsBusy, type StateHolder } from "./dictate.ts";
 export const CONFIRM_WAITING =
   "There's a confirmation waiting — answer it on screen.";
 
+// And what a chain that is still running gets answered with (M17).
+//
+// Its own sentence, not a reuse of CONFIRM_WAITING, because the two are different situations
+// and only one of them has something on screen to act on: a waiting dialog is a question the
+// user can answer, a running chain is something to wait for. Telling someone to "answer it on
+// screen" when there is nothing to answer would send them looking for a dialog that isn't there.
+//
+// Same rule as every guard in this file: never silence. A press that does nothing at all is
+// indistinguishable from a broken app (spec §4a), and a chain runs for long enough that
+// reaching for the hotkey partway through is an ordinary thing to do rather than a mistake.
+export const CHAIN_RUNNING =
+  "I'm partway through the last instruction — give me a moment.";
+
 export interface InstructionHotkeyShell {
   isConfirmPending(): boolean;
   narrate(text: string): void;
@@ -48,16 +61,26 @@ export interface SpeakerLike {
   stop(): void;
 }
 
+// Just enough of core/chainState.ts's ChainState to guard on (M17). A narrow structural type
+// rather than the interface itself, matching how `StateHolder` and `VoiceLike` are declared
+// here: this file states what it needs, not where it comes from.
+export interface ChainLike {
+  isRunning(): boolean;
+}
+
 export interface InstructionHotkeyDeps {
   shell: InstructionHotkeyShell;
   dictation: StateHolder | null;
   voice: VoiceLike | null;
   speech: SpeakerLike | null;
+  // M17. Null on any install — it is only ever the planner's own chain state, and a planner
+  // that never chains simply never sets it.
+  chain: ChainLike | null;
   runInstruction: (instruction: string) => Promise<void>;
 }
 
 export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => void {
-  const { shell, dictation, voice, speech, runInstruction } = deps;
+  const { shell, dictation, voice, speech, chain, runInstruction } = deps;
 
   return (): void => {
     // 1. Dictation and the instruction bar share one microphone AND, while dictation is
@@ -91,19 +114,39 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
       return;
     }
 
-    // 3. Barge-in. Here as well as in startRecording() on purpose: this fires the instant the
+    // 3. A chain is partway through (M17).
+    //
+    //    DELIBERATELY AFTER THE CONFIRM CHECK, and the ordering is the load-bearing part. Inside
+    //    a chain, a step parked at its confirm gate makes BOTH conditions true at once — and of
+    //    the two messages, only CONFIRM_WAITING points at something the user can act on. Swap
+    //    these two and the app tells someone to wait for a chain that is, in fact, waiting for
+    //    them.
+    //
+    //    Without this guard the press would start a second concurrent planner run over the top
+    //    of a sequence that is still acting inside Chrome — the same failure M14 §8 found, with
+    //    a much wider window to hit, because a chain is on screen for three steps rather than
+    //    one. Blocking it (rather than queueing it) is the conservative reading: the plan the
+    //    user already approved of finishes, and they repeat themselves once.
+    if (chain?.isRunning() === true) {
+      console.log("[main] instruction hotkey ignored - a chain is still running");
+      shell.narrate(CHAIN_RUNNING);
+      speech?.speak(toSpokenLine(CHAIN_RUNNING));
+      return;
+    }
+
+    // 4. Barge-in. Here as well as in startRecording() on purpose: this fires the instant the
     //    key is pressed, while the microphone takes 160-680ms to warm up, so the app goes
     //    quiet when you reach for it rather than when the mic is ready.
     speech?.stop();
 
-    // 4. And the marker goes with it (M15). A pointing overlay answers a question asked at a
+    // 5. And the marker goes with it (M15). A pointing overlay answers a question asked at a
     //    moment; reaching for the hotkey is the clearest possible signal that the moment has
-    //    passed. Deliberately AFTER both guards above: a press that was ignored changed nothing,
-    //    and should not silently clear the answer to the question still on screen.
+    //    passed. Deliberately AFTER all three guards above: a press that was ignored changed
+    //    nothing, and should not silently clear the answer to the question still on screen.
     shell.clearPointer();
 
     void (async () => {
-      // 5. Snapshot the target window BEFORE the bar takes focus (M16.9, fixed at M16.11).
+      // 6. Snapshot the target window BEFORE the bar takes focus (M16.9, fixed at M16.11).
       //
       //    AWAITED, and that is the whole fix. This was fire-and-forget, which meant the
       //    foreground was read a tick (or, on the first press, ~918ms) after showInput() had

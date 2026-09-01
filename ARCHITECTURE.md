@@ -139,8 +139,12 @@ the skeleton never changes.
 
 ```mermaid
 flowchart TB
-    A["Instruction + context<br/>from the shell"] --> B["Build LLM request<br/>+ tool menu"]
-    B --> C["LLM picks a tool<br/>structured tool call"]
+    A["Instruction + context<br/>from the shell"] --> B["Build LLM request<br/>+ tool menu + plan"]
+    B --> C["LLM answers once:<br/>one tool, or a fixed plan"]
+    C -- "a plan (M17)" --> P{"Plan runnable?<br/>≤3 steps · known tools<br/>· backward refs only"}
+    P -- "no" --> R
+    P -- "yes" --> PN["Narrate the whole plan<br/>then, per step:<br/>substitute {stepN}"]
+    PN --> E
     C --> D{"Tool in registry?"}
     D -- "no / declined" --> R["Graceful refusal<br/>log the miss"]
     D -- "yes" --> E["Resolve arguments<br/>look up in memory"]
@@ -154,11 +158,24 @@ flowchart TB
     H -- "approved" --> I
     H -- "cancelled" --> X["Abort + log"]
     I --> J["Record in action log<br/>show result"]
+    J -- "more steps left (M17)" --> E
+    J -- "step refused (M17)" --> S["Stop the chain<br/>say how much ran"]
 ```
 
 **The one rule that matters:** the LLM *proposes*, the planner *disposes*. The
 registry check, the validation, and the risk gates are deterministic code — the
 model never gets to invent a capability or fire a dangerous action unchecked.
+
+**Chained plans (M17) do not weaken that.** One instruction may resolve to a fixed, ordered
+sequence of up to three *existing* tools — but the model answers **once** and is never consulted
+again, so the step count is known before anything runs, and every step re-enters the same
+`runStep` a lone instruction uses: same memory resolution, same validation, same tier resolution,
+same two gates. There is no second gate implementation for chains to drift away from. A
+`dangerous` tool is still `dangerous` at position 3 of 3, and three `safe` steps do not become
+risky by being chained. A step that cannot run stops the chain where it stands; nothing after it
+runs, and the app says how much of the plan did and did not happen. This is prompt chaining, not
+an agent loop — the model deciding its next move *after seeing each result* is a different,
+riskier shape and a separate milestone. See spec.md §5b.
 
 **The four tiers (M10, `core/risk.ts`).** A boolean `irreversible` was enough while every
 action was either an undoable local transform or one Slack POST. Acting inside another app's
@@ -595,5 +612,11 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
   picked the wrong candidate", which pointing sidesteps entirely by keeping a person as the
   executor — and M16 additionally removed the one way that decision *could* still be silently
   wrong (a model-emitted coordinate), which auto-click would reintroduce by construction.
-- Multi-step plans and a real agent loop (the closed→open world jump).
+- ~~Multi-step plans~~ **and** a real agent loop (the closed→open world jump). **The first half
+  landed in M17**, in its narrowest form: a FIXED plan of up to three existing tools, decided in
+  one planning call and run by deterministic code (spec.md §5b). The closed→open jump is still
+  ahead — what M17 deliberately did not build is the loop where the model sees each result and
+  chooses its next move, which has no predictable step count and needs its own
+  stopping-condition and ground-truth machinery. Also still ahead from here: conditional
+  branching mid-plan, and plans that survive the instruction that started them.
 - Point the memory engine at the Postgres/Neon personal OS instead of local SQLite.
