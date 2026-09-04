@@ -4,6 +4,13 @@ import {
   CONFIRM_WAITING,
   createOnInstructionHotkey,
 } from "../src/main/instructionHotkey.ts";
+import { Planner } from "../src/core/planner.ts";
+import { InMemoryActionLog } from "../src/core/actionLog.ts";
+import { InMemoryChainState } from "../src/core/chainState.ts";
+import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
+import { MockShell } from "../src/main/shell/MockShell.ts";
+import { FakeLLM } from "./FakeLLM.ts";
+import type { CapturedContext, Tool, ToolInput } from "../src/core/types.ts";
 
 // M14 §8. The guard that was designed, approved, and then never built.
 //
@@ -379,5 +386,129 @@ describe("the instruction hotkey when a chain is parked at a confirm dialog", ()
     await settle();
 
     expect(events).not.toContain("stop");
+  });
+});
+
+// THE GAP THE TWO SUITES ABOVE LEAVE BETWEEN THEM, CLOSED.
+//
+// tests/planner.chain.test.ts's "pending-confirm guard at the last step of a chain" proves the
+// STATE: a real Planner running a real chain against a real MockShell.holdConfirm genuinely
+// makes isConfirmPending() and chain.isRunning() both true while parked. Every describe block
+// above this one proves the GUARD: createOnInstructionHotkey does the right thing when handed
+// those two booleans. Neither, on its own, proves the real handler reads the real objects a
+// real parked chain actually leaves behind — the harness above sets `confirmPending` and
+// `chaining` by hand, which is exactly the kind of fake CLAUDE.md warns can drift from what
+// the thing it stands in for would really do.
+//
+// This wires all three together: a genuine Planner, a genuine held confirm dialog produced by
+// running a real chain, and the real createOnInstructionHotkey reading the same shell/chain
+// instances the planner is actually using.
+
+const NO_CONTEXT: CapturedContext = {
+  selectedText: null,
+  activeApp: null,
+  activeWindowTitle: null,
+};
+
+function planTool(tool: string, args: ToolInput = {}, describe = ""): { tool: string; arguments: ToolInput; describe: string } {
+  return { tool, arguments: args, describe };
+}
+
+const readThing: Tool = {
+  name: "readThing",
+  description: "Read a thing.",
+  inputSchema: { type: "object", properties: {}, required: [] },
+  risk: "safe",
+  handler: (): Promise<string> => Promise.resolve("THING ONE"),
+};
+
+const sendThing: Tool = {
+  name: "sendThing",
+  description: "Send a thing.",
+  inputSchema: {
+    type: "object",
+    properties: { text: { type: "string", description: "What to send." } },
+    required: ["text"],
+  },
+  risk: "dangerous",
+  confirmSummary: (): string => `Send it?`,
+  handler: (): Promise<string> => Promise.resolve("Sent it"),
+};
+
+// Only the two methods the confirm/chain guard actually reaches are real MockShell behaviour;
+// clearPointer/snapshotPointTarget are stubbed because a BLOCKED press never gets far enough to
+// call them — which is the very thing this test is proving. Stubbing them here is not lenience
+// on the property under test, only on two unrelated methods this code path cannot reach.
+function hotkeyShellFrom(shell: MockShell): {
+  isConfirmPending: () => boolean;
+  narrate: (text: string) => void;
+  showInput: () => Promise<string>;
+  clearPointer: () => void;
+  snapshotPointTarget: () => Promise<void>;
+} {
+  return {
+    isConfirmPending: () => shell.isConfirmPending(),
+    narrate: (text: string) => shell.narrate(text),
+    showInput: () => shell.showInput(),
+    clearPointer: () => {},
+    snapshotPointTarget: () => Promise.resolve(),
+  };
+}
+
+describe("the instruction hotkey wired to a genuinely running chain", () => {
+  it("blocks a press while a real chain is really parked at its confirm dialog", async () => {
+    const shell = new MockShell({ context: NO_CONTEXT, holdConfirm: true });
+    const chain = new InMemoryChainState();
+    const planner = new Planner(
+      new FakeLLM({
+        kind: "plan",
+        steps: [planTool("readThing", {}, "read it"), planTool("sendThing", { text: "hello" }, "send it")],
+      }),
+      shell,
+      [readThing, sendThing],
+      new NoopMemoryResolver(),
+      new InMemoryActionLog(),
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      chain,
+    );
+
+    const runInstructionCalls: string[] = [];
+    const onHotkey = createOnInstructionHotkey({
+      shell: hotkeyShellFrom(shell),
+      dictation: null,
+      voice: null,
+      speech: null,
+      chain,
+      runInstruction: (instruction: string) => {
+        runInstructionCalls.push(instruction);
+        return Promise.resolve();
+      },
+    });
+
+    const running = planner.run("read it and send hello");
+    await settle();
+
+    // The dialog and the chain are genuinely, not merely nominally, both live.
+    expect(shell.isConfirmPending()).toBe(true);
+    expect(chain.isRunning()).toBe(true);
+    expect(shell.confirmMessages).toEqual(["Step 2 of 2: Send it?"]);
+
+    onHotkey();
+    await settle();
+
+    // No second run, and the real dialog is what got named — not a fabricated "chaining" flag.
+    expect(runInstructionCalls).toEqual([]);
+    expect(shell.narrations).toContain(CONFIRM_WAITING);
+    expect(shell.narrations).not.toContain(CHAIN_RUNNING);
+    // The press changed nothing about the parked state — still one dialog, still one chain.
+    expect(shell.confirmMessages).toEqual(["Step 2 of 2: Send it?"]);
+    expect(chain.position()).toEqual({ step: 2, total: 2 });
+
+    shell.answerConfirm(true);
+    const outcome = await running;
+
+    expect(outcome.status).toBe("ok");
+    expect(chain.isRunning()).toBe(false);
   });
 });
