@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   MAX_STEPS,
+  MIN_PREVIEW_HOLD_MS,
+  previewHoldRemaining,
   previewPlan,
   resolveStepArgs,
   spokenPlan,
@@ -316,5 +318,38 @@ describe("the stopped-chain accounting", () => {
 
   it("adds a terminal stop to a reason that lacks one, so the two don't run together", () => {
     expect(stoppedMessage(plan, 1, "Nope")).toContain("Nope. I'd already done");
+  });
+});
+
+// M17 LIVE-TESTING FIX. Confirmed reproducible: on a 3-step chain where every step's own work
+// finishes fast (no real waiting), the plan-preview text was replaced by step 1's result in
+// well under a second — not enough time to read it. Speech was never affected (the audio plays
+// out at its own pace in the background regardless of how fast the planner races ahead); this
+// is screen-only, and this is the fix for it.
+describe("previewHoldRemaining", () => {
+  it("asks for the full hold when shown and now are the same instant", () => {
+    expect(previewHoldRemaining(1000, 1000)).toBe(MIN_PREVIEW_HOLD_MS);
+  });
+
+  it("asks for less once some real time has already passed", () => {
+    // A chain whose narration/gates genuinely took 400ms should only wait out the remainder,
+    // never punished with the full hold on top of work it already did.
+    expect(previewHoldRemaining(1000, 1400)).toBe(MIN_PREVIEW_HOLD_MS - 400);
+  });
+
+  it("asks for nothing once the hold has already elapsed", () => {
+    // A step 1 that involved a genuinely slow real API call, or a confirm dialog someone took a
+    // while to answer, must never be delayed FURTHER on top of that real wait.
+    expect(previewHoldRemaining(1000, 1000 + MIN_PREVIEW_HOLD_MS)).toBe(0);
+  });
+
+  it("never goes negative when more time has passed than the hold requires", () => {
+    expect(previewHoldRemaining(1000, 1000 + MIN_PREVIEW_HOLD_MS + 5000)).toBe(0);
+  });
+
+  it("treats an impossible negative gap the same as zero elapsed, rather than a longer wait", () => {
+    // Defensive: `now` should never be before `shownAt` in the real app (Date.now() is
+    // monotonic in practice here), but a clock oddity must not ask for MORE than the full hold.
+    expect(previewHoldRemaining(1000, 900)).toBe(MIN_PREVIEW_HOLD_MS);
   });
 });

@@ -593,7 +593,14 @@ the run just stopped with nothing on screen and nothing logged. Fixed by refusin
 moment a response contains more than one tool call, instead of guessing which one to run
 (`core/llm/toolChoice.ts`). See `spec.md`'s M17 proven-vs-live-only section for the full account.
 
-**Verified deterministically (789 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
+**A second, on how the plan preview reads.** On a chain whose steps all finished fast, the
+preview text was replaced by step 1's result in well under a second — not long enough to read.
+The spoken narration was fine both times (audio plays out at its own pace regardless of how fast
+the planner runs); this was screen-only. Fixed with a minimum, adaptive read-time hold — 2.5s,
+minus however much real time the narration already took — so a chain that's already slow for a
+real reason is never delayed further on top of it.
+
+**Verified deterministically (798 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.

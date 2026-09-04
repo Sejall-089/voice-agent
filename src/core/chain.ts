@@ -183,6 +183,34 @@ export function spokenPlan(steps: readonly PlannedStep[]): string {
   return [`${countWord(steps.length)} ${plural(steps.length, "step")}.`, ...parts].join(" ");
 }
 
+// How long the plan preview must stay on screen before anything may replace it — a live-testing
+// finding, not part of the original design. A 3-step chain of fast steps (fake calendar, fake
+// Notion, no real network latency) replaced the preview with step 1's result in well under a
+// second: nothing throttled the SCREEN to the pace a person reads at, only to the pace the code
+// ran at. The SPOKEN narration was never affected by the same bug — `executeAction({kind:
+// "speak"})` returns once an utterance is QUEUED, not once it has been heard (core/planner.ts's
+// `say`), so the audio plays out at its own pace in the background regardless of how fast the
+// planner races through the steps afterward. This constant is the screen's equivalent of that
+// already-correct behaviour, not a change to speech.
+export const MIN_PREVIEW_HOLD_MS = 2500;
+
+// How much LONGER the preview must stay up, given the instant it was shown and the current one.
+// Pure and separately testable, mirroring `core/llm/prompt.ts`'s `renderNow(now, zone)` split:
+// the planner reads `Date.now()` at both ends (once right before narrating the preview, once
+// right before it would let step 1 begin) and calls this; tests supply two literals.
+//
+// ADAPTIVE rather than a flat pause, on purpose: a chain whose narration and gates already
+// consumed the whole hold in genuine real time waits nothing further, so a naturally slow step 1
+// (a real API call, a real confirm dialog) is never punished with an extra fixed delay on top of
+// work it was already going to do.
+export function previewHoldRemaining(shownAt: number, now: number): number {
+  // Clamped at BOTH ends: never negative (the hold is already satisfied), and never more than
+  // the hold itself (a `now` before `shownAt` — a clock oddity, never expected in practice since
+  // Date.now() is monotonic here — must not ask for longer than the preview was ever meant to
+  // stay up for).
+  return Math.min(MIN_PREVIEW_HOLD_MS, Math.max(0, MIN_PREVIEW_HOLD_MS - (now - shownAt)));
+}
+
 // The new sentence shape decision 5 asks for: how much of the plan happened, and how much did
 // not. Nothing before this milestone needed it, because nothing before it could stop halfway.
 //

@@ -13,6 +13,7 @@ import { InMemorySpeechStore } from "./speechStore.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
 import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts";
 import {
+  previewHoldRemaining,
   previewPlan,
   resolveStepArgs,
   spokenPlan,
@@ -373,8 +374,20 @@ export class Planner {
     try {
       // Decision 2: the whole plan, up front, for transparency. NOT approval — the gates still
       // fire per step, on real arguments, when execution reaches them.
+      const previewShownAt = Date.now();
       await this.shell.executeAction({ kind: "notify", payload: previewPlan(steps) });
       await this.say(toSpokenNarration(spokenPlan(steps)));
+
+      // LIVE-TESTING FIX: hold the preview on screen for a minimum read time before step 1 may
+      // replace it. Without this, a chain whose steps all finish fast (no real waiting between
+      // them) let step 1's own narration or result overwrite the preview in well under a
+      // second — readable on a screen only if you already knew what it was going to say. The
+      // wait is ADAPTIVE (core/chain.ts's `previewHoldRemaining`): it only makes up whatever is
+      // left of MIN_PREVIEW_HOLD_MS, so a step 1 that is already slow for a real reason is never
+      // delayed further. Speech is unaffected either way — see MIN_PREVIEW_HOLD_MS's own note
+      // for why the spoken side never had this bug.
+      const holdRemaining = previewHoldRemaining(previewShownAt, Date.now());
+      if (holdRemaining > 0) await this.sleep(holdRemaining);
 
       // The results of the steps that have run, in order. A LOCAL, deliberately: nothing
       // outside this loop has any business reading them, and a store would let one chain's

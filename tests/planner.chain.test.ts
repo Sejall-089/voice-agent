@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Planner } from "../src/core/planner.ts";
+import { MIN_PREVIEW_HOLD_MS } from "../src/core/chain.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { InMemoryChainState } from "../src/core/chainState.ts";
 import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
@@ -129,6 +130,18 @@ function harness(
   });
   const log = new InMemoryActionLog();
   const chain = new InMemoryChainState();
+  // Every duration `this.sleep(ms)` was called with, in order — recorded rather than dropped, so
+  // the one test that cares can see the preview hold fired.
+  //
+  // NEVER the real setTimeout-based default. `runChain` now calls `this.sleep()` to hold the
+  // plan preview on screen for a minimum read time (M17 live-testing fix, MIN_PREVIEW_HOLD_MS in
+  // core/chain.ts) — a real sleep here would make every multi-step test in this file actually
+  // wait out that many real seconds.
+  const sleepCalls: number[] = [];
+  const sleep = (ms: number): Promise<void> => {
+    sleepCalls.push(ms);
+    return Promise.resolve();
+  };
   const planner = new Planner(
     new FakeLLM({ kind: "plan", steps }),
     shell,
@@ -144,10 +157,10 @@ function harness(
     undefined, // screen
     undefined, // elements
     undefined, // chooser
-    undefined, // sleep
+    sleep,
     chain,
   );
-  return { planner, shell, log, chain };
+  return { planner, shell, log, chain, sleepCalls };
 }
 
 describe("a chain runs its steps in order", () => {
@@ -416,6 +429,67 @@ describe("a one-step plan collapses to an ordinary single call", () => {
     expect(shell.actions.filter((a) => a.kind === "notify")).toEqual([]);
     expect(chain.isRunning()).toBe(false);
   });
+
+  it("holds no preview read-time delay — there is no preview to hold", async () => {
+    // The collapse path returns before runChain ever reaches the preview/hold logic; this is
+    // what proves it, rather than assuming the early return does what it says.
+    const { planner, sleepCalls } = harness([step("readThing", {}, "read the thing")]);
+
+    await planner.run("read the thing");
+
+    expect(sleepCalls).toEqual([]);
+  });
+});
+
+// M17 LIVE-TESTING FIX. Confirmed reproducible: on a 3-step chain where every step's own work
+// finishes fast, the plan-preview text on screen was replaced by step 1's result in well under
+// a second — not enough time to read it, though the spoken narration for every step was fully
+// audible both times (speech plays out at its own pace regardless of planner speed). See
+// tests/chain.test.ts's `previewHoldRemaining` suite for the pure decision; this proves the
+// planner actually calls into it.
+describe("the plan-preview read-time hold", () => {
+  it("holds the preview for a minimum read time before step 1 begins", async () => {
+    const { planner, sleepCalls } = harness([
+      step("readThing", {}, "read it"),
+      step("readOther", {}, "read the other"),
+    ]);
+
+    await planner.run("read both");
+
+    // One call, for approximately the full hold — the fake tools resolve in microseconds, so
+    // almost none of MIN_PREVIEW_HOLD_MS was consumed by real work before this fired.
+    expect(sleepCalls).toHaveLength(1);
+    expect(sleepCalls[0]).toBeGreaterThan(2000);
+    expect(sleepCalls[0]).toBeLessThanOrEqual(MIN_PREVIEW_HOLD_MS);
+  });
+
+  it("holds only once per chain, not once per step", async () => {
+    // The hold protects the PREVIEW specifically — it must not re-trigger at every step
+    // boundary, which would turn a 3-step chain into a multi-second wait rather than one.
+    const { planner, sleepCalls } = harness([
+      step("readThing"),
+      step("readOther"),
+      step("readThing"),
+    ]);
+
+    await planner.run("read three things");
+
+    expect(sleepCalls).toHaveLength(1);
+  });
+
+  it("does not delay a step's own gate — the hold happens before step 1, not inside it", async () => {
+    // The confirm dialog for a dangerous step 1 must still appear promptly once the hold has
+    // already elapsed; nothing here should make individual steps sluggish.
+    const { planner, shell } = harness(
+      [step("sendThing", { text: "hello" }, "send it"), step("readThing", {}, "read it")],
+      { confirms: [true] },
+    );
+
+    const outcome = await planner.run("send hello then read it");
+
+    expect(outcome.status).toBe("ok");
+    expect(shell.confirmMessages).toEqual(['Step 1 of 2: Send "hello"?']);
+  });
 });
 
 describe("what a chain says out loud", () => {
@@ -471,7 +545,10 @@ describe("the chain-running flag", () => {
       new NoopMemoryResolver(),
       new InMemoryActionLog(),
       undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined,
+      // NEVER the real setTimeout-based default — this chain holds its plan preview on screen
+      // via `this.sleep()` (M17 live-testing fix); the real one would make this test wait it out.
+      (): Promise<void> => Promise.resolve(),
       chain,
     );
 
@@ -598,11 +675,18 @@ describe("a chain of REAL registry tools", () => {
       buildRegistry({ gmail: false, notion: true, calendar: true }),
       new NoopMemoryResolver(),
       log,
-      undefined,
-      undefined,
-      undefined,
+      undefined, // sender
+      undefined, // gmail
+      undefined, // draft
       notion,
       calendar,
+      undefined, // speech
+      undefined, // screen
+      undefined, // elements
+      undefined, // chooser
+      // NEVER the real setTimeout-based default — this chain runs `this.sleep()` to hold its
+      // plan preview on screen, and the real one would make this test wait out that duration.
+      (): Promise<void> => Promise.resolve(),
     );
 
     const outcome = await planner.run("check tomorrow's schedule and put it in my Notion page");

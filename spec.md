@@ -1714,13 +1714,14 @@ Post-v0:
       design and what was deliberately deferred (field-level `{step1.attendees}` references,
       which no tool can currently emit, and which the expressible chains turn out not to need).
 
-**v0 status: complete.** **789 tests green** (`npm test`) across 50 files (M17 added 114 over
-M16's 675: 19 for the plan parser, 32 for the chain gate, 9 for the chain state, 26 for chained
-planner runs including the pending-confirm regression at step N of N, 5 re-justifying the system
-prompt after its one-tool rule changed, 12 across the two hotkey guards, 1 closing the gap
-between those two guard suites with a real chain wired to the real hotkey handler, and 10 for
-`classifyToolCalls` — the fix for the multi-tool-call live bug above). The count below is
-the pre-M17 history. Through M12.1 that
+**v0 status: complete.** **798 tests green** (`npm test`) across 50 files (M17 added 123 over
+M16's 675: 19 for the plan parser, 37 for the chain gate (32 original, plus 5 for
+`previewHoldRemaining`), 9 for the chain state, 30 for chained planner runs (26 original, plus 4
+for the preview read-time hold) including the pending-confirm regression at step N of N, 5
+re-justifying the system prompt after its one-tool rule changed, 12 across the two hotkey guards,
+1 closing the gap between those two guard suites with a real chain wired to the real hotkey
+handler, and 10 for `classifyToolCalls` — the fix for the multi-tool-call live bug above). The
+count below is the pre-M17 history. Through M12.1 that
 was 242 — 63 for v0, 24 added by M7, 37 by M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by
 M12.1 (M12.2 added no new tests — all four fixes are covered by existing coverage, adjusted
 where a fix changed an assertion's shape; see §9's M12.2 for specifics). M13 and M14 added 259
@@ -1955,6 +1956,24 @@ Still unverified: whether a model *chooses* to chain when it should and declines
 shouldn't in the general case, whether `{stepN}` lands in sensible argument positions, and how
 the plan preview and per-step prefix actually read and sound. This was one specific failure mode
 confirmed and fixed, not a clean bill of health on model behavior.
+
+**A second live bug, in "how the plan preview reads":** confirmed reproducible on a 3-step chain
+whose steps all finished fast (no real waiting between them) — the preview text was replaced by
+step 1's result in well under a second, not long enough to actually read it. The spoken narration
+for every step was fully audible both times; this was screen-only. Root cause: `notify`'s status
+text is overwritten the instant the NEXT screen update fires, and nothing throttled that to the
+pace a person reads at — only speech had that property already, because
+`executeAction({kind:"speak"})` returns once an utterance is QUEUED, not once it is heard, so
+audio plays out at its own pace in the background regardless of how fast the planner executes.
+
+Fixed with a minimum, **adaptive** read-time hold: `core/chain.ts`'s `previewHoldRemaining(shownAt,
+now)` — pure, mirroring `renderNow`'s split — decides how much of `MIN_PREVIEW_HOLD_MS` (2.5s) is
+still owed given how much real time already passed narrating the preview, and `runChain` waits out
+only that remainder before letting step 1 begin. Adaptive rather than a flat pause on purpose: a
+step 1 that is already slow for a genuine reason (a real API call, a confirm dialog someone took a
+moment to answer) is never delayed further on top of that. Applies only to genuine multi-step
+chains — the single-step collapse path returns before any preview is ever shown, so it never
+reaches this at all.
 
 ### M16 — proven vs. live-only
 

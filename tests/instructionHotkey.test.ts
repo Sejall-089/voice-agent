@@ -469,7 +469,11 @@ describe("the instruction hotkey wired to a genuinely running chain", () => {
       new NoopMemoryResolver(),
       new InMemoryActionLog(),
       undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined,
+      // NEVER the real setTimeout-based default — this chain narrates a plan preview and holds
+      // it on screen via `this.sleep()` (M17 live-testing fix); the real one would make this
+      // test wait out that duration for no reason.
+      (): Promise<void> => Promise.resolve(),
       chain,
     );
 
