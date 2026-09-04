@@ -15,7 +15,21 @@ import { classifyToolCalls, type RawToolCall } from "./toolChoice.ts";
 const PLANNER_MODEL = "gpt-5";
 
 // Reasoning tokens come out of the same allowance as the tool call itself (§3a).
-const CHOOSE_MAX_TOKENS = 4096;
+//
+// Raised 4096 → 8192 at M17 live testing. gpt-5's reasoning tokens are the primary pressure on
+// this budget, and a `plan` response asks for materially more of them than a single tool call:
+// the model has to decide WHETHER to chain at all against a prompt deliberately weighted toward
+// not doing so, then work out step order, then keep to the plan tool's own stated 3-step cap —
+// on top of a structurally bigger JSON output (several steps, each its own tool/arguments/
+// describe). Confirmed live: six varied attempts at a 4-step chain (already over that cap) all
+// exhausted the budget before a complete `plan` tool call ever formed. Never misclassified —
+// `finish_reason === "length"` still catches it cleanly as `incomplete`, the same distinct
+// outcome the original M9 budget fix produced — but `validatePlan`'s own step-cap refusal was
+// never reached, which left that refusal path provably safe from fixtures but genuinely
+// unexercised by a real model. Whether 8192 is enough headroom is itself a live-only fact —
+// request shaping, not classification, per CLAUDE.md — so this is a considered raise, not a
+// proven-sufficient one; re-test live before trusting it.
+const CHOOSE_MAX_TOKENS = 8192;
 
 // A JSON string that may not be JSON. Returns null rather than throwing, so the caller can
 // report a malformed plan as one — `parsePlan(null)` is already null, so the two failures

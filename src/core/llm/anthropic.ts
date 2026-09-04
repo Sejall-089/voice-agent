@@ -15,8 +15,21 @@ import { classifyToolCalls } from "./toolChoice.ts";
 const PLANNER_MODEL = "claude-sonnet-4-6";
 
 // Headroom for any preamble the model writes before the tool_use block (§3a). A cap the
-// model does not reach costs nothing.
-const CHOOSE_MAX_TOKENS = 4096;
+// model does not reach costs nothing — raising it does not cost more unless the model actually
+// USES the extra room, which is exactly the case a truncated response means it needed to.
+//
+// Raised 4096 → 8192 at M17 live testing. A `plan` response is structurally bigger than a single
+// tool call — several steps, each its own tool name, arguments object, and describe phrase — so
+// the SAME "a cap the model does not reach costs nothing" reasoning that set 4096 originally
+// argued for more headroom the moment the plan mechanism existed to be attempted. Confirmed live:
+// every attempt at a 4-step chain (which the plan tool's own description already says not to
+// exceed) was truncated before a complete `plan` tool_use block ever formed — never
+// misclassified, always caught cleanly as `incomplete` (see the stop_reason check below), but
+// never reaching `validatePlan`'s own step-cap refusal either, which left that refusal path
+// provably safe from fixtures but genuinely unexercised by a real model. Whether 8192 is enough
+// headroom is itself a live-only fact — request shaping, not classification, per CLAUDE.md — so
+// this number is a considered raise, not a proven-sufficient one; re-test live before trusting it.
+const CHOOSE_MAX_TOKENS = 8192;
 
 // Real LLM client. The planner and handlers only see the LLMClient interface, so tests
 // swap in a fake with no network/API key.

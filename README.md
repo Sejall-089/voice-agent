@@ -600,6 +600,13 @@ the planner runs); this was screen-only. Fixed with a minimum, adaptive read-tim
 minus however much real time the narration already took — so a chain that's already slow for a
 real reason is never delayed further on top of it.
 
+**A third: the 3-step cap couldn't actually be tested live, at first.** Six attempts at a 4-step
+chain all failed — safely, never as anything misleading — but before ever reaching the step-cap
+refusal itself: the model ran out of reasoning-token budget trying to plan that many steps, the
+same failure class the app already catches cleanly as "I ran out of room," just never previously
+exercised by a request this size. Raised the token budget (4096 → 8192) so a plan attempt has
+enough headroom to actually finish forming and reach the cap that's supposed to catch it.
+
 **Verified deterministically (798 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),

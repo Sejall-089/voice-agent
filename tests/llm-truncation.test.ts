@@ -115,8 +115,13 @@ describe("OpenAI chooseTool — reasoning starving the tool call", () => {
 
     await choose(new OpenAILLMClient("sk-test"));
 
+    // Raised 4096 → 8192 at M17: a `plan` response asks for materially more reasoning AND more
+    // output than a single tool call, and live testing found 4096 wasn't enough headroom for it
+    // (every attempt at a chain over the step cap was truncated before a complete `plan`
+    // tool_use ever formed). Floor, not an exact match, on purpose — the point is "enough
+    // headroom that reasoning cannot trivially starve the call," not a specific number.
     const [request] = openaiCreate.mock.calls[0] as [{ max_completion_tokens: number }];
-    expect(request.max_completion_tokens).toBeGreaterThanOrEqual(4096);
+    expect(request.max_completion_tokens).toBeGreaterThanOrEqual(8192);
   });
 });
 

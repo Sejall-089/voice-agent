@@ -1975,6 +1975,24 @@ moment to answer) is never delayed further on top of that. Applies only to genui
 chains — the single-step collapse path returns before any preview is ever shown, so it never
 reaches this at all.
 
+**A third live finding, not a misclassification: the step cap was genuinely unexercised.** Six
+varied attempts at a 4-step chain (already over `MAX_STEPS`) all failed the same way, confirmed by
+the model's own error text: reasoning-token budget exhausted before a `plan` tool call ever
+completed. Every one was caught correctly and safely as `{ kind: "incomplete" }` — the same
+distinct outcome the original M9 budget fix produced, never misclassified as a garbled plan or a
+silent miss — but none of the six ever reached `validatePlan`'s own step-cap refusal, because the
+response never finished forming a `plan` block for it to refuse. The cap was provably safe from
+fixtures the whole time; it just had never been reached by a real model.
+
+Root cause: `CHOOSE_MAX_TOKENS` (4096, set at M9 for a single tool call's reasoning + output) was
+never recalibrated when M17 added a structurally bigger response shape — several steps, each its
+own tool name, arguments object, and describe phrase, on top of the reasoning needed to decide
+whether to chain at all against a prompt deliberately weighted toward not doing so. Raised to 8192
+in both `anthropic.ts` and `openai.ts`, per that constant's own original reasoning: "a cap the
+model does not reach costs nothing." Whether 8192 is itself enough headroom is a live-only fact —
+request shaping, not classification, per CLAUDE.md — so this is a considered raise, not a
+proven-sufficient one. It needs a live re-test, not a fixture, to confirm the cap is now reachable.
+
 ### M16 — proven vs. live-only
 
 **Proven deterministically (over 100 new tests, no PowerShell and no desktop for most of the
