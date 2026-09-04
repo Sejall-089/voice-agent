@@ -585,7 +585,15 @@ shouldn't. The prompt is deliberately lopsided against chaining, but "does gpt-5
 single-tool request in a plan?" is a live question, and so is whether it writes `{stepN}` into
 sensible argument positions. Unverified until someone runs it.
 
-**Verified deterministically (778 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
+**One live bug it did find, and this is the one that ran that question for real.** The exact same
+instruction, run twice, produced two different outcomes: once the model tried to bundle
+everything into a single response with more than one tool call in it, and both provider clients
+used to keep only the first and silently drop the rest — the tool that ran spoke normally, then
+the run just stopped with nothing on screen and nothing logged. Fixed by refusing out loud the
+moment a response contains more than one tool call, instead of guessing which one to run
+(`core/llm/toolChoice.ts`). See `spec.md`'s M17 proven-vs-live-only section for the full account.
+
+**Verified deterministically (789 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.

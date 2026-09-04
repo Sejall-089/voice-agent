@@ -1714,10 +1714,12 @@ Post-v0:
       design and what was deliberately deferred (field-level `{step1.attendees}` references,
       which no tool can currently emit, and which the expressible chains turn out not to need).
 
-**v0 status: complete.** **778 tests green** (`npm test`) across 49 files (M17 added 103 over
+**v0 status: complete.** **789 tests green** (`npm test`) across 50 files (M17 added 114 over
 M16's 675: 19 for the plan parser, 32 for the chain gate, 9 for the chain state, 26 for chained
 planner runs including the pending-confirm regression at step N of N, 5 re-justifying the system
-prompt after its one-tool rule changed, and 12 across the two hotkey guards). The count below is
+prompt after its one-tool rule changed, 12 across the two hotkey guards, 1 closing the gap
+between those two guard suites with a real chain wired to the real hotkey handler, and 10 for
+`classifyToolCalls` — the fix for the multi-tool-call live bug above). The count below is
 the pre-M17 history. Through M12.1 that
 was 242 — 63 for v0, 24 added by M7, 37 by M8/M9, 41 by M10, 36 by M11, 30 by M12, and 11 by
 M12.1 (M12.2 added no new tests — all four fixes are covered by existing coverage, adjusted
@@ -1926,6 +1928,33 @@ read on screen and sound out loud, and whether three chained steps feel like a c
 action or like the app talking over itself. Per CLAUDE.md, the rendered thing needs eyes on it —
 the `[main] … (chain 2/3)` line proves what the app decided, not what the user saw. Every
 milestone since M10 has found at least one bug the fixtures could not; budget for it.
+
+**Live testing found exactly that bug, on the first pass.** The same 4-step instruction, run
+twice, produced two different outcomes. Once, the model wrapped everything through `plan` but
+named a bogus `multi_tool_use.parallel` tool inside one step — caught cleanly by `validatePlan`'s
+ordinary unknown-tool check, working exactly as designed. The other time, the model answered with
+a *real* `readSchedule` call **alongside something else in the same response**, and both provider
+clients only ever looked at the FIRST tool call — `response.content[0]` for Anthropic,
+`tool_calls[0]` for OpenAI — silently discarding the rest. `readSchedule` ran, spoke, and the run
+just ended: no refusal, no narration, no log line, the spinner stopped with nothing on screen.
+
+Root cause was **not** the `plan` mechanism — that was already sound. It was that a chooseTool
+response can contain more than one tool call at all, and nothing checked for it. Fixed by pulling
+the decision out into `core/llm/toolChoice.ts`'s `classifyToolCalls` (zero calls → the caller's
+own decline handling; exactly one → unchanged; more than one → refused by name, never truncated
+to whichever came first), tested directly rather than left in the transport — the CLAUDE.md
+lesson about thin transports needing error-classification tests, applied a second time. Anthropic
+additionally gets `disable_parallel_tool_use: true` on its `tool_choice` (a plain, documented SDK
+field) so the API is asked not to produce this in the first place. OpenAI does **not** get the
+equivalent `parallel_tool_calls: false` — the SDK's own type docs carry no reassurance for
+gpt-5's reasoning-model family, and guessing wrong would turn a rare silent drop into every
+OpenAI-configured install failing every call. Left as an open, live-testable question rather than
+a guess; the classification fix closes the hole regardless of whether it is ever set.
+
+Still unverified: whether a model *chooses* to chain when it should and declines to when it
+shouldn't in the general case, whether `{stepN}` lands in sensible argument positions, and how
+the plan preview and per-step prefix actually read and sound. This was one specific failure mode
+confirmed and fixed, not a clean bill of health on model behavior.
 
 ### M16 — proven vs. live-only
 
