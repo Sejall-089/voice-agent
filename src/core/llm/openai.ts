@@ -4,11 +4,11 @@ import type {
   CapturedContext,
   LLMClient,
   ToolChoice,
-  ToolInput,
   ToolSchema,
 } from "../types.ts";
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
-import { PLAN_TOOL, PLAN_TOOL_NAME, PLAN_UNREADABLE, parsePlan } from "./plan.ts";
+import { PLAN_TOOL, PLAN_TOOL_NAME } from "./plan.ts";
+import { classifyToolCalls, type RawToolCall } from "./toolChoice.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
@@ -79,29 +79,62 @@ export class OpenAILLMClient implements LLMClient {
           parameters: t.inputSchema as unknown as OpenAI.FunctionParameters,
         },
       })),
+      // NOT set to `parallel_tool_calls: false`, unlike the `disable_parallel_tool_use` flag
+      // added to the Anthropic client for the same bug. That flag is a plain, stable, documented
+      // field there; this SDK's own type docs carry no equivalent reassurance for gpt-5's
+      // reasoning-model family, and OpenAI has previously rejected this parameter outright for
+      // some reasoning models rather than silently ignoring it. Guessing wrong here would turn
+      // a rare silent-drop into every OpenAI-configured install failing every call — strictly
+      // worse than the bug being fixed. Left as a live-testable question rather than a guess;
+      // the classification fix below closes the actual hole regardless of whether this is ever
+      // set.
       tool_choice: "auto",
     });
 
     const choice = response.choices[0];
     const message = choice?.message;
-    const call = message?.tool_calls?.[0];
-    if (call && call.type === "function") {
-      // Arguments arrive as a JSON STRING here, unlike Anthropic's already-parsed object — so
-      // this provider has one failure the other does not: a truncated or malformed string.
-      //
-      // Only the PLAN path swallows it. On the single-tool path `JSON.parse` throwing is the
-      // behaviour every milestone since M2 has shipped, and quietly turning it into empty
-      // arguments would convert a loud failure into a "missing required information" refusal
-      // that names the wrong problem. A malformed plan, by contrast, has a sentence written for
-      // exactly this — from where the user sits, "couldn't read the plan" is what happened.
-      if (call.function.name === PLAN_TOOL_NAME) {
-        const steps = parsePlan(safeParse(call.function.arguments));
-        return steps === null
-          ? { kind: "none", text: PLAN_UNREADABLE }
-          : { kind: "plan", steps };
+
+    // Every function-type call the model returned, in order. `type === "function"` narrows the
+    // SDK's tool-call union the same way the removed single-call check used to.
+    const rawCalls: { name: string; arguments: string }[] = [];
+    for (const call of message?.tool_calls ?? []) {
+      if (call.type === "function") {
+        rawCalls.push({ name: call.function.name, arguments: call.function.arguments });
       }
-      return { kind: "tool", name: call.function.name, input: JSON.parse(call.function.arguments || "{}") as ToolInput };
     }
+
+    // M17 LIVE-TESTING BUG, FIXED: this used to read `tool_calls?.[0]` only, silently dropping
+    // any further calls in the same response. See core/llm/toolChoice.ts for the full account
+    // and why the fix lives there. Decoding happens HERE, not inside `classifyToolCalls`,
+    // because how a decoding FAILURE is handled deliberately differs by call name (see below) —
+    // and, with more than one call, decoding is skipped entirely on purpose, so a malformed
+    // SECOND call's JSON can never throw before the multi-call refusal is even decided.
+    const calls: RawToolCall[] =
+      rawCalls.length === 1
+        ? [
+            {
+              name: rawCalls[0]!.name,
+              input:
+                // Arguments arrive as a JSON STRING here, unlike Anthropic's already-parsed
+                // object — so this provider has one failure the other does not: a truncated or
+                // malformed string.
+                //
+                // Only the PLAN path swallows it. On the ORDINARY-tool path `JSON.parse`
+                // throwing is the behaviour every milestone since M2 has shipped, and quietly
+                // turning it into empty arguments would convert a loud failure into a "missing
+                // required information" refusal that names the wrong problem. A malformed plan,
+                // by contrast, has a sentence written for exactly this — from where the user
+                // sits, "couldn't read the plan" is what happened. Both are UNCHANGED by this
+                // fix; only the ">1 calls" case is new.
+                rawCalls[0]!.name === PLAN_TOOL_NAME
+                  ? safeParse(rawCalls[0]!.arguments)
+                  : (JSON.parse(rawCalls[0]!.arguments || "{}") as unknown),
+            },
+          ]
+        : rawCalls.map((call) => ({ name: call.name, input: null }));
+
+    const classified = classifyToolCalls(calls);
+    if (classified !== null) return classified;
 
     // No tool call AND the response was cut off: the model ran out of budget rather than
     // deciding anything. Report it as its own outcome so the planner can say so honestly

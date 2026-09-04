@@ -4,11 +4,11 @@ import type {
   CapturedContext,
   LLMClient,
   ToolChoice,
-  ToolInput,
   ToolSchema,
 } from "../types.ts";
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
-import { PLAN_TOOL, PLAN_TOOL_NAME, PLAN_UNREADABLE, parsePlan } from "./plan.ts";
+import { PLAN_TOOL } from "./plan.ts";
+import { classifyToolCalls } from "./toolChoice.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
@@ -59,24 +59,32 @@ export class AnthropicLLMClient implements LLMClient {
         // Adapt the vendor-neutral JSONSchema to the SDK's InputSchema at this boundary.
         input_schema: t.inputSchema as unknown as Anthropic.Tool.InputSchema,
       })),
-      tool_choice: { type: "auto" },
+      tool_choice: {
+        type: "auto",
+        // Ask the API not to hand back more than one tool_use block at all. A model that
+        // decides several things at once should use `plan`, not native parallel tool use — and
+        // this is a request-level ask, not a guarantee (a model can still name a bogus tool
+        // INSIDE a `plan` step, which `core/chain.ts`'s `validatePlan` already catches). The
+        // `classifyToolCalls` check below is what actually enforces the contract regardless of
+        // whether the API honours this flag.
+        disable_parallel_tool_use: true,
+      },
       messages: [{ role: "user", content: renderRequest(instruction, context, previousTurn) }],
     });
 
-    for (const block of response.content) {
-      if (block.type !== "tool_use") continue;
-      // A chained plan (M17). Parsed rather than trusted: `parsePlan` answers "is this even a
-      // plan", and a garbled one becomes its own sentence instead of a wrong-looking refusal.
-      // Whether the plan is RUNNABLE — tools that exist, the step cap, backward references —
-      // is core/chain.ts's question, asked by the planner where it can refuse out loud.
-      if (block.name === PLAN_TOOL_NAME) {
-        const steps = parsePlan(block.input);
-        return steps === null
-          ? { kind: "none", text: PLAN_UNREADABLE }
-          : { kind: "plan", steps };
-      }
-      return { kind: "tool", name: block.name, input: (block.input ?? {}) as ToolInput };
-    }
+    // M17 LIVE-TESTING BUG, FIXED: this used to `return` on the FIRST tool_use block found,
+    // silently discarding any further blocks in the same response. A model that answered with a
+    // real tool call ALONGSIDE something else — a hallucinated wrapper, or a genuine second
+    // parallel call `disable_parallel_tool_use` didn't prevent — had the extra call vanish with
+    // no refusal, no narration, no log line: the first tool ran, and the run just ended. See
+    // core/llm/toolChoice.ts for the fix and why it lives there rather than here.
+    const toolUseBlocks = response.content.filter(
+      (block): block is Anthropic.Messages.ToolUseBlock => block.type === "tool_use",
+    );
+    const classified = classifyToolCalls(
+      toolUseBlocks.map((block) => ({ name: block.name, input: block.input ?? {} })),
+    );
+    if (classified !== null) return classified;
 
     // Truncated before it got to a tool_use block — a budget failure, not a decision.
     // Same distinction as the OpenAI client; the planner treats both identically.
