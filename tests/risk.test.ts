@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { Planner } from "../src/core/planner.ts";
-import { buildRegistry } from "../src/core/registry.ts";
+import {
+  buildRegistry,
+  calendarTools,
+  findTool,
+  gmailTools,
+  notionTools,
+  pointingTools,
+  registry,
+  speechTools,
+} from "../src/core/registry.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
 import {
@@ -246,7 +255,47 @@ describe("registry invariants", () => {
   // The WHOLE menu, every optional surface switched on. An invariant that only inspected the
   // tools this machine happens to have configured would go quiet exactly when a new integration
   // was added — which is the moment it is most worth having.
-  const all = buildRegistry({ gmail: true, notion: true, calendar: true });
+  //
+  // IT WAS NOT THE WHOLE MENU FOR THREE MILESTONES, and that is why the test below it exists.
+  // This read `{ gmail: true, notion: true, calendar: true }` from M13 until M18, under this
+  // same comment claiming otherwise — so M14's `elaborate` and M16's `pointAt` were never once
+  // checked by any invariant in this block. The comment was true when written and silently
+  // stopped being true twice, which no assertion here could notice, because every invariant
+  // was a statement about `all` and `all` was simply smaller than anyone reading it believed.
+  const all = buildRegistry({
+    gmail: true,
+    notion: true,
+    calendar: true,
+    speech: true,
+    pointing: true,
+  });
+
+  // THE GUARD AGAINST THAT HAPPENING AGAIN, and the one test in this block that is about the
+  // test suite rather than about the tools. Every group `registry.ts` exports has to be in the
+  // menu above, so adding a sixth group and forgetting to switch it on here fails immediately
+  // instead of quietly narrowing every invariant that follows.
+  //
+  // Compared by NAME rather than by length: a count would also pass if a group were swapped
+  // for another of equal size, and the message on failure needs to say which tool went missing.
+  it("has every tool in the codebase on the menu it checks", () => {
+    const everything = [
+      ...registry,
+      ...gmailTools,
+      ...notionTools,
+      ...calendarTools,
+      ...speechTools,
+      ...pointingTools,
+    ];
+    const offered = all.map((tool) => tool.name).sort();
+    expect(offered).toEqual(everything.map((tool) => tool.name).sort());
+
+    // And each of them is resolvable by the planner's own lookup. `findTool` keeps a SECOND
+    // hard-coded list of the same groups, so a new group added to `buildRegistry` alone is
+    // offered to the model and then refused as a hallucinated tool when it is chosen.
+    for (const tool of everything) {
+      expect(findTool(tool.name), `findTool cannot resolve ${tool.name}`).toBe(tool);
+    }
+  });
 
   // Every invariant below asks about the whole MENU, so each one reads `declaredTiers` rather
   // than the tier of one particular call. That is what declaring `tiers` up front buys: "could

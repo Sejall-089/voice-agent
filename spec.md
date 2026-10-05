@@ -754,7 +754,7 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16, +1 in M18 and +2 more with Spotify)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -780,6 +780,17 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `readSchedule`| 12. What's on my calendar             | no            | safe         | list a time window → format as text |
 | `createEvent` | 13. Put something on the calendar     | no            | caution / **dangerous** | create it; `dangerous` when anyone is invited |
 | `moveEvent`   | 14. Move something                    | no            | caution / **dangerous** | find it (default-deny) → move; `dangerous` when it has guests |
+| `elaborate`   | 15. "And the rest?"                   | no            | safe         | read back what the last spoken summary held back (§4d) |
+| `pointAt`     | 16. Where's the send button?          | no            | caution      | read the window's controls → model picks one BY NUMBER → code resolves its rect → draw a marker (§6d) |
+| `openApp`     | 17. Open an installed app             | no            | reversible   | match the user's NAME against a closed catalog → `openApp` action; refuse with the list on no match |
+
+> **`elaborate` and `pointAt` were missing from this table for four milestones** (added M14 and
+> M15/M16 respectively; the section heading counted them, the rows were never written). Noted
+> rather than quietly fixed, because the same omission had a twin in the test suite —
+> `tests/risk.test.ts`'s "whole menu" invariants were built without `speech` or `pointing`
+> switched on, so neither tool was under any registry-wide invariant either. Both are fixed at
+> M18, and that test now asserts the menu it checks contains every group `registry.ts` exports,
+> so the next addition cannot slip through the same gap.
 
 The `Irreversible` column above is the M10 `risk` tier — see the `risk` subsection below. The first six tools kept
 their exact behaviour through that migration: only `sendMessage` and `sendReply` confirm.
