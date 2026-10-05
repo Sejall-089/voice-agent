@@ -81,15 +81,23 @@ Fuzzy human sentence  →  exact function call.
   unmatched name is refused with the list of what *can* be opened. There is no fuzzy matching
   and no way to pass arguments, so "open X" can never become "run X with these flags" — the
   same proposes/disposes split §5's key rule states, applied to a command line. See §9's M18.
-- **Spotify, via the Web API** (search, play, volume) — see the connector guardrail below for
-  why this one needed an explicit amendment rather than just an entry here. Playback control
-  requires Spotify Premium; a development-mode app additionally requires the app owner's own
-  account to be Premium, so "I can't do that without Premium" is a first-class named failure
-  rather than a generic error. Launching the Spotify *app* and controlling *playback* are
-  deliberately two separate tools with two different tiers — `openApp` is `reversible`,
-  `playOnSpotify` is `caution` — and the playback tool never auto-launches the app: with no
-  active device it refuses and says to open Spotify, because starting an application is not
-  something to do as a side effect of being asked to play a song.
+- **Local media and volume control, and a Spotify *search*.** Three tools: `systemVolume` and
+  `mediaControl` press real media keys through the same `SendInput` host dictation uses, and
+  `searchSpotify` opens a Spotify search in the browser for the user to press play on.
+  **They are named for the system because that is what they touch** — a media key goes to
+  whichever app owns the Windows media session, which may be Spotify, a YouTube tab, or
+  nothing, and a volume key moves the whole machine. None of them can read the volume back or
+  ask what is playing, so every result says what was **sent**, never what is now true.
+  - **This is not what M18 set out to build, and the difference is recorded rather than
+    smoothed over.** The plan was Spotify playback and volume over the Web API. Those
+    endpoints require Spotify Premium — and an app in development mode requires the *owner's*
+    account to be Premium to function at all — and this account is free, so the connector
+    could only have shipped untestable against anything real. That is what CLAUDE.md's recon
+    rule forbids, so it is **parked, not abandoned**: see §9's "Parked: Spotify Web API tools"
+    for the design that still stands and the one thing that would unblock it.
+  - What survived from the original design is the split: launching the Spotify *app* is
+    `openApp`, and nothing else ever launches it as a side effect. A search request opens a
+    search; it does not start an application on the user's behalf.
 
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
@@ -783,6 +791,9 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `elaborate`   | 15. "And the rest?"                   | no            | safe         | read back what the last spoken summary held back (§4d) |
 | `pointAt`     | 16. Where's the send button?          | no            | caution      | read the window's controls → model picks one BY NUMBER → code resolves its rect → draw a marker (§6d) |
 | `openApp`     | 17. Open an installed app             | no            | reversible   | match the user's NAME against a closed catalog → `openApp` action; refuse with the list on no match |
+| `systemVolume`| 18. Turn the volume up/down/mute      | no            | reversible   | 1–15 presses of a real volume key via `SendInput`; says what was SENT, never a level |
+| `mediaControl`| 19. Play/pause, next, previous        | no            | reversible   | one press of a real media key, to whichever app owns the media session |
+| `searchSpotify`| 20. Find something on Spotify        | no            | reversible   | `openUrl` to a fixed-template Spotify search URL; the USER presses play |
 
 > **`elaborate` and `pointAt` were missing from this table for four milestones** (added M14 and
 > M15/M16 respectively; the section heading counted them, the rows were never written). Noted
@@ -1766,8 +1777,13 @@ Post-v0:
       design and what was deliberately deferred (field-level `{step1.attendees}` references,
       which no tool can currently emit, and which the expressible chains turn out not to need).
 
-- [ ] **M18 — Opening apps, and Spotify.** Two capabilities that happen to share one sentence
-      ("open Spotify") and are deliberately kept apart underneath it.
+- [ ] **M18 — Opening apps, and local media control.** Two capabilities that happen to share
+      one sentence ("open Spotify") and are deliberately kept apart underneath it.
+      **Left unchecked deliberately: the code is complete and 944 tests pass, but not one line
+      of it has been run by a person at a keyboard.** Every milestone from M10 on produced at
+      least one live bug no fixture caught (CLAUDE.md), and this one touches the shared
+      PowerShell input host that dictation depends on. See `docs/M18-live-checklist.md` and
+      "M18 — proven vs. live-only" below.
       **Launching an app** adds a fifth `LocalAction` kind, `openApp`, carrying *the name the
       user said* — the shell resolves it against a closed allowlist (`core/apps.ts` holds the
       names, `src/main/shell/appLaunch.ts` holds the paths and protocol URIs), so the model
@@ -1775,18 +1791,67 @@ Post-v0:
       only; an unmatched name is refused with the list of what *can* be opened, never
       approximated. `APPS_EXTRA` lets a user add their own `Name=command` entries, validated at
       startup — a malformed entry is reported and never launched.
-      **Spotify** is a fifth connector (§2), behind `SpotifySurface` with the same
-      unavailable-default, config-gated, tested-against-a-fake rules every surface since M10
-      has followed: `playOnSpotify` (`caution` — its narration does the search, so the user
-      hears the title that is about to play *before* it plays, and the handler plays that same
-      resolved URI rather than searching twice) and `spotifyVolume` (`reversible`, clamped
-      0–100). Gated on `SPOTIFY_CLIENT_ID` + `SPOTIFY_REFRESH_TOKEN`; `npm run spotify:connect`
-      is the one-time PKCE flow, on a loopback **IP literal** because Spotify disallows
-      `localhost` as a redirect URI since April 2025.
-      **What it is not:** no pause/next/previous, no playlists, no queueing, no launching an
-      app with arguments, and no auto-launching Spotify to satisfy a play request.
+      **Local media control** adds a sixth `LocalAction` kind, `mediaKey`, carrying one of six
+      NAMES (`core/media.ts`) whose virtual-key codes live in `src/main/shell/mediaKeys.ts` —
+      the same name/keycode split `apps.ts`/`appLaunch.ts` uses, so there is not a keycode
+      anywhere in `/core`. It is pressed through the **existing** `SendInput` host dictation
+      uses: `InputInjector` gains `pressKey(vk, count)` (same primitive, same process, same
+      un-swallowable short-write signal — a second contract would have meant a second
+      PowerShell host), and `HOST_SCRIPT` gains a purely additive `KEY` command alongside the
+      untouched `TYPE` one, reusing its measured 40 ms inter-press gap (M12.1).
+      Three tools, all `reversible`, all ungated: `systemVolume` (1–15 presses, default 5 ≈
+      10%), `mediaControl` (play/pause, next, previous) and `searchSpotify` (a fixed-template
+      search URL through `openUrl`). **A repeat count is honoured only for the volume keys** —
+      `mute` and `playPause` are toggles that five presses would return to their starting
+      state, and five `next` presses skip five tracks — and `pressesFor` enforces that in the
+      tool *and* in the shell. The injector is now built unconditionally rather than only
+      alongside whisper, since media keys have nothing to do with voice; `ensureStarted()` is
+      lazy, so an install that never dictates and never presses a key still never spawns it.
+      **What it is not:** no reading the current volume (nothing can, so nothing claims to), no
+      per-app volume, no playlists or queueing, no launching an app with arguments, and no
+      auto-launching Spotify to satisfy a search request.
 
-**v0 status: complete.** **798 tests green** (`npm test`) across 50 files (M17 added 123 over
+      > **Parked: Spotify Web API tools.** M18 was planned as `playOnSpotify` and
+      > `spotifyVolume` over the Web API, behind a `SpotifySurface` with the same
+      > unavailable-default, config-gated, tested-against-a-fake rules every surface since M10
+      > has followed. **It is parked because the account is free.** Spotify's playback and
+      > volume endpoints require Premium, and an app in *development mode* — which is the only
+      > mode a personal project can be in, since extended quota has required a registered
+      > organisation with 250k+ MAU since 2025-05-15 — additionally requires the app owner's
+      > own account to be Premium for the app to function at all. Building it anyway would have
+      > meant a connector untestable against anything real, which is exactly what CLAUDE.md's
+      > recon rule exists to prevent.
+      >
+      > **Trigger to resume: a Premium account.** Nothing else about the design changes. What
+      > still stands, unmodified: `SpotifySurface` (`search`/`play`/`getVolume`/`setVolume`),
+      > `core/spotify/errors.ts` with a `SpotifyError extends UserFixableError` whose reasons
+      > come from captured recon output rather than recalled names, classification as an
+      > **exported pure function** so it is tested directly (`GoogleCalendar.classify` is a
+      > private method and that is the one thing not to copy), `UnavailableSpotify`,
+      > PKCE-refresh `SpotifyAuth`, and a `FakeSpotify` that is async, rejects a volume outside
+      > 0–100, and throws the **same error class** the real transport throws for "no device".
+      > `playOnSpotify` stays `caution` with its narration doing the search so the user hears
+      > the title before it plays, and the handler playing that same resolved URI rather than
+      > searching twice.
+      >
+      > **What already exists and does not need rebuilding:** `npm run spotify:connect` (PKCE
+      > on a loopback **IP literal** — `localhost` has been rejected as a redirect URI since
+      > 2025-04-09, with all clients migrated by November 2025), `scripts/spotify-recon.mjs`,
+      > and the `.env.example` block. Three API facts worth keeping, all confirmed against the
+      > live docs: search `limit` is now **0–10, default 5** (not the 50/20 it once was);
+      > `GET /v1/me/player` signals "no active device" as **204 with an empty body**, not a
+      > JSON error, so a classifier keyed only on error bodies would miss it; and the player
+      > response carries `device.supports_volume` and a **nullable** `volume_percent`, so a
+      > volume tool must refuse on both rather than defaulting a null to 0 and then applying a
+      > relative change to it.
+
+**v0 status: complete.** **944 tests green** (`npm test`) across 55 files. M18 added 146 over
+M17's 798, in five new files: 28 for the app catalog (`apps.test.ts`), 40 for the launch table
+and `APPS_EXTRA` (`appLaunch.test.ts`), 14 for `openApp` through the planner plus the
+`openTarget` split (`openApp.test.ts`), 22 for the media-key mapping and press policy
+(`mediaKeys.test.ts`), 32 for the three local-control tools (`localControls.test.ts`), 1 for the
+two-step chain, and 9 from M18's own result strings entering both `speech.test.ts` fixture
+sweeps. The historical count follows. (M17 added 123 over
 M16's 675: 19 for the plan parser, 37 for the chain gate (32 original, plus 5 for
 `previewHoldRemaining`), 9 for the chain state, 30 for chained planner runs (26 original, plus 4
 for the preview read-time hold) including the pending-confirm regression at step N of N, 5
@@ -1960,6 +2025,69 @@ have to rediscover.
 
 - **The taskbar, the desktop, and open popup menus are out of scope.** They are separate
   top-level windows, and enumeration is scoped to the foreground window.
+
+### M18 — proven vs. live-only
+
+**Nothing in M18 has been run by a human yet.** This section is written before the live pass
+rather than after it, which is a first for this file and is the point: every milestone from M10
+on has produced at least one live bug no fixture caught, so writing down *in advance* which
+claims rest on fixtures makes the checklist a test of specific doubts rather than a lap of the
+feature. `docs/M18-live-checklist.md` is the list.
+
+**Proven deterministically (944 tests, `npm test`):**
+
+- **The app catalog.** Normalisation ("the Spotify app", "  NOTEPAD. ", "calc"), exact matching
+  and its refusals ("spotifyy", "spot", "notepad.exe", "my music player" — each of which a
+  fuzzy rule would have accepted), every built-in name resolving uniquely back to its own entry,
+  and `APPS_EXTRA`'s fifteen rejection classes with the exact sentence each produces and the
+  entry's absence from the catalog.
+- **`openApp` end to end through the planner**, against a `MockShell` running the **real**
+  launcher over the **real** built-in catalog — so "it refused Photoshop" is the matching code
+  refusing, not a mock agreeing. Including that the refusal names the whole closed list.
+- **The media-key mapping**, with the six virtual-key codes written independently in the test
+  rather than imported, plus a dedicated assertion that volume up and down cannot be
+  transposed (adjacent codes, and the most obviously wrong thing that could ship).
+- **The repeat policy**: a count honoured only for the volume keys, forced to one for `mute`,
+  `playPause`, `next` and `previous`, enforced in the tool *and* the shell, and never resolving
+  outside 1–15 for any input including `NaN`, `-5`, `2.5` and a string.
+- **`searchSpotify`'s URL construction**: thirteen encoding cases including
+  `https://evil.example.com`, `../../etc`, `ac/dc`, `50% off` and two non-Latin titles, each
+  asserting the host and path prefix literally, so no query can retarget the request.
+- **Result honesty**: no result string contains a percentage, a digit in a key label, or the
+  word "playing"; all four of M18's user-facing strings are in both `speech.test.ts` fixture
+  sweeps, where the strict `FakeSynthesizer` enforces the engine's real character limits.
+- **Both `resolvesReferences: false` flags**, verified to FAIL with the flag flipped on. The
+  first drafts of those tests proved nothing — see the step C commit.
+- **A two-step chain** (`openApp` → `searchSpotify`) through the M17 runner with no new chain
+  code, with step order read off the side effects and the plan preview pinned as a literal.
+
+**Only a live run can prove these, and each is here because something specific could be wrong:**
+
+1. **That dictation still works.** `HOST_SCRIPT` gained a `KEY` command, and the `TYPE` path is
+   untouched — but they share one PowerShell host, and that file carries its own KNOWN ISSUE
+   note (M16.8) about the fragility of its `-Command -` invocation. This is the highest-value
+   check in the list and it is a *regression* check, not a feature one.
+2. **That `VkEvent` actually moves the volume.** Nothing under vitest sends a real `SendInput`.
+   The down/up pair, `wScan = 0`, and `KEYEVENTF_KEYUP` are written from the Win32 contract, not
+   observed — the same standing this repo's first Gmail fixture had before a live page corrected
+   it.
+3. **How far 5 presses actually moves it.** "About 2% per press" is from documentation, and the
+   default of 5 was chosen from it. If a press turns out to be 10%, the default is a jolt.
+4. **That 15 presses leaves no stuck or repeated key.** The 40 ms gap is inherited from M12.1's
+   measurement for `KEYEVENTF_UNICODE` events, which carry `wVk = 0` — a real virtual key is a
+   *different* signal to Windows' key-repeat handling, so the number is borrowed, not verified
+   for this case.
+5. **Which app a media key reaches.** The tools claim only "sent", precisely because this is
+   unknowable from inside the app — but what actually happens with Spotify playing, with only a
+   YouTube tab playing, and with both is worth writing down once.
+6. **Whether `openApp` starts a second copy** of an already-running app, and what Windows does
+   with `spotify:` when Spotify is not installed (the protocol handler may show a system dialog
+   rather than failing, in which case `{ ok: true }` is reported for a launch nobody saw).
+7. **Which tool the model picks** for "open Spotify" vs "open the Spotify web player" vs "play X
+   on Spotify". Every test in this repo drives tool choice through `FakeLLM`, so no test can
+   speak to this at all.
+8. **`spotify:connect` on a free account** — whether consent completes, and what the recon
+   captures for the Premium-required path. That capture is the fixture the parked work needs.
 
 ### M17 — proven vs. live-only
 

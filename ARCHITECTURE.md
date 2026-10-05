@@ -84,9 +84,17 @@ knows it's on Windows.
 
 ### What each piece does
 - **OS shell** — the hands and ears. Notices the hotkey, grabs context (clipboard
-  text + active window), carries out local actions (open URL, copy, notify), and
+  text + active window), carries out local actions (open URL, copy, notify, speak,
+  open an app, press a media key), and
   shows the command bar / result / confirm dialogs. Makes no decisions. This is the
   only layer you rewrite per OS, and it sits behind the `OSShell` interface.
+  - **Two of those six actions carry a NAME, not a value, and that is the pattern to keep
+    (M18).** `openUrl` carries a resolved URL because a URL is something the model can
+    legitimately know and the shell can validate on sight. `openApp` and `mediaKey` carry *the
+    name the user said* and *one of six key names* — because a command line and a virtual-key
+    code have no such check, so the model never writes one. The names live in `/core`
+    (`apps.ts`, `media.ts`) and the paths, protocol URIs and keycodes live beside the shell
+    (`appLaunch.ts`, `mediaKeys.ts`), which is also what keeps `/core` free of both.
 - **Core** — the brain, identical on every OS. The *tool registry* is the menu of
   things the app can do; the *planner* runs the loop that turns an instruction into
   one validated tool call.

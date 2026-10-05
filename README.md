@@ -94,6 +94,28 @@ created — there's no later "send" to gate. So the risk tier is decided from *t
 arguments*, not from which tool was picked. "Move the review to 4" works the same way, except
 it has to look up who's on it first (see `spec.md` §6c).
 
+…and four more in **M18**, which need nothing configured at all:
+
+| # | Say this | It does |
+|---|---|---|
+| 17 | "open Spotify" / "open calc" | Launches the app — from a **closed list**, never a path the model wrote |
+| 18 | "turn the volume up" | Presses the real volume key ~5 times (≈10%) |
+| 19 | "pause" / "next track" | Presses the real media key, wherever the media session is |
+| 20 | "play Bohemian Rhapsody on Spotify" | Opens a Spotify **search** — you press play |
+
+**Task 20 is the honest version of what M18 set out to build.** The plan was to start playback
+over the Spotify Web API; that needs Spotify Premium (twice over — a development-mode app also
+needs the *owner's* account to be Premium), and this account is free. Rather than ship a
+connector that could never be tested against anything real, the Web API tools are **parked**
+with their design intact (`spec.md` §9), and what's here opens the search and says so. It never
+claims something is playing, because it can't know.
+
+**18 and 19 are named for the system, not for Spotify, because that's what they touch.** A media
+key goes to whichever app owns the Windows media session — Spotify, a YouTube tab, sometimes
+nothing — and a volume key moves the whole machine. Nothing here can read the volume back or ask
+what's playing, so every result says what was **sent**: *"Sent volume up 5 times"*, never
+*"Volume is now 40%"*.
+
 Anything else → an honest refusal, logged as a miss (a ranked backlog of what to build next).
 It never guesses.
 
@@ -563,6 +585,29 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M18 is code-complete and has never been run by a human (944 tests, 55 files).** That's stated
+first because it's the most important thing to know about it. Every milestone from M10 on
+produced at least one live bug no fixture caught, and M18 adds a command to the **same**
+PowerShell input host that dictation depends on — so the first item on
+`docs/M18-live-checklist.md` isn't a feature check, it's a regression check that dictation still
+types.
+
+What *is* proved deterministically: the app catalog refuses every near-miss a fuzzy rule would
+have accepted ("spotifyy", "spot", "notepad.exe", "my music player"); `APPS_EXTRA`'s fifteen
+rejection classes each produce their exact sentence and leave nothing in the catalog; the six
+virtual-key codes are asserted against literals **written independently in the test**, with a
+dedicated check that volume up and down can't be transposed; a repeat count is honoured only for
+the volume keys, because five presses of `mute` would land back where they started and five of
+`next` would skip five tracks; and thirteen encoding cases prove no `searchSpotify` query can
+retarget the URL off `open.spotify.com`.
+
+What only a keyboard can tell us: whether a synthetic `VkEvent` actually moves the volume and by
+how much (the 2%-per-press figure is from documentation, and the default of 5 was chosen from
+it); whether 15 presses at a 40 ms gap leaves a stuck key, since that gap was measured for
+`KEYEVENTF_UNICODE` events, which are a different signal to Windows' key-repeat handling; which
+app a media key actually reaches; and — as always — **which tool the model picks**, which no
+test here can speak to, because every test drives tool choice through `FakeLLM`.
 
 **Chaining — the machinery is proved, the model's judgement is not (M17).** Everything
 deterministic is tested: steps run in order; `{step1}` reaches step 2 carrying the earlier step's
