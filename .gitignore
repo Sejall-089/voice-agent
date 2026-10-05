@@ -13,3 +13,8 @@ tts-recon-out/
 # delete them by default (screen-recon keeps them only with --keep).
 screen-recon-out/
 vision-recon-out/
+
+# Recon output — captured Spotify API responses from scripts/spotify-recon.mjs. Never
+# committed: tokens are redacted on the way to disk, but the bodies still carry account
+# details (country, device names, what was playing).
+spotify-recon-out/
