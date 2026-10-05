@@ -1,5 +1,7 @@
 import type { AudioClip } from "../../core/types.ts";
 import { BUILT_IN_CATALOG, createAppLauncher, type AppLauncher } from "./appLaunch.ts";
+import { pressesFor } from "../../core/media.ts";
+import { virtualKeyFor } from "./mediaKeys.ts";
 import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
@@ -23,6 +25,12 @@ export interface MockShellOptions {
   // only ever prove the guard was consulted, never that it held. When set, confirm() stays
   // pending until the test calls answerConfirm().
   holdConfirm?: boolean;
+  // When set, a `mediaKey` action fails with this message (M18) — the short-write / UIPI-blocked
+  // case the real host reports as `KEY ERR`.
+  failMediaKeyWith?: string;
+  // How long the fake injector pretends the OS took, per press. Non-zero by default: see
+  // `pressKeys` below for why a synchronous fake here would be a weaker test than it looks.
+  mediaKeyDelayMs?: number;
 }
 
 // Headless implementation of the OSShell contract (spec.md §4) and the VoiceShell contract
@@ -48,6 +56,12 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   // between the two is where the catalog does its work, and a test that only saw one of them
   // could not tell "resolved Spotify to its protocol handler" from "passed the word through".
   public readonly launched: string[] = [];
+  // Every (virtual key, press count) pair that actually reached the "OS" (M18), in order, and
+  // recorded only AFTER the fake injector's delay. `actions` holds what was ASKED FOR — the
+  // media-key NAME and the requested count — and this holds what it resolved to. The gap
+  // between them is where the keycode table and the repeat policy do their work, so a test
+  // that saw only one of the two could not tell a correct mapping from a pass-through.
+  public readonly pressed: { vk: number; count: number }[] = [];
   public stopPlaybackCalls = 0;
   public recordingsStarted = 0;
   public recordingsStopped = 0;
@@ -91,6 +105,9 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     },
   });
 
+  private readonly failMediaKeyWith: string | undefined;
+  private readonly mediaKeyDelayMs: number;
+
   constructor(options: MockShellOptions) {
     this.context = options.context;
     this.inputs = [...(options.inputs ?? [])];
@@ -99,6 +116,28 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     this.failRecording = options.failRecording;
     this.holdPlayback = options.holdPlayback ?? false;
     this.holdConfirm = options.holdConfirm ?? false;
+    this.failMediaKeyWith = options.failMediaKeyWith;
+    this.mediaKeyDelayMs = options.mediaKeyDelayMs ?? 1;
+  }
+
+  // The fake injector, inline rather than a separate class because it is three lines and one
+  // decision — but that decision matters, so it is written out rather than defaulted.
+  //
+  // ASYNC, WITH A REAL DELAY, AND IT RECORDS ONLY AFTER THE DELAY. The real
+  // `WindowsInputInjector.pressKey` is a round trip to a PowerShell host that sleeps 40ms
+  // between presses; a fake that resolved in the same tick could only ever prove the CALL
+  // happened, never that the PRESS landed before whatever else the test cares about. M16.9
+  // shipped a real bug straight through a test that made exactly that substitution — a
+  // synchronous fake for an async read — and a human at the keyboard found it two milestones
+  // later (CLAUDE.md).
+  //
+  // It rejects with a BARE `Error`, which is what the real implementation throws on a short
+  // write. Verified against it rather than assumed: `typeText` throws a bare Error too, so
+  // there is no typed-error family here to drift away from.
+  private async pressKeys(vk: number, count: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, this.mediaKeyDelayMs));
+    if (this.failMediaKeyWith !== undefined) throw new Error(this.failMediaKeyWith);
+    this.pressed.push({ vk, count });
   }
 
   registerHotkey(): boolean {
@@ -170,6 +209,21 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     // M18. Recorded like any other side effect, and then actually RESOLVED — so an unknown
     // name comes back `{ ok: false }` here just as it would on Windows. See the `apps` field.
     if (action.kind === "openApp") return this.apps.launch(action.payload);
+    // M18. Resolved through the SAME `pressesFor` and `virtualKeyFor` the real shell uses, so
+    // the mock is never more lenient than Windows (CLAUDE.md): a `mute` asked for five times
+    // is recorded as one press here exactly as it would be pressed once there, and a thrown
+    // short write comes back as { ok: false } with the host's message rather than as a
+    // rejection no caller expects.
+    if (action.kind === "mediaKey") {
+      const presses = pressesFor(action.payload, action.count);
+      return this.pressKeys(virtualKeyFor(action.payload), presses).then(
+        () => ({ ok: true }),
+        (error: unknown) => ({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     return Promise.resolve({ ok: true });
   }
 

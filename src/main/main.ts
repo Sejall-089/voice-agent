@@ -363,14 +363,25 @@ app.whenReady().then(() => {
   const voice = transcriber ? new VoiceSession(shell, transcriber) : null;
 
   // M12: dictation needs the same transcriber voice does — no whisper, no dictation either,
-  // same "off is a real state" rule as M7/M8. The injector is only constructed alongside it,
-  // so a voice-off install never spawns the PowerShell input host at all.
-  const injector = transcriber ? new WindowsInputInjector() : null;
+  // same "off is a real state" rule as M7/M8.
+  //
+  // THE INJECTOR ITSELF IS NO LONGER TIED TO THAT (M18). It used to be built only alongside
+  // dictation, on the reasoning that a voice-off install should never spawn the PowerShell
+  // input host — but the media-key tools press keys through this same injector and have nothing
+  // to do with voice, so gating it on whisper would leave three ungated tools permanently
+  // broken on a machine with no transcriber.
+  //
+  // The property that comment was protecting is kept, because `ensureStarted()` is LAZY: the
+  // host process spawns on first use, not at construction. An install that never dictates and
+  // never presses a media key still never starts it. What changed is that "never used" is now
+  // decided by use rather than by configuration.
+  const injector = new WindowsInputInjector();
   inputInjector = injector;
-  const dictation =
-    transcriber && injector
-      ? new DictationSession(shell, transcriber, injector)
-      : null;
+  // The shell presses media keys through the SAME instance DictationSession uses — one host for
+  // the whole app. A second WindowsInputInjector would mean a second ~500ms Add-Type compile
+  // and a second process to dispose.
+  shell.attachInput(injector);
+  const dictation = transcriber ? new DictationSession(shell, transcriber, injector) : null;
 
   // One hotkey: open the bar and start listening at the same moment. The handler lives in
   // instructionHotkey.ts rather than here, so its guards are testable without booting electron

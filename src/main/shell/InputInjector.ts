@@ -1,4 +1,5 @@
-// The system-wide text-insertion contract (M12). Dictation types into whatever OS window
+// The system-wide synthetic-input contract (M12; widened at M18 to cover real key presses -
+// see `pressKey`). Dictation types into whatever OS window
 // currently has focus, in ANY app — there is no CDP-equivalent for that on Windows, so this
 // is the primitive Chrome's `Input.dispatchMouseEvent`/`Input.dispatchKeyEvent` played for
 // Gmail/Notion (spec.md §3, §6b): real device-level input, not a JS/DOM call the target can
@@ -39,6 +40,25 @@ export interface InputInjector {
   // unelevated process from typing into an elevated window), and the honest response is a
   // refusal, never a partially-typed, uncorrectable mess left in the user's document.
   typeText(text: string): Promise<void>;
+
+  // Press a real virtual key, `count` times, via SendInput with a genuine `wVk` and a
+  // KEYEVENTF_KEYUP after each press (M18). NOT the KEYEVENTF_UNICODE path `typeText` uses:
+  // that one deliberately sends `wVk = 0` with the character in `wScan`, which types a
+  // character and is exactly the wrong signal for a key that has no character - a media key is
+  // meaningful as a KEY, and the shell that owns the media session is listening for the
+  // keycode.
+  //
+  // WHY THIS BELONGS ON THE TEXT-INSERTION CONTRACT RATHER THAN A NEW ONE. It is the same
+  // primitive (SendInput), through the same persistent PowerShell host, with the same
+  // un-swallowable success signal, and the whole argument in the comment above applies to it
+  // word for word. A second contract would mean either a second host process - another ~500ms
+  // Add-Type compile and another thing to dispose - or one class implementing two interfaces
+  // for no gain. So the contract's name outgrew "text" and its reasoning did not.
+  //
+  // Throws on a short write, for the identical reason `typeText` does. `count` is expected to
+  // be already resolved (`core/media.ts`'s `pressesFor`); this is the transport, not the place
+  // that decides policy.
+  pressKey(vk: number, count: number): Promise<void>;
 
   // Releases the persistent host process backing this injector. Call once, at app shutdown.
   dispose(): void;

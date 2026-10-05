@@ -1,3 +1,7 @@
+// Type-only, so this file stays a pure contract with no runtime dependency on /core - the
+// names and press limits are core's to own (M18), the keycodes are the shell's.
+import type { MediaKey } from "../../core/media.ts";
+
 // The portability contract (spec.md §4). The core NEVER calls OS APIs directly —
 // it only calls these methods. Porting to another OS = reimplementing this interface.
 
@@ -28,7 +32,18 @@ export type LocalAction =
   // command line is neither — there is no check that distinguishes a reasonable one from a
   // harmful one, so the model never gets to write one. Same rule as `pointAt`'s coordinates,
   // which come from the OS and never from a model (§6d).
-  | { kind: "openApp"; payload: string };
+  | { kind: "openApp"; payload: string }
+  // M18. Press a media key - system volume, or whatever owns the Windows media session. The
+  // same shape of contract as `openApp` above: the payload is ONE OF SIX NAMES
+  // (`core/media.ts`), and the virtual-key code it becomes lives in
+  // `src/main/shell/mediaKeys.ts`, where the model cannot reach it.
+  //
+  // `count` is a REQUEST, not an instruction. The shell resolves it through
+  // `pressesFor(key, count)`, which clamps it to 1-15 and forces 1 for every key where a
+  // repeat is meaningless or harmful - `mute` and `playPause` are toggles that would land back
+  // where they started, and five `next` presses skip five tracks, which is not "next" by any
+  // reading of the word. See core/media.ts.
+  | { kind: "mediaKey"; payload: MediaKey; count?: number };
 
 export interface OSShell {
   // Returns false when the OS refused the combo — another app already owns it. The caller

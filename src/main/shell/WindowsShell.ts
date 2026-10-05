@@ -13,6 +13,9 @@ import {
   spawnDetached,
   type AppLauncher,
 } from "./appLaunch.ts";
+import { pressesFor } from "../../core/media.ts";
+import type { InputInjector } from "./InputInjector.ts";
+import { virtualKeyFor } from "./mediaKeys.ts";
 import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
@@ -75,6 +78,12 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     spawn: spawnDetached,
     openExternal: (uri: string) => electronShell.openExternal(uri),
   });
+  // The synthetic-input host (M18), or null until main.ts hands one over. THE SAME INSTANCE
+  // DictationSession gets — one PowerShell host for the whole app, not one per feature, since
+  // starting a second would mean a second ~500ms Add-Type compile and a second process to
+  // dispose. Nullable rather than self-constructed for exactly that reason: the shell must not
+  // own a thing another part of the app also needs.
+  private input: InputInjector | null = null;
   // How to take the pointing marker away (M15), or null on an install with vision off. Held as a
   // bare callback rather than the whole ScreenSurface because this is the only thing the shell
   // has any business doing to it — the shell does not capture and does not point, it only knows
@@ -311,6 +320,14 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // learns what `.env` is.
   attachApps(launcher: AppLauncher): void {
     this.apps = launcher;
+  }
+
+  // --- Media keys (M18) ---
+
+  // The injector to press keys through, once main.ts has built one. Same shape as attachApps
+  // and attachSpeech above.
+  attachInput(injector: InputInjector): void {
+    this.input = injector;
   }
 
   // --- The pointing marker (M15) ---
@@ -566,6 +583,27 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
           // be worse, because then there WOULD be a path from model output to a protocol
           // handler. Do not "fix" this by making the two cases symmetric.
           return await this.apps.launch(action.payload);
+        }
+        case "mediaKey": {
+          // No injector means the input host was never wired up. Said out loud rather than
+          // reported as success: a volume key that silently does nothing is indistinguishable
+          // from a broken app, which is the same reasoning registerHotkey's boolean exists for.
+          if (this.input === null) {
+            return {
+              ok: false,
+              error: "I can't press media keys - the input host isn't wired up on this machine.",
+            };
+          }
+          // RESOLVED HERE, NOT TRUSTED FROM THE ACTION. `pressesFor` clamps to 1-15 and forces
+          // a single press for every key where a repeat is meaningless or harmful (mute and
+          // play/pause are toggles; five `next` presses skip five tracks). The tool applies the
+          // same function, so this is defence in depth against an action that arrives with a
+          // count no tool would have sent - never a second, disagreeing policy.
+          const presses = pressesFor(action.payload, action.count);
+          // A short write throws, and the surrounding catch turns that into { ok: false } with
+          // the host's own explanation. Never downgraded to a silent success.
+          await this.input.pressKey(virtualKeyFor(action.payload), presses);
+          return { ok: true };
         }
       }
     } catch (error) {

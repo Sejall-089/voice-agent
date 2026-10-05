@@ -20,6 +20,7 @@ import type { ForegroundWindow, InputInjector } from "./InputInjector.ts";
 //
 //   FG                          -> "FG <hwnd> <base64 title>"  or  "FG NONE"
 //   TYPE <base64 utf16le text>  -> "TYPE OK <sent>"  or  "TYPE ERR <sent> <expected> <win32err>"
+//   KEY <vk> <count>            -> "KEY OK <sent>"   or  "KEY ERR <sent> <expected> <win32err>"
 //
 // The host chunks a TYPE request into small SendInput bursts with a short sleep between
 // them (CHUNK_SIZE_CHARS / CHUNK_DELAY_MS below) rather than one giant burst — apps doing
@@ -59,6 +60,9 @@ import type { ForegroundWindow, InputInjector } from "./InputInjector.ts";
 const STARTUP_TIMEOUT_MS = 10_000; // Add-Type compiled in ~500ms locally; generous headroom for a cold machine
 const FOREGROUND_TIMEOUT_MS = 5_000; // a plain user32 read; if this hangs, the host is dead
 const TYPE_TIMEOUT_MS = 20_000; // covers even a very long transcript's worth of chunks
+// M18. The ceiling is 15 presses with a 40ms gap after each - about 600ms of real work - so
+// this is generous headroom rather than a budget, and a host that takes longer is wedged.
+const KEY_TIMEOUT_MS = 10_000;
 
 // How many characters go into one SendInput burst, and how long to pause between bursts.
 // Same convention as ChromeNotion's FOCUS_SETTLE_MS/KEY_SETTLE_MS: named constants because
@@ -125,6 +129,21 @@ public static class VoiceAgentInput {
         inp.ki.dwExtraInfo = IntPtr.Zero;
         return inp;
     }
+
+    // M18. A REAL key, not a character. The mirror image of KeyEvent above: the virtual-key
+    // code goes in wVk and wScan is empty, where KeyEvent puts the character in wScan and
+    // leaves wVk at 0. That difference is the whole point - a media key carries no character,
+    // and the application owning the Windows media session is listening for the keycode.
+    public static INPUT VkEvent(ushort vk, bool keyUp) {
+        INPUT inp = new INPUT();
+        inp.type = INPUT_KEYBOARD;
+        inp.ki.wVk = vk;
+        inp.ki.wScan = 0;
+        inp.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0u;
+        inp.ki.time = 0;
+        inp.ki.dwExtraInfo = IntPtr.Zero;
+        return inp;
+    }
 }
 '@
 
@@ -186,6 +205,34 @@ while ($true) {
                 Write-Output "TYPE OK $sent"
             } else {
                 Write-Output "TYPE ERR $sent $expected $lastError"
+            }
+        } elseif ($line.StartsWith("KEY ")) {
+            $parts = $line.Substring(4).Split(' ')
+            $vk = [uint16]$parts[0]
+            $count = [int]$parts[1]
+            $expected = $count * 2
+            $sent = 0
+            $lastError = 0
+            for ($k = 0; $k -lt $count; $k++) {
+                $events = New-Object 'VoiceAgentInput+INPUT[]' 2
+                $events[0] = [VoiceAgentInput]::VkEvent($vk, $false)
+                $events[1] = [VoiceAgentInput]::VkEvent($vk, $true)
+                $result = [VoiceAgentInput]::SendInput([uint32]2, $events, $InputSize)
+                $sent += [int]$result
+                if ($result -ne [uint32]2) {
+                    $lastError = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                    break
+                }
+                # The same gap TYPE uses between chunks, and for the same measured reason
+                # (M12.1): synthetic key events closer together than this tripped Windows own
+                # key-repeat handling. A volume key is exactly the place a user would notice
+                # that as a stuck key.
+                if ($k -lt ($count - 1)) { Start-Sleep -Milliseconds ${CHUNK_DELAY_MS} }
+            }
+            if ($sent -eq $expected) {
+                Write-Output "KEY OK $sent"
+            } else {
+                Write-Output "KEY ERR $sent $expected $lastError"
             }
         } else {
             Write-Output "ERR unknown-command"
@@ -354,6 +401,36 @@ export class WindowsInputInjector implements InputInjector {
         throw new Error(
           `Typing was blocked partway through (${sent}/${expected} keystrokes delivered, ` +
             `Win32 error ${win32Error}) — most likely the focused window has higher ` +
+            `privileges than this app.`,
+        );
+      }
+    }
+
+    throw new Error(`The input host reported a failure: ${line}`);
+  }
+
+  // M18. The same request/reply shape as typeText, and the same refusal to swallow a short
+  // write. `count` arrives already resolved by core/media.ts's `pressesFor` - this is the
+  // transport and decides no policy - but the range is re-checked here anyway, because a
+  // keycode is the one value in this file that reaches the OS verbatim.
+  async pressKey(vk: number, count: number): Promise<void> {
+    if (!Number.isInteger(vk) || vk < 1 || vk > 254) {
+      throw new Error(`Refusing to press a virtual key outside 1-254: ${vk}`);
+    }
+    if (!Number.isInteger(count) || count < 1) return;
+
+    await this.ensureStarted();
+    const line = await this.request(`KEY ${vk} ${count}`, KEY_TIMEOUT_MS);
+
+    if (line.startsWith("KEY OK")) return;
+
+    if (line.startsWith("KEY ERR")) {
+      const match = /^KEY ERR (\d+) (\d+) (-?\d+)$/.exec(line);
+      if (match) {
+        const [, sent, expected, win32Error] = match;
+        throw new Error(
+          `The key press was blocked partway through (${sent}/${expected} events delivered, ` +
+            `Win32 error ${win32Error}) - most likely the focused window has higher ` +
             `privileges than this app.`,
         );
       }
