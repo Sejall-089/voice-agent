@@ -1,7 +1,20 @@
 import "dotenv/config";
 import { join } from "node:path";
-import { app, BrowserWindow, globalShortcut, screen, session } from "electron";
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  screen,
+  session,
+  shell as electronShell,
+} from "electron";
 import { WindowsShell } from "./shell/WindowsShell.ts";
+import {
+  BUILT_IN_CATALOG,
+  createAppLauncher,
+  parseExtraApps,
+  spawnDetached,
+} from "./shell/appLaunch.ts";
 import { VoiceSession } from "./shell/VoiceSession.ts";
 import { DictationSession } from "./shell/DictationSession.ts";
 import { WindowsInputInjector } from "./shell/WindowsInputInjector.ts";
@@ -171,6 +184,29 @@ app.whenReady().then(() => {
   commandBar.setContentProtection(true);
 
   const shell = new WindowsShell(commandBar);
+
+  // M18. APPS_EXTRA is read HERE, in composition — /core never touches process.env — and
+  // handed to the shell as a built catalog. The shell already works without this (its default
+  // launcher covers the built-ins), so this call only WIDENS what can be opened.
+  //
+  // Every malformed entry is printed. A config value that silently does nothing is
+  // indistinguishable from the feature being broken, and `parseExtraApps` returns the problems
+  // precisely so the decision of what to do with them is not buried in a parser. The parsing
+  // and every rejection message are tested in tests/appLaunch.test.ts; what is left here is
+  // three lines of wiring, which is all that belongs in this file (CLAUDE.md).
+  const extraApps = parseExtraApps(process.env["APPS_EXTRA"]);
+  for (const problem of extraApps.problems) console.log(`[main] ${problem}`);
+  if (extraApps.entries.length > 0) {
+    console.log(
+      `[main] APPS_EXTRA added: ${extraApps.entries.map((entry) => entry.label).join(", ")}`,
+    );
+    shell.attachApps(
+      createAppLauncher([...BUILT_IN_CATALOG, ...extraApps.entries], {
+        spawn: spawnDetached,
+        openExternal: (uri: string) => electronShell.openExternal(uri),
+      }),
+    );
+  }
 
   // Voice capture runs in the renderer, so the window needs the media permission. Grant
   // ONLY that one — everything else stays denied by default.
