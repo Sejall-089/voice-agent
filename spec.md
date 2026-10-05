@@ -73,6 +73,24 @@ Fuzzy human sentence  →  exact function call.
   putting speech recognition on the one gate that must never be bypassed needs its own
   fail-closed design, and gets its own milestone if it is ever built.
 
+**Added after v0 (M18):**
+- **Launching a local app from a closed allowlist.** "Open Spotify", "open Notepad" — a new
+  *kind* of local action, the first thing the shell does that is neither a URL, the clipboard,
+  a notification, nor speech. The model supplies **a name the user said and nothing else**: the
+  catalog of launchable apps lives in the shell, every path and protocol URI with it, and an
+  unmatched name is refused with the list of what *can* be opened. There is no fuzzy matching
+  and no way to pass arguments, so "open X" can never become "run X with these flags" — the
+  same proposes/disposes split §5's key rule states, applied to a command line. See §9's M18.
+- **Spotify, via the Web API** (search, play, volume) — see the connector guardrail below for
+  why this one needed an explicit amendment rather than just an entry here. Playback control
+  requires Spotify Premium; a development-mode app additionally requires the app owner's own
+  account to be Premium, so "I can't do that without Premium" is a first-class named failure
+  rather than a generic error. Launching the Spotify *app* and controlling *playback* are
+  deliberately two separate tools with two different tiers — `openApp` is `reversible`,
+  `playOnSpotify` is `caution` — and the playback tool never auto-launches the app: with no
+  active device it refuses and says to open Spotify, because starting an application is not
+  something to do as a side effect of being asked to play a song.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
   live-verified. It was out of v0 deliberately — voice is a second way to produce the
@@ -116,7 +134,18 @@ Fuzzy human sentence  →  exact function call.
   M16 additionally closed the one way that decision could still be silently wrong (a
   model-emitted coordinate), which auto-click would reintroduce by construction.
 - macOS or Linux shells (architect for them via the interface, implement Windows only).
-- More than one external connector.
+- ~~More than one external connector.~~ **Overtaken long before M18 and never amended, which
+  is the honest version of this entry.** v0 shipped one (Slack's webhook, M5); Gmail came in at
+  M10, Notion at M11, Google Calendar at M13 — and none of those milestones struck this line,
+  so the guardrail has been quietly false since M10. Spotify (M18) is the fifth, not the
+  second. **What the line was actually protecting is kept, and it was never the count:** every
+  connector sits behind its own interface in `/core` with an "unavailable" default, is gated on
+  its own configuration so an unconfigured one is never even on the menu, and is tested against
+  a fake rather than the real service. Those are the rules; "no more than one" was a proxy for
+  them that stopped measuring anything once the second one was built to them. A sixth connector
+  is a cost question (another OAuth flow, another live-verification pass, another thing to keep
+  working), not a scope violation — so **ask before adding one**, and expect the three rules
+  above to be the whole of the answer.
 - **Open-ended** agent loops. Narrowed at M17, not lifted: a FIXED plan of up to 3 existing
   tools, decided in one planning call and executed by deterministic code, is now in scope (§5b).
   What stays out is the shape where the model sees each result and decides its next move — no
@@ -1713,6 +1742,26 @@ Post-v0:
       instruction, and no step's risk tier changes by being chained. See §5b for the full
       design and what was deliberately deferred (field-level `{step1.attendees}` references,
       which no tool can currently emit, and which the expressible chains turn out not to need).
+
+- [ ] **M18 — Opening apps, and Spotify.** Two capabilities that happen to share one sentence
+      ("open Spotify") and are deliberately kept apart underneath it.
+      **Launching an app** adds a fifth `LocalAction` kind, `openApp`, carrying *the name the
+      user said* — the shell resolves it against a closed allowlist (`core/apps.ts` holds the
+      names, `src/main/shell/appLaunch.ts` holds the paths and protocol URIs), so the model
+      never supplies a path, a command, or an argument. Exact matching on id, label or alias
+      only; an unmatched name is refused with the list of what *can* be opened, never
+      approximated. `APPS_EXTRA` lets a user add their own `Name=command` entries, validated at
+      startup — a malformed entry is reported and never launched.
+      **Spotify** is a fifth connector (§2), behind `SpotifySurface` with the same
+      unavailable-default, config-gated, tested-against-a-fake rules every surface since M10
+      has followed: `playOnSpotify` (`caution` — its narration does the search, so the user
+      hears the title that is about to play *before* it plays, and the handler plays that same
+      resolved URI rather than searching twice) and `spotifyVolume` (`reversible`, clamped
+      0–100). Gated on `SPOTIFY_CLIENT_ID` + `SPOTIFY_REFRESH_TOKEN`; `npm run spotify:connect`
+      is the one-time PKCE flow, on a loopback **IP literal** because Spotify disallows
+      `localhost` as a redirect URI since April 2025.
+      **What it is not:** no pause/next/previous, no playlists, no queueing, no launching an
+      app with arguments, and no auto-launching Spotify to satisfy a play request.
 
 **v0 status: complete.** **798 tests green** (`npm test`) across 50 files (M17 added 123 over
 M16's 675: 19 for the plan parser, 37 for the chain gate (32 original, plus 5 for
