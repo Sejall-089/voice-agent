@@ -17,7 +17,18 @@ export type LocalAction =
   // accepts it and does nothing — exactly as `notify` did for every milestone before M10 had
   // anything to narrate. The payload is already speakable (core/speech.ts); nothing downstream
   // rewrites it.
-  | { kind: "speak"; payload: string };
+  | { kind: "speak"; payload: string }
+  // M18. Start an installed application. THE PAYLOAD IS THE NAME THE USER SAID — not a path,
+  // not a command, not a protocol URI. The shell owns the catalog (`core/apps.ts` for the
+  // names, `appLaunch.ts` for the commands) and resolves the name against it, so the only
+  // thing crossing this boundary from the model's side is a string a person uttered.
+  //
+  // That asymmetry with `openUrl` is deliberate. `openUrl` carries a resolved URL because a
+  // URL is a value the model can legitimately know and the shell can validate on sight; a
+  // command line is neither — there is no check that distinguishes a reasonable one from a
+  // harmful one, so the model never gets to write one. Same rule as `pointAt`'s coordinates,
+  // which come from the OS and never from a model (§6d).
+  | { kind: "openApp"; payload: string };
 
 export interface OSShell {
   // Returns false when the OS refused the combo — another app already owns it. The caller

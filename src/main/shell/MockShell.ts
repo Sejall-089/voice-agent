@@ -1,4 +1,5 @@
 import type { AudioClip } from "../../core/types.ts";
+import { BUILT_IN_CATALOG, createAppLauncher, type AppLauncher } from "./appLaunch.ts";
 import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
@@ -42,6 +43,11 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   public readonly spoken: string[] = [];
   // Utterances handed to the player, in order, and how many times playback was cut off (M14).
   public readonly played: Uint8Array[] = [];
+  // Every command or protocol URI an `openApp` action actually reached the OS with (M18), in
+  // order. Separate from `actions`, which records the NAME that was asked for — the gap
+  // between the two is where the catalog does its work, and a test that only saw one of them
+  // could not tell "resolved Spotify to its protocol handler" from "passed the word through".
+  public readonly launched: string[] = [];
   public stopPlaybackCalls = 0;
   public recordingsStarted = 0;
   public recordingsStopped = 0;
@@ -67,6 +73,23 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   // anything. It is what the M17 chain tests read to prove the hotkey guard's precondition is
   // actually true while a chain is parked at a dialog.
   private confirmPending = false;
+  // THE SAME LAUNCHER THE REAL SHELL BUILDS, over THE SAME built-in catalog — only the `io` is
+  // faked (CLAUDE.md: "a fake must never be more lenient than the real thing"). The temptation
+  // here was to let `executeAction` record an `openApp` action and return `{ ok: true }` the
+  // way it does for every other kind, which is exactly the shape of fake that M13's
+  // `FakeCalendar` was: lenient where the real thing is strict, and therefore blind to the one
+  // bug it existed to catch. An unknown app name has to fail HERE, with the real matching rules
+  // and the real refusal message, or `openApp`'s refusal path is never tested at all.
+  private readonly apps: AppLauncher = createAppLauncher(BUILT_IN_CATALOG, {
+    spawn: (command: string): Promise<void> => {
+      this.launched.push(command);
+      return Promise.resolve();
+    },
+    openExternal: (uri: string): Promise<void> => {
+      this.launched.push(uri);
+      return Promise.resolve();
+    },
+  });
 
   constructor(options: MockShellOptions) {
     this.context = options.context;
@@ -144,6 +167,9 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
       return Promise.resolve({ ok: true });
     }
     this.actions.push(action);
+    // M18. Recorded like any other side effect, and then actually RESOLVED — so an unknown
+    // name comes back `{ ok: false }` here just as it would on Windows. See the `apps` field.
+    if (action.kind === "openApp") return this.apps.launch(action.payload);
     return Promise.resolve({ ok: true });
   }
 

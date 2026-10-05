@@ -279,7 +279,9 @@ export interface CapturedContext {
 export type LocalAction =
   | { kind: "openUrl"; payload: string }
   | { kind: "copyToClipboard"; payload: string }
-  | { kind: "notify"; payload: string };
+  | { kind: "notify"; payload: string }
+  | { kind: "speak"; payload: string }     // M14 — see §4d
+  | { kind: "openApp"; payload: string };  // M18 — a NAME, never a path or command
 
 export interface OSShell {
   registerHotkey(combo: string, onTrigger: () => void): boolean;  // false = combo taken
@@ -294,6 +296,16 @@ export interface OSShell {
 **Build a `MockShell` first.** It returns canned context, logs actions instead of
 running them, and lets the entire core + memory + tests run headless with no
 Electron. Wire the real `WindowsShell` last.
+
+> **`openApp`'s payload is a NAME, and that asymmetry with `openUrl` is the design (M18).**
+> `openUrl` carries a resolved URL because a URL is something the model can legitimately know
+> and the shell can validate on sight — `WindowsShell` refuses any protocol but http(s). A
+> command line has no such check: nothing distinguishes a reasonable one from a harmful one by
+> inspection. So the model never writes one. It passes the name the user said, and the shell
+> resolves it against a closed catalog — names in `core/apps.ts`, commands and protocol URIs in
+> `src/main/shell/appLaunch.ts` — by exact match, or refuses with the list of what it can open.
+> `MockShell` runs the SAME launcher over the SAME catalog with a faked `io`, so an unmatched
+> name fails in tests exactly where it fails live (CLAUDE.md's rule about lenient fakes).
 
 v0 selection capture is intentionally simple: `getContext()` reads the current
 system clipboard as `selectedText`. The user workflow is "select → copy (Ctrl+C) →

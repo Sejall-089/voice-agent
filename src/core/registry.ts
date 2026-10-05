@@ -2,6 +2,7 @@ import type { Tool, ToolSchema } from "./types.ts";
 import { summarizeTool } from "./tools/summarize.ts";
 import { rewriteTool } from "./tools/rewrite.ts";
 import { openTargetTool } from "./tools/openTarget.ts";
+import { openAppTool } from "./tools/openApp.ts";
 import { rememberTool } from "./tools/remember.ts";
 import { sendMessageTool } from "./tools/sendMessage.ts";
 import { recallTool } from "./tools/recall.ts";
@@ -24,6 +25,12 @@ export const registry: Tool[] = [
   rememberTool,
   sendMessageTool,
   recallTool,
+  // M18. UNGATED, unlike every tool added since M10, and the asymmetry is deliberate: three of
+  // the four built-in apps ship with Windows, so there is no "is it configured?" question to
+  // answer and nothing to be unreachable. Spotify is the one that may be absent, and that is
+  // reported by the OS at launch time rather than predicted — there is no cheap, synchronous
+  // check for "is this installed" to gate on, and guessing would hide an app the user has.
+  openAppTool,
 ];
 
 // The Gmail tools (M10). They only work against a Chrome started with remote debugging, so they

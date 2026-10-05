@@ -7,6 +7,12 @@ import {
   shell as electronShell,
 } from "electron";
 import type { AudioClip } from "../../core/types.ts";
+import {
+  BUILT_IN_CATALOG,
+  createAppLauncher,
+  spawnDetached,
+  type AppLauncher,
+} from "./appLaunch.ts";
 import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
@@ -58,6 +64,17 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // The speech queue (M14), or null on an install with no synthesizer configured. Held rather
   // than constructed here because it needs this shell to play through.
   private speech: Speaker | null = null;
+  // How to open an installed app (M18). Unlike `speech` and `dismissPointer` this is NOT
+  // nullable and does NOT default to doing nothing: the built-in catalog needs no
+  // configuration to work (three of its four entries ship with Windows), so an install where
+  // main.ts never called `attachApps` can still open Notepad. `attachApps` exists only to
+  // widen this with the user's own APPS_EXTRA entries, which is composition's business because
+  // it reads `.env` — and a shell that silently refused everything until wired would be a
+  // capability that fails by appearing broken.
+  private apps: AppLauncher = createAppLauncher(BUILT_IN_CATALOG, {
+    spawn: spawnDetached,
+    openExternal: (uri: string) => electronShell.openExternal(uri),
+  });
   // How to take the pointing marker away (M15), or null on an install with vision off. Held as a
   // bare callback rather than the whole ScreenSurface because this is the only thing the shell
   // has any business doing to it — the shell does not capture and does not point, it only knows
@@ -285,6 +302,15 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // THIS shell to play through — the same shape as onDismissed/onTypingStarted.
   attachSpeech(session: Speaker): void {
     this.speech = session;
+  }
+
+  // --- Opening apps (M18) ---
+
+  // Replace the built-in catalog with a wider one, once main.ts has read APPS_EXTRA. Same
+  // shape as attachSpeech and attachPointer: the shell is handed a built thing and never
+  // learns what `.env` is.
+  attachApps(launcher: AppLauncher): void {
+    this.apps = launcher;
   }
 
   // --- The pointing marker (M15) ---
@@ -525,6 +551,21 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
           // has carried unimplemented since M0 — M10 is the first tool with something to say.
           this.narrate(action.payload);
           return { ok: true };
+        }
+        case "openApp": {
+          // M18. The payload is a NAME; the launcher resolves it against the catalog and
+          // refuses anything it cannot match, without starting a process.
+          //
+          // NOTE THAT `spotify:` REACHES `openExternal` WITHOUT PASSING THE http(s) CHECK the
+          // `openUrl` case above applies, and that is correct rather than an oversight. That
+          // check exists because `openUrl`'s payload ORIGINATES IN LLM OUTPUT, so the protocol
+          // is whatever a model wrote. Here the URI comes from a hard-coded table keyed by a
+          // name that had to match the catalog exactly, and `APPS_EXTRA` protocol entries are
+          // shape-checked and denylisted at parse time (appLaunch.ts). Adding an http(s) guard
+          // here would simply break Spotify; moving the catalog's URIs through `openUrl` would
+          // be worse, because then there WOULD be a path from model output to a protocol
+          // handler. Do not "fix" this by making the two cases symmetric.
+          return await this.apps.launch(action.payload);
         }
       }
     } catch (error) {
