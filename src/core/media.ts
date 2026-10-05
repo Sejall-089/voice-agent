@@ -78,3 +78,42 @@ export function acceptsRepeat(key: MediaKey): boolean {
 export function pressesFor(key: MediaKey, requested: unknown): number {
   return acceptsRepeat(key) ? clampPresses(requested) : 1;
 }
+
+// How each key is described after the fact, for the one sentence the user reads.
+//
+// IN CORE RATHER THAN BESIDE THE KEYCODES, because the tools build their result text and
+// `/core` must not import from `src/main/` at runtime (spec.md §10). It belongs here anyway:
+// what to CALL the thing is no more OS-specific than the six names above it.
+//
+// Every phrase is a thing SENT, never a resulting state, and that wording is load-bearing
+// rather than modest: nothing in this app can read the system volume back or ask what is
+// playing. "Volume is now 40%" would be a guess dressed as a fact, and "Now playing" would be
+// a claim about an application we never spoke to.
+//
+// NOTE `playPause` IS "play or pause", NOT "play/pause". A slash is printable ASCII, so
+// nothing in the speech path strips it (core/speech.ts maps dashes, arrows and quotes but has
+// no rule for it) and Piper would voice it as a word. That is M14's "a URL read character by
+// character is unbearable" lesson in miniature, so the slash is avoided at the source.
+const SENT_LABELS: Record<MediaKey, string> = {
+  volumeUp: "volume up",
+  volumeDown: "volume down",
+  mute: "mute",
+  playPause: "play or pause",
+  next: "next track",
+  previous: "previous track",
+};
+
+export function sentLabelFor(key: MediaKey): string {
+  return SENT_LABELS[key];
+}
+
+// The whole sentence a tool returns. One place, so `systemVolume` and `mediaControl` cannot
+// drift into describing the same action two ways.
+//
+// "Sent volume up 5 times" / "Sent volume up" / "Sent mute". Plain ASCII throughout: an "x5"
+// written with a multiplication sign would be rejected by the strict FakeSynthesizer and
+// mis-decoded by the real engine, which is precisely the en-dash bug M14 found.
+export function sentDescription(key: MediaKey, presses: number): string {
+  const label = sentLabelFor(key);
+  return presses > 1 ? `Sent ${label} ${presses} times` : `Sent ${label}`;
+}

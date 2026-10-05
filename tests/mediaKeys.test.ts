@@ -8,9 +8,11 @@ import {
   clampPresses,
   isMediaKey,
   pressesFor,
+  sentDescription,
+  sentLabelFor,
   type MediaKey,
 } from "../src/core/media.ts";
-import { sentLabelFor, virtualKeyFor } from "../src/main/shell/mediaKeys.ts";
+import { virtualKeyFor } from "../src/main/shell/mediaKeys.ts";
 
 // The media-key mapping and press policy (M18). Both halves are pure, so this file is all
 // literals — nothing here asks the code to produce its own input or its own expectation.
@@ -163,7 +165,9 @@ describe("sentLabelFor", () => {
     expect(sentLabelFor("volumeUp")).toBe("volume up");
     expect(sentLabelFor("volumeDown")).toBe("volume down");
     expect(sentLabelFor("mute")).toBe("mute");
-    expect(sentLabelFor("playPause")).toBe("play/pause");
+    // Deliberately not "play/pause": a slash is ASCII so nothing strips it, and Piper would
+    // voice it as a word. See the note in core/media.ts.
+    expect(sentLabelFor("playPause")).toBe("play or pause");
     expect(sentLabelFor("next")).toBe("next track");
     expect(sentLabelFor("previous")).toBe("previous track");
   });
@@ -174,6 +178,33 @@ describe("sentLabelFor", () => {
       expect(label.length, key).toBeGreaterThan(0);
       // "now playing", "is muted", "volume is 40%" — none of these can be known.
       expect(label, key).not.toMatch(/now|playing|is |%|\d/);
+      // No slash, for the speech reason above.
+      expect(label, key).not.toContain("/");
     }
+  });
+
+  describe("sentDescription", () => {
+    it("says how many times only when it was more than once", () => {
+      expect(sentDescription("volumeUp", 5)).toBe("Sent volume up 5 times");
+      expect(sentDescription("volumeDown", 2)).toBe("Sent volume down 2 times");
+      expect(sentDescription("volumeUp", 1)).toBe("Sent volume up");
+      expect(sentDescription("mute", 1)).toBe("Sent mute");
+      expect(sentDescription("next", 1)).toBe("Sent next track");
+    });
+
+    // The invariant behind all of them: a result may say what was SENT and must never imply a
+    // level or a playback state, because neither can be read back.
+    it("never claims a level or a playback state", () => {
+      for (const key of MEDIA_KEYS) {
+        for (const presses of [1, 5, 15]) {
+          const text = sentDescription(key, presses);
+          expect(text, text).toMatch(/^Sent /);
+          expect(text, text).not.toMatch(/%|now playing|is playing|muted|unmuted/i);
+          // Plain ASCII only - the strict FakeSynthesizer rejects anything else, and the real
+          // engine mis-decodes it (M14).
+          expect(text, text).toMatch(/^[ -~]+$/);
+        }
+      }
+    });
   });
 });

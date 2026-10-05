@@ -6,6 +6,7 @@ import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
+import { normalizeAppName } from "../src/core/apps.ts";
 import type { CapturedContext, ToolInput } from "../src/core/types.ts";
 import { FakeLLM } from "./FakeLLM.ts";
 
@@ -219,34 +220,50 @@ describe("openApp and openTarget stay on their own side", () => {
   });
 });
 
-describe("openApp — memory never rewrites the app name", () => {
-  // `resolvesReferences: false`, and this is the test that distinguishes it from the default.
+describe("openApp - memory never rewrites the app name", () => {
+  // `resolvesReferences: false`, and this is the test that has to DISTINGUISH it from the
+  // default rather than merely pass alongside it.
   //
-  // Without the flag this is a REAL bug rather than a theoretical one: `remember spotify is
-  // <url>` stores `target:spotify`, memory resolution rewrites `app: "spotify"` into that URL
-  // before the handler runs, the catalog cannot match a URL, and the app refuses to open
-  // something it opened perfectly well yesterday. So the fact is taught here for real, through
-  // a real SqliteMemory, and the launch is asserted to be unaffected.
-  it("opens Spotify even when a fact named 'spotify' is stored", async () => {
+  // Without the flag this is a real bug: a stored fact gets substituted into `app` before the
+  // handler runs, the catalog cannot match a URL, and the app refuses to open something it
+  // opened perfectly well yesterday.
+  //
+  // THE FIRST VERSION OF THIS TEST PROVED NOTHING, and it is worth recording why. It used
+  // `app: "spotify"` with a fact under `target:spotify` - and `resolveArgs` only considers a
+  // value that LOOKS vague, /^(my|the)\s+/ (src/core/memory/SqliteMemory.ts), so plain
+  // "spotify" was never a resolution candidate at all. The test passed, and would have passed
+  // identically with `resolvesReferences: true`. Caught by writing the sibling test for
+  // `searchSpotify`, whose precondition failed and exposed the whole shape of the mistake.
+  it('opens Spotify even when a fact named "the Spotify app" is stored', async () => {
     const db = createDatabase(":memory:");
     const memory = new SqliteMemory(db);
-    memory.write("target:spotify", "https://open.spotify.com");
-    // The precondition — memory really would resolve this name if it were allowed to.
-    expect(memory.resolve("spotify")?.value).toBe("https://open.spotify.com");
+    // The key is what `normalizeReference` PRODUCES, not the phrase the user says: "the Spotify
+    // app" normalizes to "spotify app" (memory/normalize.ts strips a leading my/the).
+    memory.write("target:spotify app", "https://open.spotify.com");
+
+    // THREE PRECONDITIONS, because the flag only matters when all three hold.
+    // 1. The value is shaped so that resolveArgs would even try.
+    expect(/^\s*(my|the)\s+\S/i.test("the Spotify app")).toBe(true);
+    // 2. Resolution would find something to substitute.
+    expect(memory.resolve("the Spotify app")?.value).toBe("https://open.spotify.com");
+    // 3. The unresolved name still reaches the catalog, so an `ok` outcome is possible at all.
+    expect(normalizeAppName("the Spotify app")).toBe("spotify");
 
     const shell = new MockShell({ context: NO_CONTEXT });
     const planner = new Planner(
-      new FakeLLM({ kind: "tool", name: "openApp", input: { app: "spotify" } }),
+      new FakeLLM({ kind: "tool", name: "openApp", input: { app: "the Spotify app" } }),
       shell,
       registry,
       memory,
       memory,
     );
 
-    const outcome = await planner.run("open spotify");
+    const outcome = await planner.run("open the spotify app");
 
+    // With resolution ON, `app` would be "https://open.spotify.com/", which matches nothing in
+    // the catalog - so this would be a refusal with nothing launched.
     expect(outcome.status).toBe("ok");
-    expect(shell.actions).toEqual([{ kind: "openApp", payload: "spotify" }]);
+    expect(shell.actions).toEqual([{ kind: "openApp", payload: "the Spotify app" }]);
     expect(shell.launched).toEqual(["spotify:"]);
     db.close();
   });

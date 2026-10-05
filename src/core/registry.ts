@@ -3,6 +3,9 @@ import { summarizeTool } from "./tools/summarize.ts";
 import { rewriteTool } from "./tools/rewrite.ts";
 import { openTargetTool } from "./tools/openTarget.ts";
 import { openAppTool } from "./tools/openApp.ts";
+import { systemVolumeTool } from "./tools/systemVolume.ts";
+import { mediaControlTool } from "./tools/mediaControl.ts";
+import { searchSpotifyTool } from "./tools/searchSpotify.ts";
 import { rememberTool } from "./tools/remember.ts";
 import { sendMessageTool } from "./tools/sendMessage.ts";
 import { recallTool } from "./tools/recall.ts";
@@ -31,6 +34,17 @@ export const registry: Tool[] = [
   // reported by the OS at launch time rather than predicted — there is no cheap, synchronous
   // check for "is this installed" to gate on, and guessing would hide an app the user has.
   openAppTool,
+  // M18's local controls. UNGATED for the same reason `openApp` is, and a stronger one: a
+  // media key needs no configuration at all — every Windows machine has a volume, and the
+  // injector that presses them is built unconditionally (main.ts) precisely so these are never
+  // silently unavailable.
+  //
+  // `searchSpotify` sits with them rather than in a Spotify group because it needs no Spotify
+  // credentials: it opens a search URL in the browser. The two Web API tools that WOULD have
+  // needed a group are parked — see spec.md §9's "Parked: Spotify Web API tools".
+  systemVolumeTool,
+  mediaControlTool,
+  searchSpotifyTool,
 ];
 
 // The Gmail tools (M10). They only work against a Chrome started with remote debugging, so they

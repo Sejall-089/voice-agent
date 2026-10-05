@@ -28,22 +28,3 @@ const VIRTUAL_KEYS: Record<MediaKey, number> = {
 export function virtualKeyFor(key: MediaKey): number {
   return VIRTUAL_KEYS[key];
 }
-
-// How this key is described after the fact, for the one sentence the user reads.
-//
-// Phrased as what was SENT, never as a resulting state, and that wording is load-bearing
-// rather than cautious: nothing in this app can read the system volume back or ask what is
-// playing. "Volume is now 40%" would be a guess dressed as a fact, and "Now playing" would be
-// a claim about an application we never spoke to.
-const SENT_LABELS: Record<MediaKey, string> = {
-  volumeUp: "volume up",
-  volumeDown: "volume down",
-  mute: "mute",
-  playPause: "play/pause",
-  next: "next track",
-  previous: "previous track",
-};
-
-export function sentLabelFor(key: MediaKey): string {
-  return SENT_LABELS[key];
-}
