@@ -38,11 +38,18 @@ function asUrl(value: unknown): string | null {
 export const openTargetTool: Tool = {
   name: "openTarget",
   description:
-    "Open a named target in the browser. Use this when the user asks to open, launch, go to, or " +
+    "Open a named target IN THE BROWSER. Use this when the user asks to open, launch, go to, or " +
     "pull up a site or link. Always pass `target` as the name the user used, verbatim. Set `url` " +
     "ONLY when you are certain of the public canonical URL (e.g. 'youtube' -> " +
     "'https://youtube.com'). For personal or private references (e.g. 'my dashboard', " +
-    "'my upwork'), leave `url` empty — do not guess.",
+    "'my upwork'), leave `url` empty — do not guess. " +
+    // M18. The one line that separates this tool from `openApp`, stated as examples rather than
+    // a rule because the ambiguous cases are the ones that need deciding: "Spotify" is an
+    // installed app on this machine AND a website, and which one the user meant is carried
+    // entirely by how they said it.
+    "Use `openApp` instead for an INSTALLED APPLICATION: 'open Spotify' and 'open Notepad' are " +
+    "`openApp`, while 'open the Spotify web player', 'open spotify.com' and 'open my Stripe " +
+    "dashboard' are this tool.",
   inputSchema: {
     type: "object",
     properties: {

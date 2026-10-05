@@ -152,6 +152,73 @@ describe("openApp — the gate", () => {
   });
 });
 
+// THE SPLIT between `openApp` and `openTarget` (M18 step 3).
+//
+// What is NOT tested here, and cannot be: which of the two the model picks. Every test in this
+// repo drives tool choice through `FakeLLM`, so a test asserting "'open Spotify' chooses
+// openApp" would only be asserting the fixture. That half is genuinely live-only and is on
+// docs/M18-live-checklist.md.
+//
+// What IS testable is that neither tool wanders into the other's territory when it is the one
+// that got called — which is the actual new risk, because before M18 "open X" had exactly one
+// destination and now it has two. The memory path these tests deliberately do NOT re-assert:
+// memory resolving "my dashboard" into a URL and `openUrl` firing is already covered by
+// memory-integration.test.ts and remember.test.ts, and a third copy would be a test that
+// cannot fail under a wrong implementation.
+describe("openApp and openTarget stay on their own side", () => {
+  function run(name: string, input: ToolInput) {
+    const shell = new MockShell({ context: NO_CONTEXT });
+    const log = new InMemoryActionLog();
+    const planner = new Planner(
+      new FakeLLM({ kind: "tool", name, input }),
+      shell,
+      registry,
+      new NoopMemoryResolver(),
+      log,
+    );
+    return { shell, planner };
+  }
+
+  it("sends the same word to two different shell actions", async () => {
+    const asApp = run("openApp", { app: "Spotify" });
+    await asApp.planner.run("open Spotify");
+    expect(asApp.shell.actions).toEqual([{ kind: "openApp", payload: "Spotify" }]);
+
+    const asSite = run("openTarget", { target: "Spotify", url: "https://open.spotify.com" });
+    await asSite.planner.run("open the Spotify web player");
+    expect(asSite.shell.actions).toEqual([
+      { kind: "openUrl", payload: "https://open.spotify.com/" },
+    ]);
+    // The browser path starts no process, which is the half that would be a real bug.
+    expect(asSite.shell.launched).toEqual([]);
+  });
+
+  // openApp's arrival must not have made openTarget more willing to guess. A bare app name
+  // with no URL is still an honest "I don't know that yet", not an invented spotify.com.
+  it("openTarget still refuses a bare app name rather than inventing a URL", async () => {
+    const { shell, planner } = run("openTarget", { target: "Spotify" });
+
+    const outcome = await planner.run("open Spotify");
+
+    expect(outcome.status).toBe("refused");
+    expect(shell.actions).toEqual([]);
+    expect(shell.launched).toEqual([]);
+  });
+
+  // And the reverse: a URL handed to openApp is refused, not launched. The catalog is names
+  // only, so there is no entry a URL could ever match — asserted because this is the direction
+  // where a "helpful" normalization would turn a web request into a process launch.
+  it("openApp refuses a URL rather than treating it as something to start", async () => {
+    const { shell, planner } = run("openApp", { app: "https://open.spotify.com" });
+
+    const outcome = await planner.run("open spotify.com");
+
+    expect(outcome.status).toBe("refused");
+    expect(shell.launched).toEqual([]);
+    expect(shell.results[0]).toContain("I can only open:");
+  });
+});
+
 describe("openApp — memory never rewrites the app name", () => {
   // `resolvesReferences: false`, and this is the test that distinguishes it from the default.
   //
