@@ -704,3 +704,75 @@ describe("a chain of REAL registry tools", () => {
     expect(String(appendArgs?.["instruction"])).toContain("Design review");
   });
 });
+
+// M18 step 7/D. The milestone's own two-step chain, through the M17 runner with NO new chain
+// code — which is the claim being checked: a tool added later needs nothing from `core/chain.ts`
+// to be chainable.
+//
+// WHAT THIS TEST CANNOT SHOW, said here rather than left for someone to assume. Both steps are
+// `reversible`, so "each step is gated by its own tier" is technically asserted and practically
+// vacuous: the correct behaviour for both tiers is to do nothing, and a runner that ignored
+// tiers entirely would pass this. The mixed-tier case is covered by the `sendThing` chains
+// above, which hold a real confirm open mid-chain. What IS proved here is step ORDER, that each
+// step produced exactly its own side effect, and that a two-reversible-step chain asks the user
+// nothing at all.
+describe("a chain of M18's local tools", () => {
+  it("opens Spotify and then opens a search, in that order, asking nothing", async () => {
+    const shell = new MockShell({ context: NO_CONTEXT });
+    const log = new InMemoryActionLog();
+    const planner = new Planner(
+      new FakeLLM({
+        kind: "plan",
+        steps: [
+          step("openApp", { app: "Spotify" }, "open Spotify"),
+          step("searchSpotify", { query: "bohemian rhapsody" }, "search for Bohemian Rhapsody"),
+        ],
+      }),
+      shell,
+      buildRegistry({ gmail: false }),
+      new NoopMemoryResolver(),
+      log,
+      undefined, // sender
+      undefined, // gmail
+      undefined, // draft
+      undefined, // notion
+      undefined, // calendar
+      undefined, // speech
+      undefined, // screen
+      undefined, // elements
+      undefined, // chooser
+      // Never the real clock: the runner holds its plan preview on screen for a real duration.
+      (): Promise<void> => Promise.resolve(),
+    );
+
+    const outcome = await planner.run("open spotify then play bohemian rhapsody");
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.chain).toEqual({ completed: 2, total: 2 });
+    expect(log.entries.map((e) => e.tool)).toEqual(["openApp", "searchSpotify"]);
+
+    // THE ORDER, read off the side effects rather than the log — the app really was launched
+    // before the search opened, not merely planned that way.
+    const effects = shell.actions.filter((a) => a.kind !== "notify");
+    expect(effects).toEqual([
+      { kind: "openApp", payload: "Spotify" },
+      { kind: "openUrl", payload: "https://open.spotify.com/search/bohemian%20rhapsody" },
+    ]);
+    expect(shell.launched).toEqual(["spotify:"]);
+
+    // Two reversible steps: nothing was asked.
+    expect(shell.confirmMessages).toEqual([]);
+
+    // The plan WAS previewed, though — transparency is not approval (§5b), and a chain that
+    // ran silently would be the thing that preview exists to prevent.
+    const notifications = shell.actions.filter((a) => a.kind === "notify");
+    expect(notifications.length).toBeGreaterThan(0);
+    // The literal preview, including the runner's own capitalisation of each step's describe
+    // text - pinned as the whole string because this is what the user reads before anything
+    // runs, and a preview that silently stopped listing step 2 is exactly the failure the
+    // M17 live-testing fix was about.
+    expect(String(notifications[0]?.payload)).toBe(
+      "Two steps:\n1. Open Spotify\n2. Search for Bohemian Rhapsody",
+    );
+  });
+});

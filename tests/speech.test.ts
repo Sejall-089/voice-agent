@@ -228,6 +228,16 @@ describe("every output is speakable", () => {
     "Nothing on your calendar in that window.",
     "Updated \"team\": #design → #design-team (v2).",
     "Sent. 🎉\n\nThanks!",
+    // M18's result strings. In BOTH sweeps on purpose: this is the only place a tool's own
+    // output is checked against the engine's real limits, and the first draft of `systemVolume`
+    // returned "Sent volume up ×5" — a multiplication sign, which the strict FakeSynthesizer
+    // rejects and Piper receives as mojibake, exactly the en-dash bug M14 found. Plain ASCII
+    // now, but the fixtures stay so the next result string is checked too. The searchSpotify
+    // line keeps its em dash, which `speakable` DOES map, so it proves the mapping still fires.
+    "Sent volume up 5 times",
+    "Sent play or pause",
+    "Opened a Spotify search for \"bohemian rhapsody\" — press play on the one you want.",
+    "I can't open Photoshop — I can only open: Spotify, Notepad, Calculator and File Explorer.",
   ];
 
   const forbidden = ["\n", "•", "*", "_", "`", "#", '"', "…", "http"];
@@ -348,6 +358,16 @@ describe("the transform satisfies the engine's contract", () => {
     "Nothing on your calendar in that window.",
     'Updated "team": #design → #design-team (v2).',
     "Sent. 🎉\n\nThanks!",
+    // M18's result strings. In BOTH sweeps on purpose: this is the only place a tool's own
+    // output is checked against the engine's real limits, and the first draft of `systemVolume`
+    // returned "Sent volume up ×5" — a multiplication sign, which the strict FakeSynthesizer
+    // rejects and Piper receives as mojibake, exactly the en-dash bug M14 found. Plain ASCII
+    // now, but the fixtures stay so the next result string is checked too. The searchSpotify
+    // line keeps its em dash, which `speakable` DOES map, so it proves the mapping still fires.
+    "Sent volume up 5 times",
+    "Sent play or pause",
+    "Opened a Spotify search for \"bohemian rhapsody\" — press play on the one you want.",
+    "I can't open Photoshop — I can only open: Spotify, Notepad, Calculator and File Explorer.",
     "Send this reply to alex@example.com?\n\nHi Alex,\n\nThursday works.\n\nSejal",
     "Standup 9:00–9:15 AM — “quoted” and ‘curly’",
   ];
