@@ -327,12 +327,51 @@ describe("createAppLauncher", () => {
     expect(io.spawned).toEqual(["notepad.exe"]);
   });
 
-  it("surfaces a protocol failure the same way", async () => {
-    const io = recordingIo("No application is registered for spotify:");
+  // RE-JUSTIFIED after the live pass. This test used to feed the launcher "No application is
+  // registered for spotify:" — a sentence written from an assumption, which the real thing
+  // never says. The text below is what `openExternal("spotify:")` actually rejected with on a
+  // machine without Spotify, transcribed as a literal (CLAUDE.md: a fake's failure shape drifts
+  // from the real one silently).
+  const NOT_INSTALLED =
+    "Failed to open: No application is associated with the specified file for this operation. (0x483)";
+
+  it("says an app with no registered protocol handler isn't installed, without the raw reason", async () => {
+    const io = recordingIo(NOT_INSTALLED);
     const result = await createAppLauncher(BUILT_IN_CATALOG, io).launch("Spotify");
 
-    expect(result.error).toBe(
-      "I couldn't start Spotify: No application is registered for spotify:",
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("Spotify doesn't seem to be installed.");
+    expect(result.error).not.toMatch(/0x483|Failed to open|associated/);
+    // It really did try the protocol — this is a failed launch, not a refusal.
+    expect(io.opened).toEqual(["spotify:"]);
+  });
+
+  it("names the app that was asked for, not Spotify, for an APPS_EXTRA protocol", async () => {
+    const io = recordingIo(NOT_INSTALLED);
+    const { entries } = parseExtraApps("Slack=slack:");
+    const result = await createAppLauncher([...BUILT_IN_CATALOG, ...entries], io).launch("slack");
+
+    expect(result.error).toBe("Slack doesn't seem to be installed.");
+  });
+
+  it("recognises the error by its code alone, since Windows localizes the sentence", async () => {
+    const io = recordingIo("Failed to open: (0x483)");
+    const result = await createAppLauncher(BUILT_IN_CATALOG, io).launch("Spotify");
+
+    expect(result.error).toBe("Spotify doesn't seem to be installed.");
+  });
+
+  // The other half: ONLY that case is rewritten. A different protocol failure, and a different
+  // Win32 code in the same "Failed to open: ... (0x..)" shape, keep their own reason.
+  it("still shows any other protocol failure in its own words", async () => {
+    const denied = recordingIo("Failed to open: Access is denied. (0x5)");
+    expect((await createAppLauncher(BUILT_IN_CATALOG, denied).launch("Spotify")).error).toBe(
+      "I couldn't start Spotify: Failed to open: Access is denied. (0x5)",
+    );
+
+    const other = recordingIo("The operation was canceled by the user.");
+    expect((await createAppLauncher(BUILT_IN_CATALOG, other).launch("Spotify")).error).toBe(
+      "I couldn't start Spotify: The operation was canceled by the user.",
     );
   });
 

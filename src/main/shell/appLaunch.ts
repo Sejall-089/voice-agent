@@ -233,12 +233,29 @@ export function createAppLauncher(
         // we do not know what this install's failures look like yet, and guessing sends someone
         // to fix the wrong thing.
         const reason = error instanceof Error ? error.message : String(error);
+        // THE ONE FAILURE THAT IS NOW KNOWN, from a live run rather than a guess: Spotify not
+        // installed. `openExternal("spotify:")` rejected with
+        //   "Failed to open: No application is associated with the specified file for this
+        //    operation. (0x483)"
+        // which is Win32 ERROR_NO_ASSOCIATION - nothing is registered for the protocol. That
+        // is a diagnosis this code can stand behind, so it is said plainly and the raw text is
+        // kept out of what the user reads. Everything else still falls through verbatim.
+        if (isNoAssociation(reason)) {
+          return { ok: false, error: `${entry.label} doesn't seem to be installed.` };
+        }
         return { ok: false, error: `I couldn't start ${entry.label}: ${reason}` };
       }
 
       return { ok: true };
     },
   };
+}
+
+// Matched on the CODE first: the sentence in front of it is Windows' own and is localized, so
+// on a non-English install only "(0x483)" survives. The English text is accepted too in case a
+// caller ever strips the code.
+function isNoAssociation(reason: string): boolean {
+  return /\(0x483\)/i.test(reason) || /no application is associated/i.test(reason);
 }
 
 // Start a program and stop caring about it.
