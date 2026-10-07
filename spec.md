@@ -791,7 +791,7 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `elaborate`   | 15. "And the rest?"                   | no            | safe         | read back what the last spoken summary held back (§4d) |
 | `pointAt`     | 16. Where's the send button?          | no            | caution      | read the window's controls → model picks one BY NUMBER → code resolves its rect → draw a marker (§6d) |
 | `openApp`     | 17. Open an installed app             | no            | reversible   | match the user's NAME against a closed catalog → `openApp` action; refuse with the list on no match |
-| `systemVolume`| 18. Turn the volume up/down/mute      | no            | reversible   | 1–15 presses of a real volume key via `SendInput`; says what was SENT, never a level |
+| `systemVolume`| 18. Turn the volume up/down/mute      | no            | reversible   | 1–15 presses of a real volume key via `SendInput`; says what was SENT as a change in percent ("Volume up about 10%"), never a level |
 | `mediaControl`| 19. Play/pause, next, previous        | no            | reversible   | one press of a real media key, to whichever app owns the media session |
 | `searchSpotify`| 20. Find something on Spotify        | no            | reversible   | `openUrl` to a fixed-template Spotify search URL; the USER presses play |
 
@@ -2028,7 +2028,9 @@ have to rediscover.
 
 ### M18 — proven vs. live-only
 
-**Nothing in M18 has been run by a human yet.** This section is written before the live pass
+**The live pass is under way (2026-10-07) and has found four things no test caught** — see
+"What the live pass found" at the end of this section, and `docs/M18-live-checklist.md` for the
+per-item record. The rest of this section was written before the live pass
 rather than after it, which is a first for this file and is the point: every milestone from M10
 on has produced at least one live bug no fixture caught, so writing down *in advance* which
 claims rest on fixtures makes the checklist a test of specific doubts rather than a lap of the
@@ -2053,8 +2055,13 @@ feature. `docs/M18-live-checklist.md` is the list.
 - **`searchSpotify`'s URL construction**: thirteen encoding cases including
   `https://evil.example.com`, `../../etc`, `ac/dc`, `50% off` and two non-Latin titles, each
   asserting the host and path prefix literally, so no query can retarget the request.
-- **Result honesty**: no result string contains a percentage, a digit in a key label, or the
-  word "playing"; all four of M18's user-facing strings are in both `speech.test.ts` fixture
+- **Result honesty**: no result states a resulting level or the word "playing". A volume
+  result reports the CHANGE that was sent, in percent and always with "about" ("Volume up about
+  10%"; capped: "Volume up about 30% (my limit per request, you asked for 80%)") — the test
+  requires every number in the sentence to be that step or the user's own request quoted back,
+  and is itself checked against "now at 40%" and "to 50%" so it can fail. *Changed after the
+  live pass: this used to read "no result string contains a percentage", back when the result
+  was a press count.* M18's user-facing strings are in both `speech.test.ts` fixture
   sweeps, where the strict `FakeSynthesizer` enforces the engine's real character limits.
 - **Both `resolvesReferences: false` flags**, verified to FAIL with the flag flipped on. The
   first drafts of those tests proved nothing — see the step C commit.
@@ -2088,6 +2095,39 @@ feature. `docs/M18-live-checklist.md` is the list.
    speak to this at all.
 8. **`spotify:connect` on a free account** — whether consent completes, and what the recon
    captures for the Premium-required path. That capture is the fixture the parked work needs.
+
+**What the live pass found (2026-10-07, in progress).** Per-item results, each marked
+human-verified or script-verified, are in `docs/M18-live-checklist.md`.
+
+- **A units bug** (item 3). One press is about 2%, as documented — but the tool's argument was
+  a press count, so "turn it up by 10" moved the volume 20%. The argument is now `percent`.
+  Human-verified at 10, 5 and 80 (10 → 40, the cap).
+- **The input host swallowed its first command** (item 1's file, not item 1's fear). `-Command -`
+  made stdin the script source; `-File` fixed it, with request ids and per-verb budgets.
+- **A raw Win32 error reached the user** (item 6). With Spotify not installed there was no
+  system dialog and no false success — the launch failed with "Failed to open: No application is
+  associated with the specified file for this operation. (0x483)". `appLaunch.ts` now says
+  "Spotify doesn't seem to be installed." for exactly that case; other failures keep their own
+  reason. Script-verified only.
+- **The volume result spoke in key presses**, the units bug again on the way out. It now reads
+  "Volume up about 10%". Script-verified only; "%" needs no respelling for speech — Piper's
+  phonemizer returns the same phonemes for "10%" as for "10 percent".
+- **Answers to items 5 and 6:** with both Spotify and YouTube playing, "pause" stopped YouTube
+  only; with nothing playing it *started* Spotify; opening an already-running Notepad starts a
+  second window every time.
+- **Two observations are open and unexplained:** a tool request ("open calc", "pause", "open Spotify") three times
+  answered with chat text instead of a tool run; and dictation once typed "aame" for "name"
+  with a correct transcription — not reproduced in 400 scripted repeats across the old and new
+  host, and the encoding is byte-exact up to the `SendInput` call.
+
+**Parked after M18.** Recorded so they are not lost; no work has been done on any of them.
+
+- Three odd model replies ("open calc", "pause", "open Spotify") returned chat text instead of running a tool, always on the first try, and the second try worked; clipboard text is the suspect; not reproduced by script yet.
+- `searchSpotify` could open the Spotify app first (`spotify:search:`) with a browser fallback; needs a contract change.
+- "Set the volume to 50%" is not supported: the app cannot read the current level.
+- The instruction bar may keep showing the previous result while a new command is typed (unconfirmed).
+- 26 leftover `va-uia-*` folders in the temp directory from the UIA host, which only cleans up on a clean exit.
+- Spotify Web API tools are parked until a Premium account exists.
 
 ### M17 — proven vs. live-only
 

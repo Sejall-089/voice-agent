@@ -113,7 +113,7 @@ claims something is playing, because it can't know.
 **18 and 19 are named for the system, not for Spotify, because that's what they touch.** A media
 key goes to whichever app owns the Windows media session — Spotify, a YouTube tab, sometimes
 nothing — and a volume key moves the whole machine. Nothing here can read the volume back or ask
-what's playing, so every result says what was **sent**: *"Sent volume up 5 times"*, never
+what's playing, so every result says what was **sent**: *"Volume up about 10%"* (the size of the step, always "about") or *"Sent play or pause"*, never
 *"Volume is now 40%"*.
 
 Anything else → an honest refusal, logged as a miss (a ranked backlog of what to build next).
