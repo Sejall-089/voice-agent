@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import {
   app,
   BrowserWindow,
@@ -23,6 +24,9 @@ import { createRunInstruction } from "./runInstruction.ts";
 import { createOnInstructionHotkey } from "./instructionHotkey.ts";
 import { Planner } from "../core/planner.ts";
 import { buildRegistry } from "../core/registry.ts";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { loadConnectorTools } from "../core/mcp/load.ts";
+import { SdkMcpConnection } from "../core/mcp/SdkConnection.ts";
 import { createLLMClient } from "../core/llm/factory.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
@@ -49,6 +53,7 @@ import type {
   CalendarSurface,
   GmailSurface,
   NotionSurface,
+  Tool,
   Transcriber,
 } from "../core/types.ts";
 
@@ -312,6 +317,8 @@ app.whenReady().then(() => {
     speech: synthesizer !== null,
     // Both halves, or neither: something to READ the window with and something to ASK.
     pointing: elements !== null && chooser !== null && screenSurfaceOrNull !== null,
+    // M19. Decided by connectors.json and .env alone - building these opens no connection.
+    connectors: createConnectorTools(),
   });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
@@ -592,6 +599,43 @@ function createCalendar(): CalendarSurface | null {
   return new GoogleCalendar({
     auth: new GoogleCalendarAuth({ clientId, clientSecret, refreshToken }),
   });
+}
+
+// M19. The connector tools for this run: apps reached over MCP rather than through a hand-built
+// surface. What is on the menu is decided HERE from two local things - connectors.json and the
+// presence of a key in .env - so, as with the calendar, nothing on the network decides what the
+// model is offered. Each connection opens lazily, on the first instruction that uses it.
+//
+// The key is read in composition and handed to the transport; /core never sees process.env, and
+// neither the key nor the Authorization header is ever logged (spec section 10). Everything
+// that decides anything is in core/mcp/ and tested there; this is the file read and the
+// transport, which is all that belongs in this file (CLAUDE.md).
+function createConnectorTools(): Tool[] {
+  let configText: string | null = null;
+  try {
+    configText = readFileSync(join(app.getAppPath(), "connectors.json"), "utf8");
+  } catch {
+    // No file is an ordinary install: no connectors, nothing to report.
+  }
+
+  const loaded = loadConnectorTools({
+    configText,
+    readKey: (keyName) => process.env[keyName],
+    connect: (def, key) =>
+      new SdkMcpConnection({
+        app: def.label,
+        keyName: def.keyName,
+        transport: () =>
+          new StreamableHTTPClientTransport(new URL(def.url), {
+            requestInit: { headers: { Authorization: `Bearer ${key}` } },
+          }),
+      }),
+  });
+  for (const note of loaded.notes) console.log(`[main] ${note}`);
+  if (loaded.tools.length > 0) {
+    console.log(`[main] connector tools: ${loaded.tools.map((tool) => tool.name).join(", ")}`);
+  }
+  return loaded.tools;
 }
 
 // A couple of starter facts so a live "open my dashboard" / "rewrite in my tone" can be

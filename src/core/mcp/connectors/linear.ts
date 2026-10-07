@@ -93,8 +93,8 @@ export const linearConnector: ConnectorDef = {
       description:
         "Search the user's Linear workspace for existing issues whose title or description " +
         "matches some words. Use this when the user asks to find, look up or check for an issue " +
-        "or ticket in Linear. Returns up to 5 matches, each with its identifier, title, status " +
-        "and link. Read-only.",
+        "or ticket in Linear. Returns up to 5 results, each with its identifier, title, status " +
+        "and link. The matching is approximate: results may be only loosely related. Read-only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -108,6 +108,10 @@ export const linearConnector: ConnectorDef = {
         additionalProperties: false,
       },
       risk: "safe",
+      // LIVE FINDING (scripts/linear-live-check.ts): the server's `query` is a FUZZY search. A
+      // nonsense string still returned an issue, so an empty result is rare and a non-empty one
+      // is not proof of a match — which is why the description above says "approximate".
+      //
       // A fixed, small page and only the four fields the formatter prints. Without `fields` the
       // server sends each issue's (truncated) description too, which is other people's text
       // this app has no use for in a list.

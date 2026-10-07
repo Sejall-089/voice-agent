@@ -101,6 +101,12 @@ export interface RegistryOptions {
   // Renamed from `vision` at M16.10: nothing is photographed any more, and an option named for a
   // capability that no longer exists is a trap for whoever reads it next.
   pointing?: boolean;
+  // Optional (defaults to none) — the connector tools for this run (M19), ALREADY BUILT by
+  // core/mcp/load.ts from connectors.json and .env. They arrive as a list rather than a flag
+  // because, unlike every group above, they are not constants of this file: which ones exist
+  // depends on a config file. They are still a closed list — only tools a connector definition
+  // in core/mcp/connectors/ pins can be in it.
+  connectors?: readonly Tool[];
 }
 
 // The menu for one app run.
@@ -117,6 +123,13 @@ export function buildRegistry(options: RegistryOptions): Tool[] {
   if (options.calendar === true) tools.push(...calendarTools);
   if (options.speech === true) tools.push(...speechTools);
   if (options.pointing === true) tools.push(...pointingTools);
+  // A connector tool is namespaced (`linear__create_issue`), so it cannot share a name with a
+  // hand-built one by accident. If one ever did, the HAND-BUILT TOOL WINS and the other is left
+  // off: the planner resolves a name with `find`, and which of two same-named tools ran must
+  // never depend on the order they were pushed in.
+  for (const tool of options.connectors ?? []) {
+    if (!tools.some((existing) => existing.name === tool.name)) tools.push(tool);
+  }
   return tools;
 }
 

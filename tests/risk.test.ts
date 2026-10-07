@@ -10,6 +10,8 @@ import {
   registry,
   speechTools,
 } from "../src/core/registry.ts";
+import { CONNECTORS, loadConnectorTools } from "../src/core/mcp/load.ts";
+import { UnavailableConnection } from "../src/core/mcp/SdkConnection.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
 import {
@@ -262,12 +264,36 @@ describe("registry invariants", () => {
   // checked by any invariant in this block. The comment was true when written and silently
   // stopped being true twice, which no assertion here could notice, because every invariant
   // was a statement about `all` and `all` was simply smaller than anyone reading it believed.
+  // M19. The connector tools, built exactly as the app builds them (core/mcp/load.ts) from a
+  // config that switches every connector and every pinned tool ON. Nothing connects: the menu
+  // is decided offline, which is itself the property that lets this block see them at all.
+  const everyConnector = JSON.stringify({
+    connectors: Object.fromEntries(
+      CONNECTORS.map((def) => [
+        def.id,
+        {
+          enabled: true,
+          tools: def.tools.map((tool) => tool.name),
+          settings: Object.fromEntries(
+            def.tools.flatMap((tool) => tool.requires ?? []).map((key) => [key, "x"]),
+          ),
+        },
+      ]),
+    ),
+  });
+  const connectorTools = loadConnectorTools({
+    configText: everyConnector,
+    readKey: () => "a-key",
+    connect: (def) => new UnavailableConnection(def.label),
+  }).tools;
+
   const all = buildRegistry({
     gmail: true,
     notion: true,
     calendar: true,
     speech: true,
     pointing: true,
+    connectors: connectorTools,
   });
 
   // THE GUARD AGAINST THAT HAPPENING AGAIN, and the one test in this block that is about the
@@ -286,8 +312,14 @@ describe("registry invariants", () => {
       ...speechTools,
       ...pointingTools,
     ];
+    // Every tool every connector definition pins must have made it onto the menu too — counted
+    // from the DEFINITIONS, so a pinned tool the loader silently dropped fails here.
+    const pinned = CONNECTORS.flatMap((def) => def.tools.map((tool) => `${def.id}__${tool.name}`));
+    expect(connectorTools.map((tool) => tool.name).sort()).toEqual([...pinned].sort());
+    expect(pinned.length).toBeGreaterThan(0);
+
     const offered = all.map((tool) => tool.name).sort();
-    expect(offered).toEqual(everything.map((tool) => tool.name).sort());
+    expect(offered).toEqual([...everything.map((tool) => tool.name), ...pinned].sort());
 
     // And each of them is resolvable by the planner's own lookup. `findTool` keeps a SECOND
     // hard-coded list of the same groups, so a new group added to `buildRegistry` alone is
@@ -321,7 +353,19 @@ describe("registry invariants", () => {
       .map((tool) => tool.name);
     // createEvent and moveEvent join the list in M13 — not because they always email someone,
     // but because they CAN, and that is the question an invariant has to ask.
-    expect(gated.sort()).toEqual(["createEvent", "moveEvent", "sendMessage", "sendReply"]);
+    //
+    // The three Linear tools join it in M19. `create_issue` is dangerous outright. The two
+    // reads are `safe` in code but CAN be raised all the way by a server hint (core/mcp/tiers.ts),
+    // and "can ever be" is still the question.
+    expect(gated.sort()).toEqual([
+      "createEvent",
+      "linear__create_issue",
+      "linear__get_issue",
+      "linear__search_issues",
+      "moveEvent",
+      "sendMessage",
+      "sendReply",
+    ]);
   });
 
   // New in M13, and only meaningful now that a tool can land on either tier: a tool that can be
@@ -333,11 +377,33 @@ describe("registry invariants", () => {
       return tiers.includes("caution") && tiers.includes("dangerous");
     });
 
-    expect(eitherWay.map((tool) => tool.name).sort()).toEqual(["createEvent", "moveEvent"]);
+    expect(eitherWay.map((tool) => tool.name).sort()).toEqual([
+      "createEvent",
+      "linear__get_issue",
+      "linear__search_issues",
+      "moveEvent",
+    ]);
     for (const tool of eitherWay) {
       expect(tool.narrate, `${tool.name} has no narration`).toBeTypeOf("function");
       expect(tool.confirmSummary, `${tool.name} has no confirmSummary`).toBeTypeOf("function");
     }
+  });
+
+  // M19. A connector tool sends its arguments to someone else's server, so every one of them
+  // must validate against a closed schema and must not have memory rewrite what it sends.
+  it("closes every connector tool's schema and keeps memory resolution off it", () => {
+    for (const tool of connectorTools) {
+      expect(tool.inputSchema.additionalProperties, tool.name).toBe(false);
+      expect(tool.resolvesReferences, tool.name).toBe(false);
+      expect(tool.name).toMatch(/^[a-z][a-z0-9]*__[a-z][a-z0-9_]*$/);
+    }
+  });
+
+  it("lets a hand-built tool win a name clash with a connector tool", () => {
+    const impostor = { ...connectorTools[0]!, name: "sendMessage" };
+    const menu = buildRegistry({ gmail: false, connectors: [impostor] });
+    expect(menu.filter((tool) => tool.name === "sendMessage")).toHaveLength(1);
+    expect(menu.find((tool) => tool.name === "sendMessage")).not.toBe(impostor);
   });
 
   it("gives every dangerous tool a way to describe what it is about to do", () => {
