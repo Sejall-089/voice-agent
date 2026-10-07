@@ -13,6 +13,7 @@
     "calendar:connect": "node scripts/calendar-connect.mjs",
     "spotify:connect": "node scripts/spotify-connect.mjs",
     "spotify:recon": "node scripts/spotify-recon.mjs",
+    "linear:recon": "node scripts/linear-recon.mjs",
     "eval": "vitest run tests/eval --reporter=verbose",
     "preeval": "npm run rebuild:node",
     "rebuild:node": "npm rebuild better-sqlite3",
@@ -22,6 +23,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "ajv": "^8.20.0",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.7",
     "openai": "^7.4.0",

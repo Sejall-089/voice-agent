@@ -18,3 +18,7 @@ vision-recon-out/
 # committed: tokens are redacted on the way to disk, but the bodies still carry account
 # details (country, device names, what was playing).
 spotify-recon-out/
+
+# Recon output — captured Linear MCP responses from scripts/linear-recon.mjs. Never committed:
+# the key is never written, but the bodies hold the titles and descriptions of real issues.
+linear-recon-out/
