@@ -1,0 +1,32 @@
+## Findings
+
+**The mistyping did not reproduce, on either version.** That makes it neither a confirmed regression nor a confirmed older bug.
+
+| Run | Injector | Mismatches |
+|---|---|---|
+| Working tree (`-File`, request ids) | WindowsInputInjector.ts | 0 / 200 |
+| Last commit `3d7e36d` (`-Command -`), from a separate worktree | scratchpad `wt-head` | 0 / 200 |
+| Working tree, first attempt (disturbed, see below) | same as row 1 | 0 / 183 before focus left |
+
+- **Position and chunk boundaries:** there is nothing to place, because there were no mismatches. `CHUNK_SIZE_CHARS` is 1, so every character is its own chunk anyway.
+- **Timing:** `typeText()` took 1253–1506 ms per sentence (median about 1270 ms) on both versions.
+- **Read-back:** the text was read from the Notepad document itself after every sentence, and the final document matched the sum of those reads.
+- **Code diff:** the `TYPE` branch, `KeyEvent`, the chunk constants and the base64 encoder are identical between the two versions except for the `${tag}` prefix on the reply line.
+
+**The round trip is byte-exact.** type-roundtrip-probe.ts types nothing. It uses the real `typeText()`, the real `HostChannel` and the shipped host script read back off disk, with only the `SendInput` call swapped for a recorder.
+
+All seven checks passed, including that the host's `ReadLine` saw exactly the wire line. The `n` at position 3 reaches the `SendInput` call as `006E`, followed by `0061`. This does not cover the marshalling into user32 or anything the OS and the target window do afterwards.
+
+**What this leaves:** the `n` → `a` swap happened after the host handed correct events to `SendInput`, under conditions the probe did not recreate. The probe ran without the Electron app or whisper running, typed sentences back to back, and only targeted Notepad. With 0 failures in 400, the rate in these conditions is below roughly 1% per sentence, so a rare event is not ruled out.
+
+## Uncommitted state
+
+Nothing was committed, stashed, reset or cleaned. Your six modified and five untracked files are as they were.
+
+I added:
+
+- `scripts/typing-fidelity-probe.ts` and `scripts/type-roundtrip-probe.ts`, both untracked.
+- A detached worktree of `3d7e36d` at `scratchpad/wt-head`; remove it with `git worktree remove <path>` when you're done.
+- Three probe documents left open in Notepad; close them without saving.
+
+Which window were you dictating into when it typed "aame", and was anything else busy at the time? That decides what the next probe should target.
