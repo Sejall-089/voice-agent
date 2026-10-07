@@ -1777,13 +1777,15 @@ Post-v0:
       design and what was deliberately deferred (field-level `{step1.attendees}` references,
       which no tool can currently emit, and which the expressible chains turn out not to need).
 
-- [ ] **M18 — Opening apps, and local media control.** Two capabilities that happen to share
+- [x] **M18 — Opening apps, and local media control.** Two capabilities that happen to share
       one sentence ("open Spotify") and are deliberately kept apart underneath it.
-      **Left unchecked deliberately: the code is complete and 944 tests pass, but not one line
-      of it has been run by a person at a keyboard.** Every milestone from M10 on produced at
-      least one live bug no fixture caught (CLAUDE.md), and this one touches the shared
-      PowerShell input host that dictation depends on. See `docs/M18-live-checklist.md` and
-      "M18 — proven vs. live-only" below.
+      **Ticked after the live pass (2026-10-07), which is what this box was held open for.** It
+      was left unchecked while the code was complete but unrun by a person; the pass then found
+      four bugs no fixture caught — as every milestone from M10 on has (CLAUDE.md) — including
+      one in the shared PowerShell input host that dictation depends on. All four are fixed.
+      **Ticked with things still open, and they are listed rather than implied:** two
+      unexplained observations, the unrun checklist items, and the parked list. See
+      `docs/M18-live-checklist.md` and "M18 — proven vs. live-only" below.
       **Launching an app** adds a fifth `LocalAction` kind, `openApp`, carrying *the name the
       user said* — the shell resolves it against a closed allowlist (`core/apps.ts` holds the
       names, `src/main/shell/appLaunch.ts` holds the paths and protocol URIs), so the model
@@ -1845,7 +1847,10 @@ Post-v0:
       > volume tool must refuse on both rather than defaulting a null to 0 and then applying a
       > relative change to it.
 
-**v0 status: complete.** **944 tests green** (`npm test`) across 55 files. M18 added 146 over
+**v0 status: complete.** **993 tests green** (`npm test`) across 57 files, plus 46 skipped —
+the opt-in real-model eval, which makes no API calls unless asked. M18's live pass added 49 to
+the 944 it shipped with: the input-host protocol layer (`hostChannel.test.ts`), the percent
+conversion and wording, and the not-installed launch failure. As shipped, M18 added 146 over
 M17's 798, in five new files: 28 for the app catalog (`apps.test.ts`), 40 for the launch table
 and `APPS_EXTRA` (`appLaunch.test.ts`), 14 for `openApp` through the planner plus the
 `openTarget` split (`openApp.test.ts`), 22 for the media-key mapping and press policy
@@ -2036,7 +2041,7 @@ on has produced at least one live bug no fixture caught, so writing down *in adv
 claims rest on fixtures makes the checklist a test of specific doubts rather than a lap of the
 feature. `docs/M18-live-checklist.md` is the list.
 
-**Proven deterministically (944 tests, `npm test`):**
+**Proven deterministically (993 tests, `npm test`; 944 when this list was written):**
 
 - **The app catalog.** Normalisation ("the Spotify app", "  NOTEPAD. ", "calc"), exact matching
   and its refusals ("spotifyy", "spot", "notepad.exe", "my music player" — each of which a
