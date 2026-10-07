@@ -7,7 +7,7 @@ import type {
   ToolSchema,
 } from "../types.ts";
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
-import { PLAN_TOOL, PLAN_TOOL_NAME } from "./plan.ts";
+import { PLAN_TOOL_NAME, planToolFor } from "./plan.ts";
 import { classifyToolCalls, type RawToolCall } from "./toolChoice.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
@@ -84,7 +84,7 @@ export class OpenAILLMClient implements LLMClient {
       ],
       // The registry's tools, plus the `plan` meta-tool (M17) — see the note in anthropic.ts
       // for why it is appended here and never added to the registry.
-      tools: [...tools, PLAN_TOOL].map((t) => ({
+      tools: [...tools, planToolFor(tools)].map((t) => ({
         type: "function",
         // Adapt the vendor-neutral JSONSchema to the SDK's function schema at this boundary.
         function: {

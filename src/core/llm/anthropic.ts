@@ -7,7 +7,7 @@ import type {
   ToolSchema,
 } from "../types.ts";
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
-import { PLAN_TOOL } from "./plan.ts";
+import { planToolFor } from "./plan.ts";
 import { classifyToolCalls } from "./toolChoice.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
@@ -66,7 +66,7 @@ export class AnthropicLLMClient implements LLMClient {
       // The registry's tools, plus the `plan` meta-tool (M17). Appended HERE rather than in the
       // registry because it has no handler and no risk tier — keeping it out of `registry` is
       // what stops `plan` ever resolving as a step inside a plan.
-      tools: [...tools, PLAN_TOOL].map((t) => ({
+      tools: [...tools, planToolFor(tools)].map((t) => ({
         name: t.name,
         description: t.description,
         // Adapt the vendor-neutral JSONSchema to the SDK's InputSchema at this boundary.

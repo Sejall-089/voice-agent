@@ -87,6 +87,39 @@ export const PLAN_TOOL: ToolSchema = {
   },
 };
 
+// The worked example (M19): one real three-step chain, spelled out with real tool names.
+//
+// WHY IT EXISTS. Live testing since M17 has found models reluctant to reach for `plan` at all —
+// the prompt is deliberately lopsided toward one tool, and the description above explains the
+// mechanism without ever showing a finished plan. An instruction like "file this bug email in
+// Linear and tell the team" needs the things that description only states in the abstract: a
+// read whose result is passed on as `{step1}`, and an argument the model must write ITSELF,
+// now, because it will never see the email. Whether the example actually moves a real model is
+// a live-only fact (docs/M19-live-checklist.md) — the tests pin that it is offered, not that it
+// works.
+//
+// WHY IT IS CONDITIONAL. The description tells the model every step must name a tool from the
+// list it was given, and an example naming `linear__create_issue` on an install with no Linear
+// would be the description contradicting itself — and inviting a plan that `validatePlan` then
+// refuses as naming a tool the app does not have. So the example is appended only when every
+// tool it names is on THIS run's menu, and the base schema is untouched otherwise.
+const EXAMPLE_TOOLS = ["readEmail", "linear__create_issue", "sendMessage"] as const;
+
+const WORKED_EXAMPLE =
+  " A worked example — 'file this bug email in Linear and tell the bugs channel' is three " +
+  "steps: (1) readEmail with no arguments; (2) linear__create_issue with a `title` you write " +
+  "yourself from what the user said (you will not see the email) and `description` set to " +
+  '"{step1}"; (3) sendMessage with the channel the user named and `notes` set to ' +
+  '"New bug filed: {step2}".';
+
+// The `plan` schema for one run: `PLAN_TOOL`, plus the worked example when this menu can run it.
+export function planToolFor(tools: readonly ToolSchema[]): ToolSchema {
+  const runnable = EXAMPLE_TOOLS.every((name) => tools.some((tool) => tool.name === name));
+  return runnable
+    ? { ...PLAN_TOOL, description: PLAN_TOOL.description + WORKED_EXAMPLE }
+    : PLAN_TOOL;
+}
+
 // Is this even a plan? SHAPE ONLY — deliberately not policy.
 //
 // This answers "did the model return the structure we asked for", and nothing else. Whether the

@@ -68,10 +68,13 @@ interface StepPosition {
   // Show and speak a FAILURE here? False inside a chain, where `runChain` composes one message
   // about the whole plan instead of letting the tool's refusal and the accounting arrive as two.
   report: boolean;
+  // Handed to the tool as `deps.chained` (M19) — see ToolDeps. A fact about POSITION, which is
+  // why it lives here: the planner knows it, and nothing the model wrote can set it.
+  chained: boolean;
 }
 
 // The shape every milestone before M17 had, and the shape a lone instruction still has.
-const SINGLE: StepPosition = { label: "", speak: true, report: true };
+const SINGLE: StepPosition = { label: "", speak: true, report: true, chained: false };
 
 // The planner loop (spec.md §5). It is generic: it never names a specific tool. The LLM
 // PROPOSES a tool; the planner DISPOSES — registry check, resolve, validate, confirm gate,
@@ -217,6 +220,7 @@ export class Planner {
       chooser: this.chooser,
       sleep: this.sleep,
       tier: null,
+      chained: step.chained,
     };
 
     // 6. What does THIS call cost? Through M12 the answer was a constant the tool carried, and
@@ -420,6 +424,7 @@ export class Planner {
           label: `Step ${index + 1} of ${steps.length}: `,
           speak: index === steps.length - 1,
           report: false,
+          chained: true,
         };
         const outcome = await this.runStep(
           instruction,

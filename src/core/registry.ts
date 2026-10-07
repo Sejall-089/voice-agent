@@ -12,6 +12,7 @@ import { recallTool } from "./tools/recall.ts";
 import { draftReplyTool } from "./tools/draftReply.ts";
 import { reviseDraftTool } from "./tools/reviseDraft.ts";
 import { sendReplyTool } from "./tools/sendReply.ts";
+import { readEmailTool } from "./tools/readEmail.ts";
 import { addToPageTool } from "./tools/addToPage.ts";
 import { readScheduleTool } from "./tools/readSchedule.ts";
 import { createEventTool } from "./tools/createEvent.ts";
@@ -49,7 +50,10 @@ export const registry: Tool[] = [
 
 // The Gmail tools (M10). They only work against a Chrome started with remote debugging, so they
 // are added by `buildRegistry` rather than listed above.
-export const gmailTools: Tool[] = [draftReplyTool, reviseDraftTool, sendReplyTool];
+//
+// `readEmail` joined them in M19. It needs the same Chrome, and it is what lets a chain start from
+// an email's content ("file this as a Linear issue") rather than only reply to it.
+export const gmailTools: Tool[] = [draftReplyTool, reviseDraftTool, sendReplyTool, readEmailTool];
 
 // The Notion tool (M11). Same gating idea as Gmail's, same debug Chrome — a different tab.
 // Just one tool, not three: see spec.md §6b for why Notion's shape doesn't mirror Gmail's.

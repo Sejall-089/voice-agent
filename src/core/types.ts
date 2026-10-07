@@ -591,6 +591,16 @@ export interface ToolDeps {
   // second later someone else adds a guest to it — without this, the handler would email a
   // person the user was never asked about. Knowing the tier lets it refuse instead.
   tier: Risk | null;
+  // M19. True when this call is a step of a chained plan (spec §5b), false for a lone
+  // instruction. Set by the PLANNER from where the call sits — never by the model, and not
+  // something an argument can claim.
+  //
+  // One tool reads it, for one reason: `sendMessage` rewrites the notes it is given through a
+  // model before sending them, which is right for rough notes someone selected and wrong for
+  // text a previous step produced. Inside a chain the text is sent VERBATIM and shown in full
+  // at the confirm gate, so what was approved is what goes — and a ticket link is not something
+  // a rewrite gets to drop.
+  chained: boolean;
 }
 
 // A handler returns the text to display; it throws on failure (planner catches).
