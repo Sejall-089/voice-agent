@@ -30,13 +30,14 @@ function harness(name: string, input: ToolInput, options: Partial<MockShellOptio
 }
 
 describe("systemVolume", () => {
-  it("sends volume up the default number of times", async () => {
+  it("sends volume up the default amount, and reports it in percent", async () => {
     const { shell, log, planner } = harness("systemVolume", { direction: "up" });
 
     const outcome = await planner.run("turn the volume up");
 
     expect(outcome.status).toBe("ok");
-    expect(outcome.result).toBe("Sent volume up 5 times");
+    // The default: 5 presses, reported as the change that was sent and never as presses.
+    expect(outcome.result).toBe("Volume up about 10%");
     expect(shell.actions).toEqual([{ kind: "mediaKey", payload: "volumeUp", count: 5 }]);
     // 0xAF five times — what the OS actually saw.
     expect(shell.pressed).toEqual([{ vk: 0xaf, count: 5 }]);
@@ -46,18 +47,27 @@ describe("systemVolume", () => {
   // The one that would be most obviously wrong if the key table were transposed: asserted here
   // through the whole planner, not just against the table, so a correct table wired up
   // backwards somewhere in between still fails.
+  //
+  // RE-JUSTIFIED for the percent change: the argument used to be `presses: 3` and this expected
+  // 3 presses. It now passes `percent: 6`, which is the same three presses expressed the way a
+  // person says it — so the test still pins the key code AND now also pins that the conversion
+  // runs on the `down` path, not only on `up`.
   it("sends volume DOWN for down, and never the up key", async () => {
-    const { shell, planner } = harness("systemVolume", { direction: "down", presses: 3 });
+    const { shell, planner } = harness("systemVolume", { direction: "down", percent: 6 });
 
     const outcome = await planner.run("quieter");
 
-    expect(outcome.result).toBe("Sent volume down 3 times");
+    expect(outcome.result).toBe("Volume down about 6%");
     expect(shell.pressed).toEqual([{ vk: 0xae, count: 3 }]);
     expect(shell.pressed[0]?.vk).not.toBe(0xaf);
   });
 
-  it("toggles mute with exactly one press, whatever count was asked for", async () => {
-    const { shell, planner } = harness("systemVolume", { direction: "mute", presses: 5 });
+  // RE-JUSTIFIED: this used to prove "a press count is ignored for mute". It now proves the
+  // stronger and more useful thing — the amount is ignored for mute WHATEVER UNIT it arrives
+  // in. 50 would be 25 presses if the conversion ran, and 50 presses if the old press-count
+  // reading survived anywhere; it is one press, so neither happens.
+  it("toggles mute with exactly one press, whatever amount was asked for", async () => {
+    const { shell, planner } = harness("systemVolume", { direction: "mute", percent: 50 });
 
     const outcome = await planner.run("mute");
 
@@ -68,22 +78,97 @@ describe("systemVolume", () => {
     expect(shell.pressed).toEqual([{ vk: 0xad, count: 1 }]);
   });
 
-  it("clamps a press count through the planner, at both ends", async () => {
-    const high = harness("systemVolume", { direction: "up", presses: 99 });
-    await high.planner.run("turn it way up");
-    expect(high.shell.pressed).toEqual([{ vk: 0xaf, count: 15 }]);
-    expect(high.shell.results[0]).toBe("Sent volume up 15 times");
+  // THE UNITS BUG, as a planner-level regression test. Live testing found that "turn the volume
+  // up by 10" had the model pass 10 and moved the volume 20% — the model said percent, the code
+  // read presses. These are the numbers a person would actually say, with the presses they must
+  // now produce written as literals.
+  it("reads the amount as a PERCENT and converts it to presses", async () => {
+    const ten = harness("systemVolume", { direction: "up", percent: 10 });
+    await ten.planner.run("turn the volume up by 10");
+    // 10% at 2% per press. Under the old press-count reading this was 10 presses = 20%.
+    expect(ten.shell.pressed).toEqual([{ vk: 0xaf, count: 5 }]);
+    expect(ten.shell.results[0]).toBe("Volume up about 10%");
 
-    const low = harness("systemVolume", { direction: "up", presses: 0 });
-    await low.planner.run("turn it up a bit");
-    expect(low.shell.pressed).toEqual([{ vk: 0xaf, count: 1 }]);
-    // One press reads as a plain sentence rather than "1 times".
-    expect(low.shell.results[0]).toBe("Sent volume up");
+    const twenty = harness("systemVolume", { direction: "up", percent: 20 });
+    await twenty.planner.run("turn the volume up by 20");
+    expect(twenty.shell.pressed).toEqual([{ vk: 0xaf, count: 10 }]);
+
+    // Rounds half up: 5% is 2.5 presses, and under-delivering on a small request reads as the
+    // app ignoring it.
+    const five = harness("systemVolume", { direction: "up", percent: 5 });
+    await five.planner.run("turn it up by 5");
+    expect(five.shell.pressed).toEqual([{ vk: 0xaf, count: 3 }]);
   });
 
-  it("defaults the count when the model gave a non-number", async () => {
-    const { shell, planner } = harness("systemVolume", { direction: "up", presses: "lots" });
+  // THE RESULT TEXT, as the literal sentences a person reads and hears. The percent is what was
+  // SENT (presses x 2), so a request for 5 reports 6 - and each case pins the presses beside
+  // the sentence, so the text cannot drift away from what the OS was actually handed.
+  it("reports the change in percent, as what was actually sent", async () => {
+    const cases: [Record<string, unknown>, number, number, string][] = [
+      [{ direction: "up" }, 0xaf, 5, "Volume up about 10%"],
+      [{ direction: "up", percent: 10 }, 0xaf, 5, "Volume up about 10%"],
+      [{ direction: "down" }, 0xae, 5, "Volume down about 10%"],
+      // Asked for 5, which rounds up to 3 presses: the sentence says 6, not 5.
+      [{ direction: "down", percent: 5 }, 0xae, 3, "Volume down about 6%"],
+      [{ direction: "up", percent: 5 }, 0xaf, 3, "Volume up about 6%"],
+      // Exactly the cap is not "capped" - nothing was withheld, so nothing is explained.
+      [{ direction: "up", percent: 30 }, 0xaf, 15, "Volume up about 30%"],
+      [
+        { direction: "up", percent: 80 },
+        0xaf,
+        15,
+        "Volume up about 30% (my limit per request, you asked for 80%)",
+      ],
+      [
+        { direction: "down", percent: 80 },
+        0xae,
+        15,
+        "Volume down about 30% (my limit per request, you asked for 80%)",
+      ],
+    ];
+
+    for (const [args, vk, count, sentence] of cases) {
+      const { shell, planner } = harness("systemVolume", args);
+      const outcome = await planner.run("volume");
+      expect(shell.pressed, sentence).toEqual([{ vk, count }]);
+      expect(outcome.result, JSON.stringify(args)).toBe(sentence);
+    }
+  });
+
+  it("clamps a percent through the planner, at both ends", async () => {
+    const high = harness("systemVolume", { direction: "up", percent: 99 });
+    await high.planner.run("turn it way up");
+    // 99% would be 50 presses; the ceiling is 15 (30%).
+    expect(high.shell.pressed).toEqual([{ vk: 0xaf, count: 15 }]);
+    expect(high.shell.results[0]).toBe(
+      "Volume up about 30% (my limit per request, you asked for 99%)",
+    );
+
+    const low = harness("systemVolume", { direction: "up", percent: 1 });
+    await low.planner.run("turn it up a tiny bit");
+    expect(low.shell.pressed).toEqual([{ vk: 0xaf, count: 1 }]);
+    // One press is 2%, and that is what it says - not the 1% that was asked for.
+    expect(low.shell.results[0]).toBe("Volume up about 2%");
+  });
+
+  it("defaults to 5 presses when no amount was given at all", async () => {
+    const { shell, planner } = harness("systemVolume", { direction: "up" });
     await planner.run("turn it up");
+    expect(shell.pressed).toEqual([{ vk: 0xaf, count: 5 }]);
+  });
+
+  it("defaults when the model gave a non-number", async () => {
+    const { shell, planner } = harness("systemVolume", { direction: "up", percent: "lots" });
+    await planner.run("turn it up");
+    expect(shell.pressed).toEqual([{ vk: 0xaf, count: 5 }]);
+  });
+
+  // The old argument name must not keep working, or the bug could come back silently through a
+  // model that still says `presses` — it has to be ignored, which falls back to the default.
+  it("ignores a stale `presses` argument rather than honouring it", async () => {
+    const { shell, planner } = harness("systemVolume", { direction: "up", presses: 10 });
+    await planner.run("turn the volume up by 10");
+    // NOT 10 presses. The old reading is gone, so this is the no-amount default.
     expect(shell.pressed).toEqual([{ vk: 0xaf, count: 5 }]);
   });
 

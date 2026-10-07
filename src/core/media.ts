@@ -32,25 +32,73 @@ export function isMediaKey(value: unknown): value is MediaKey {
 
 // How many presses one request may ask for.
 //
-// Windows moves the system volume by roughly 2% per press of the volume keys, so the default of
-// 5 is about a 10% step — a noticeable change that is not a jolt. The ceiling exists because
-// "turn it up" must not be able to become a 100-press sweep: each press is a real synthetic key
-// event with a real 40ms gap after it (see WindowsInputInjector's CHUNK_DELAY_MS and the
-// key-repeat corruption M12.1 found), so 15 is already more than half a second of held
-// keyboard, and the honest answer to "turn it way up" is to ask twice.
+// The ceiling exists because "turn it up" must not be able to become a 100-press sweep: each
+// press is a real synthetic key event with a real 40ms gap after it (see
+// WindowsInputInjector's CHUNK_DELAY_MS and the key-repeat corruption M12.1 found), so 15 is
+// already more than half a second of held keyboard, and the honest answer to "turn it way up"
+// is to ask twice.
 export const MIN_PRESSES = 1;
 export const MAX_PRESSES = 15;
 export const DEFAULT_PRESSES = 5;
 
-// Settle how many presses a request means.
+// --- Percent, which is what a person means (fixed after live testing) ---
+
+// How far one press of the volume key moves the system volume.
+//
+// THIS IS THE WINDOWS DEFAULT AS MEASURED ON ONE MACHINE, NOT A UNIVERSAL CONSTANT. Live
+// testing measured the default 5 presses moving the volume 28→38 and 14→24 — 2% per press,
+// in both directions, on that hardware. Windows' own step is a registry/driver detail and some
+// audio drivers and keyboards do their own thing, so this is a calibration, not a law. If the
+// step turns out to differ on another machine, THIS is the one number to change.
+export const PERCENT_PER_PRESS = 2;
+
+// The most a single request can move it: 15 presses at 2% each.
+export const MAX_PERCENT = MAX_PRESSES * PERCENT_PER_PRESS;
+// What one press buys, which is also the smallest change that can be asked for.
+export const MIN_PERCENT = MIN_PRESSES * PERCENT_PER_PRESS;
+// The step when no amount is given, in the units a person thinks in.
+export const DEFAULT_PERCENT = DEFAULT_PRESSES * PERCENT_PER_PRESS;
+
+// Turn the amount A PERSON SAID into key presses.
+//
+// THE BUG THIS FIXES, found by live testing and worth recording because it was invisible to
+// every test: the tool used to take `presses` directly, so "turn the volume up by 10" had the
+// model pass 10, and 10 presses moved the volume by 20%. The model was not wrong and the code
+// was not wrong — they disagreed about the UNIT. Nobody says "turn it up by ten key presses";
+// they mean ten percent. So the argument is now a percent and the conversion lives here, where
+// it is one rounded division instead of an assumption spread across a prompt.
+//
+// ROUNDING IS HALF-UP (`Math.round`), so a requested 5% becomes 3 presses (6%) rather than 2
+// (4%). Either way the error is 1%, so the tie is broken on which failure is worse: a small
+// request that under-delivers reads as the app having ignored it, which is the complaint M12.2
+// fixed in dictation for the same reason. Over-delivering by 1% is inaudible.
+//
+// A value that is not a usable number means THE MODEL DID NOT SAY, and the answer is the
+// default — the same split `clampPresses` makes, and for the same reason: "turn it up" with no
+// amount is a complete request, not a malformed one.
+export function pressesForPercent(percent: unknown): number {
+  if (typeof percent !== "number" || !Number.isFinite(percent)) return DEFAULT_PRESSES;
+  const presses = Math.round(percent / PERCENT_PER_PRESS);
+  if (presses < MIN_PRESSES) return MIN_PRESSES;
+  if (presses > MAX_PRESSES) return MAX_PRESSES;
+  return presses;
+}
+
+// Settle how many PRESSES a press count means.
+//
+// NOTE WHAT THIS IS AND IS NOT, because its role narrowed when the tool's argument became a
+// percent. This is no longer the user-facing rule — `pressesForPercent` below is. Nothing a
+// model says reaches this function any more: `systemVolume` converts a percent to presses and
+// the already-clamped result travels on the action. What is left is the SHELL's defence in
+// depth (WindowsShell's `mediaKey` case re-resolves every action through `pressesFor`), so an
+// action arriving with a count no tool would have sent still cannot press a key 400 times.
 //
 // TWO DIFFERENT KINDS OF BAD INPUT, DELIBERATELY ANSWERED DIFFERENTLY. A value that is not a
-// usable number at all — absent, a string, NaN — means THE MODEL DID NOT SAY, and the answer is
-// the default. A number outside the range means it DID say, and said something out of bounds, so
-// it is clamped to the nearest end. Collapsing the two would turn "turn it up by 40" into the
-// default 5, which is a quieter wrong answer than clamping to the maximum it will actually do.
+// usable number at all — absent, a string, NaN — means NOTHING WAS SAID, and the answer is the
+// default. A number outside the range is a count that was given and is out of bounds, so it is
+// clamped to the nearest end rather than discarded.
 //
-// Fractions are rounded rather than refused: `2.5` is a model being loose about a number, not a
+// Fractions are rounded rather than refused: `2.5` is a caller being loose about a number, not a
 // request that cannot be honoured, and a refusal there would be pedantry the user pays for.
 export function clampPresses(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_PRESSES;
@@ -110,10 +158,55 @@ export function sentLabelFor(key: MediaKey): string {
 // The whole sentence a tool returns. One place, so `systemVolume` and `mediaControl` cannot
 // drift into describing the same action two ways.
 //
-// "Sent volume up 5 times" / "Sent volume up" / "Sent mute". Plain ASCII throughout: an "x5"
-// written with a multiplication sign would be rejected by the strict FakeSynthesizer and
-// mis-decoded by the real engine, which is precisely the en-dash bug M14 found.
-export function sentDescription(key: MediaKey, presses: number): string {
-  const label = sentLabelFor(key);
-  return presses > 1 ? `Sent ${label} ${presses} times` : `Sent ${label}`;
+// "Sent mute" / "Sent play or pause" / "Sent next track" — the single-press keys. A volume
+// CHANGE is described by `volumeChangeDescription` below instead, in the unit a person asked
+// in. Plain ASCII throughout: the first draft's multiplication sign was rejected by the strict
+// FakeSynthesizer and mis-decoded by the real engine, which is precisely the en-dash bug M14
+// found.
+export function sentDescription(key: MediaKey): string {
+  return `Sent ${sentLabelFor(key)}`;
+}
+
+// Whether a requested percent is more than one request can deliver. Decided on the PRESS COUNT
+// it converts to, by the same rounding `pressesForPercent` uses, so the two cannot disagree
+// about a value near the boundary (30.4% is 15 presses and is not "capped"; 31% is 16 and is).
+export function exceedsVolumeCap(percent: unknown): percent is number {
+  return (
+    typeof percent === "number" &&
+    Number.isFinite(percent) &&
+    Math.round(percent / PERCENT_PER_PRESS) > MAX_PRESSES
+  );
+}
+
+// The sentence `systemVolume` returns for up and down.
+//
+// IN PERCENT, BECAUSE THAT IS THE UNIT THE REQUEST CAME IN. This used to read "Sent volume up 5
+// times", which answered "turn it up by 10" with a number the user never said and had to
+// multiply to check — the units bug again, on the way out instead of the way in.
+//
+// THE PERCENT SHOWN IS presses x PERCENT_PER_PRESS: what was actually SENT, not what was asked
+// for. "By 5" sends 3 presses and so reads "about 6%". And it is always "about", because 2% per
+// press was measured on one machine (see PERCENT_PER_PRESS) and nothing here can check it.
+//
+// IT IS STILL A CHANGE AND NEVER A LEVEL. "Volume up about 10%" is the size of the step that
+// was sent; "now at 40%" or "to 50%" would be a reading of the volume, which this app cannot
+// take. tests/mediaKeys.test.ts holds that line: every number in the sentence must be the step
+// or the user's own request quoted back, and nothing else.
+//
+// A capped request says so, with the number the user asked for, so "turn it up by 80" moving
+// 30% does not read as the app having misheard.
+//
+// "%" RATHER THAN "percent": printable ASCII, so nothing in the speech path touches it, and
+// Piper's phonemizer was asked directly — "10%" and "10 percent" produce identical phonemes.
+// The parentheses become a comma in core/speech.ts, as every aside does.
+export function volumeChangeDescription(
+  key: "volumeUp" | "volumeDown",
+  presses: number,
+  requestedPercent: unknown,
+): string {
+  const direction = key === "volumeUp" ? "up" : "down";
+  const sent = `Volume ${direction} about ${presses * PERCENT_PER_PRESS}%`;
+  return exceedsVolumeCap(requestedPercent)
+    ? `${sent} (my limit per request, you asked for ${Math.round(requestedPercent)}%)`
+    : sent;
 }

@@ -69,6 +69,6 @@ export const mediaControlTool: Tool = {
 
     // "Sent play or pause" / "Sent next track". What was SENT — never what is now playing,
     // which nothing here can know.
-    return sentDescription(raw, presses);
+    return sentDescription(raw);
   },
 };

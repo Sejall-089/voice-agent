@@ -1,14 +1,21 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_PERCENT,
   DEFAULT_PRESSES,
+  MAX_PERCENT,
   MAX_PRESSES,
   MEDIA_KEYS,
+  MIN_PERCENT,
   MIN_PRESSES,
+  PERCENT_PER_PRESS,
   acceptsRepeat,
   clampPresses,
   isMediaKey,
   pressesFor,
+  pressesForPercent,
   sentDescription,
+  volumeChangeDescription,
+  exceedsVolumeCap,
   sentLabelFor,
   type MediaKey,
 } from "../src/core/media.ts";
@@ -77,8 +84,21 @@ describe("isMediaKey", () => {
   });
 });
 
-describe("clampPresses", () => {
-  it("defaults when the model said nothing usable", () => {
+// RE-JUSTIFIED when the tool's argument became a percent, rather than just re-run.
+//
+// These tests did not change and they still pass, but WHAT THEY PROVE changed, and that is
+// exactly the situation CLAUDE.md says to re-examine rather than tick off. `clampPresses` used
+// to be the user-facing rule: the model passed a press count and this decided what it meant.
+// It is now unreachable from anything a model says — `systemVolume` converts a percent through
+// `pressesForPercent` and sends an already-clamped count. What is left is the SHELL's defence
+// in depth, since WindowsShell re-resolves every `mediaKey` action through `pressesFor`.
+//
+// So these are kept, with their titles changed from "the model" to "a caller", because an
+// action arriving with a count no tool would have sent must still not press a key 400 times.
+// They are no longer evidence about what a person's words mean — `pressesForPercent`'s tests
+// above are the ones that carry that now.
+describe("clampPresses (the shell's defence, no longer the user-facing rule)", () => {
+  it("defaults when a caller supplied nothing usable", () => {
     // NOT A NUMBER AT ALL means "no answer given", and the answer to that is the default — a
     // different thing from an out-of-range number, which is an answer that needs correcting.
     expect(clampPresses(undefined)).toBe(DEFAULT_PRESSES);
@@ -112,6 +132,65 @@ describe("clampPresses", () => {
     // Rounding happens BEFORE the clamp, so 0.4 is still a request for a press, not for none.
     expect(clampPresses(0.4)).toBe(1);
     expect(clampPresses(15.6)).toBe(15);
+  });
+});
+
+// THE UNITS FIX (found by live testing). `systemVolume`'s argument used to be a press count,
+// so "turn the volume up by 10" moved the volume by 20%. Every expected value below is written
+// as a LITERAL, not computed from PERCENT_PER_PRESS — deriving them from the constant would
+// only prove the function agrees with its own arithmetic, and the thing worth pinning is the
+// answer a person gets for the number they said.
+describe("pressesForPercent", () => {
+  it("converts the percent a person said into presses", () => {
+    expect(pressesForPercent(10)).toBe(5); // the default-sized nudge
+    expect(pressesForPercent(20)).toBe(10); // the bug's original symptom: 10 used to mean 20%
+    expect(pressesForPercent(2)).toBe(1);
+    expect(pressesForPercent(30)).toBe(15); // exactly the ceiling
+  });
+
+  // ROUNDS HALF UP, so 5% -> 2.5 presses -> 3 presses (6%), not 2 (4%). The error is 1% either
+  // way, so the tie is broken on which failure is worse: a small request that under-delivers
+  // reads as the app having ignored it, while 1% over is inaudible.
+  it("rounds half up, so a small request is never swallowed", () => {
+    expect(pressesForPercent(5)).toBe(3); // 2.5 -> 3
+    expect(pressesForPercent(7)).toBe(4); // 3.5 -> 4
+    expect(pressesForPercent(9)).toBe(5); // 4.5 -> 5
+    // And rounds DOWN below the halfway point, which is ordinary rounding, not a bias.
+    expect(pressesForPercent(4.9)).toBe(2); // 2.45 -> 2
+    expect(pressesForPercent(11)).toBe(6); // 5.5 -> 6
+  });
+
+  it("never does nothing: anything above zero is at least one press", () => {
+    expect(pressesForPercent(1)).toBe(1); // 0.5 -> 1, and the minimum anyway
+    expect(pressesForPercent(0.4)).toBe(1); // 0.2 -> 0 -> floored up to the minimum
+    expect(pressesForPercent(0)).toBe(1);
+    expect(pressesForPercent(-20)).toBe(1); // direction is a separate argument
+    expect(MIN_PERCENT).toBe(2);
+  });
+
+  it("clamps a percent above the cap instead of refusing it", () => {
+    expect(pressesForPercent(31)).toBe(15);
+    expect(pressesForPercent(50)).toBe(15);
+    expect(pressesForPercent(100)).toBe(15);
+    expect(MAX_PERCENT).toBe(30);
+  });
+
+  it("defaults when no amount was given", () => {
+    expect(pressesForPercent(undefined)).toBe(5);
+    expect(pressesForPercent(null)).toBe(5);
+    expect(pressesForPercent("10")).toBe(5); // a string is not an amount
+    expect(pressesForPercent(NaN)).toBe(5);
+    expect(pressesForPercent(Infinity)).toBe(5);
+    expect(DEFAULT_PERCENT).toBe(10);
+  });
+
+  // The calibration itself, pinned as a literal with its provenance. Measured live: the default
+  // 5 presses moved the volume 28→38 and 14→24. If this ever changes, it is the one number to
+  // change, and this assertion is what makes that a deliberate edit rather than a silent drift.
+  it("records the measured Windows step as 2% per press", () => {
+    expect(PERCENT_PER_PRESS).toBe(2);
+    expect(DEFAULT_PERCENT).toBe(DEFAULT_PRESSES * PERCENT_PER_PRESS);
+    expect(MAX_PERCENT).toBe(MAX_PRESSES * PERCENT_PER_PRESS);
   });
 });
 
@@ -184,26 +263,126 @@ describe("sentLabelFor", () => {
   });
 
   describe("sentDescription", () => {
-    it("says how many times only when it was more than once", () => {
-      expect(sentDescription("volumeUp", 5)).toBe("Sent volume up 5 times");
-      expect(sentDescription("volumeDown", 2)).toBe("Sent volume down 2 times");
-      expect(sentDescription("volumeUp", 1)).toBe("Sent volume up");
-      expect(sentDescription("mute", 1)).toBe("Sent mute");
-      expect(sentDescription("next", 1)).toBe("Sent next track");
+    // RE-JUSTIFIED when the volume wording moved to percent. This used to pin "Sent volume up 5
+    // times"; no tool produces a press count any more, so the count parameter is gone and what
+    // is left is the single-press keys. Up and down are `volumeChangeDescription`'s, below.
+    it("is 'Sent' plus the label, with no count", () => {
+      expect(sentDescription("mute")).toBe("Sent mute");
+      expect(sentDescription("playPause")).toBe("Sent play or pause");
+      expect(sentDescription("next")).toBe("Sent next track");
+      expect(sentDescription("previous")).toBe("Sent previous track");
     });
 
-    // The invariant behind all of them: a result may say what was SENT and must never imply a
-    // level or a playback state, because neither can be read back.
+    // RE-JUSTIFIED, not just re-run. This sweep used to forbid "%" outright, across every key,
+    // and that rule was the only thing standing between a volume result and "now at 40%". The
+    // volume sentences now legitimately contain "%", so the blanket ban cannot be the level
+    // rule any more. It is kept here for what it still distinguishes - a toggle or a transport
+    // key claiming a state - and the level rule is restated properly below, for the sentences
+    // that can actually break it.
     it("never claims a level or a playback state", () => {
       for (const key of MEDIA_KEYS) {
-        for (const presses of [1, 5, 15]) {
-          const text = sentDescription(key, presses);
-          expect(text, text).toMatch(/^Sent /);
-          expect(text, text).not.toMatch(/%|now playing|is playing|muted|unmuted/i);
-          // Plain ASCII only - the strict FakeSynthesizer rejects anything else, and the real
-          // engine mis-decodes it (M14).
-          expect(text, text).toMatch(/^[ -~]+$/);
+        const text = sentDescription(key);
+        expect(text, text).toMatch(/^Sent /);
+        expect(text, text).not.toMatch(/%|\d|now|playing|muted|unmuted/i);
+        // Plain ASCII only - the strict FakeSynthesizer rejects anything else, and the real
+        // engine mis-decodes it (M14).
+        expect(text, text).toMatch(/^[ -~]+$/);
+      }
+    });
+  });
+
+  describe("volumeChangeDescription", () => {
+    // The sentences, as literals. The percent is presses x 2 - what was SENT.
+    it("reports the change that was sent, in percent, always with 'about'", () => {
+      expect(volumeChangeDescription("volumeUp", 5, undefined)).toBe("Volume up about 10%");
+      expect(volumeChangeDescription("volumeUp", 5, 10)).toBe("Volume up about 10%");
+      expect(volumeChangeDescription("volumeDown", 5, undefined)).toBe("Volume down about 10%");
+      // Asked for 5; 3 presses went out; the sentence says 6.
+      expect(volumeChangeDescription("volumeDown", 3, 5)).toBe("Volume down about 6%");
+      expect(volumeChangeDescription("volumeUp", 1, 1)).toBe("Volume up about 2%");
+    });
+
+    it("says so when the request was capped, quoting what was asked for", () => {
+      expect(volumeChangeDescription("volumeUp", 15, 80)).toBe(
+        "Volume up about 30% (my limit per request, you asked for 80%)",
+      );
+      expect(volumeChangeDescription("volumeDown", 15, 100)).toBe(
+        "Volume down about 30% (my limit per request, you asked for 100%)",
+      );
+      // Exactly the limit withheld nothing, so there is nothing to explain.
+      expect(volumeChangeDescription("volumeUp", 15, 30)).toBe("Volume up about 30%");
+    });
+
+    // The boundary is decided on PRESSES, by the same rounding the conversion uses: a request
+    // counts as capped exactly when `pressesForPercent` had to cut it down.
+    it("calls a request capped exactly when the conversion cut it down", () => {
+      for (const percent of [0, 1, 5, 29, 30, 30.9, 31, 32, 80, 1000]) {
+        const uncapped = Math.round(percent / 2);
+        expect(exceedsVolumeCap(percent), String(percent)).toBe(uncapped > 15);
+        expect(exceedsVolumeCap(percent), String(percent)).toBe(
+          pressesForPercent(percent) < uncapped,
+        );
+      }
+      for (const junk of [undefined, null, "80", Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(exceedsVolumeCap(junk), String(junk)).toBe(false);
+      }
+    });
+
+    // THE NO-LEVEL RULE, restated for sentences that are allowed to contain a percent.
+    //
+    // What it has to DISTINGUISH is a change from a level: "about 10%" is the size of the step
+    // that was sent; "now at 40%" and "to 50%" are readings of the volume, which nothing in
+    // this app can take. So the rule is not "no %" any more but: every number in the sentence
+    // is either the step ("about N%", where N is exactly presses x 2) or the user's own request
+    // quoted back ("you asked for N%"). Remove those two forms and no digit and no "%" may be
+    // left - which is what "now at 40%", "to 50%" or "40% volume" would leave behind.
+    const LEVEL_WORDING = /\bnow\b|\b(?:to|at|is|reached|level)\b[^%]*\d+\s*%|\bset to\b/i;
+
+    function strayNumbers(text: string): string {
+      return text.replace(/\babout \d+%/g, "").replace(/\byou asked for \d+%/g, "");
+    }
+
+    it("states a change and never a resulting level, for every press count and request", () => {
+      for (const key of ["volumeUp", "volumeDown"] as const) {
+        for (let presses = 1; presses <= 15; presses += 1) {
+          for (const requested of [undefined, 1, 5, 10, 30, 31, 50, 80, 100]) {
+            const text = volumeChangeDescription(key, presses, requested);
+            expect(text, text).toMatch(/^Volume (up|down) about \d+%/);
+            expect(text, text).toContain(`about ${presses * 2}%`);
+            expect(text, text).not.toMatch(LEVEL_WORDING);
+            expect(strayNumbers(text), text).not.toMatch(/\d|%/);
+            expect(text, text).toMatch(/^[ -~]+$/);
+          }
         }
+      }
+    });
+
+    // The rule above is only worth having if it can fail. These are the sentences it exists to
+    // forbid, checked against the same two predicates - and the allowed ones beside them, so
+    // the test proves it tells the two apart rather than rejecting everything with a "%".
+    it("the rule itself rejects level wording and accepts change wording", () => {
+      const forbidden = [
+        "Volume up, now at 40%",
+        "Volume is now 40%",
+        "Volume up to 50%",
+        "Volume set to 50%",
+        "Volume up about 10%, now 40%",
+        "Volume at 40%",
+        "Volume up about 10% to 40%",
+      ];
+      for (const text of forbidden) {
+        expect(LEVEL_WORDING.test(text), text).toBe(true);
+        expect(strayNumbers(text), text).toMatch(/\d|%/);
+      }
+
+      const allowed = [
+        "Volume up about 10%",
+        "Volume down about 6%",
+        "Volume up about 30% (my limit per request, you asked for 80%)",
+      ];
+      for (const text of allowed) {
+        expect(LEVEL_WORDING.test(text), text).toBe(false);
+        expect(strayNumbers(text), text).not.toMatch(/\d|%/);
       }
     });
   });

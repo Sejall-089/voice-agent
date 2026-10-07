@@ -152,6 +152,30 @@ describe("toSpokenResult — a list", () => {
   });
 });
 
+// systemVolume's results, as the exact strings handed to the synthesizer. "%" is printable ASCII
+// and no rule here touches it, so it reaches the engine as written — and Piper's own phonemizer,
+// asked directly (PiperVoice.phonemize, not by ear), returns identical phonemes for "10%" and
+// "10 percent". So the screen text is not respelled for speech. What DOES change is the capped
+// form: its parentheses become a comma, like every other aside.
+describe("toSpokenResult — a volume change in percent", () => {
+  it("keeps the percent sign and adds only the full stop", () => {
+    expect(toSpokenResult("Volume up about 10%")).toEqual({
+      text: "Volume up about 10%.",
+      remainder: null,
+    });
+    expect(toSpokenResult("Volume down about 6%").text).toBe("Volume down about 6%.");
+  });
+
+  it("says the capped form's aside with a comma, not parentheses", () => {
+    expect(
+      toSpokenResult("Volume up about 30% (my limit per request, you asked for 80%)"),
+    ).toEqual({
+      text: "Volume up about 30%, my limit per request, you asked for 80%.",
+      remainder: null,
+    });
+  });
+});
+
 describe("toSpokenNarration", () => {
   it("says what is about to happen, with the screen's ellipsis and quotes removed", () => {
     // createEvent's actual narrate output.
@@ -234,7 +258,10 @@ describe("every output is speakable", () => {
     // rejects and Piper receives as mojibake, exactly the en-dash bug M14 found. Plain ASCII
     // now, but the fixtures stay so the next result string is checked too. The searchSpotify
     // line keeps its em dash, which `speakable` DOES map, so it proves the mapping still fires.
-    "Sent volume up 5 times",
+    "Volume up about 10%",
+    "Volume down about 6%",
+    "Volume up about 30% (my limit per request, you asked for 80%)",
+    "Sent mute",
     "Sent play or pause",
     "Opened a Spotify search for \"bohemian rhapsody\" — press play on the one you want.",
     "I can't open Photoshop — I can only open: Spotify, Notepad, Calculator and File Explorer.",
@@ -364,7 +391,10 @@ describe("the transform satisfies the engine's contract", () => {
     // rejects and Piper receives as mojibake, exactly the en-dash bug M14 found. Plain ASCII
     // now, but the fixtures stay so the next result string is checked too. The searchSpotify
     // line keeps its em dash, which `speakable` DOES map, so it proves the mapping still fires.
-    "Sent volume up 5 times",
+    "Volume up about 10%",
+    "Volume down about 6%",
+    "Volume up about 30% (my limit per request, you asked for 80%)",
+    "Sent mute",
     "Sent play or pause",
     "Opened a Spotify search for \"bohemian rhapsody\" — press play on the one you want.",
     "I can't open Photoshop — I can only open: Spotify, Notepad, Calculator and File Explorer.",
