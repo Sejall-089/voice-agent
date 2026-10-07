@@ -157,13 +157,12 @@ added (`main.ts` loops over `problems` before it reports `entries`):
 - [ ] The console shows `[main] I ignored the APPS_EXTRA app "Bad" — "notepad.exe /A" has
       arguments, and I only launch a bare command.`
 - [ ] The console shows `[main] APPS_EXTRA added: VLC`.
-- [x] "open VLC" works. **Human-verified, with Paint standing in for VLC**
-      (`Paint=mspaint.exe`): "open Paint" opened Paint.
+- [x] "open VLC" works. **Human-verified, with Paint standing in for VLC:** "open Paint"
+      opened Paint.
 - [x] "open Bad" is refused and **nothing launches** — the malformed entry is never in the
       catalog, only in the report. **Human-verified:** "open Bad" was refused.
-      *The `Bad` entry in that run was noted as `Bad=notepad.exe`. It is the ` /A` that makes
-      the entry malformed — a bare `Bad=notepad.exe` is a valid entry and "open Bad" would open
-      Notepad — so the value actually set must have carried arguments, as the one above does.*
+
+Both were run with `APPS_EXTRA=Paint=mspaint.exe|Bad=notepad.exe /A`.
 
 > **Script-verified (2026-10-07), all four. The two launch checks have since been
 > human-verified above; the two console lines have still not been seen in the running app.** The real
