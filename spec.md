@@ -2133,6 +2133,7 @@ human-verified or script-verified, are in `docs/M18-live-checklist.md`.
 - The instruction bar may keep showing the previous result while a new command is typed (unconfirmed).
 - 26 leftover `va-uia-*` folders in the temp directory from the UIA host, which only cleans up on a clean exit.
 - Spotify Web API tools are parked until a Premium account exists.
+- The terminal shows the em dash in refusal messages as "ΓÇö" (console encoding only; the bar renders it correctly).
 
 ### M17 — proven vs. live-only
 

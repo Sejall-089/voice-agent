@@ -18,9 +18,9 @@
 > "M18 — proven vs. live-only" for the same split from the other side.
 >
 > **Progress (2026-10-07):** sections 0, 1, 3, 4, 5 and 6 have been run by hand and their
-> results are recorded in place. Section 0b is one of three done. Section 2's two launch checks
-> are human-verified and its two console lines script-verified. The parts of sections 7 and 9
-> that have results are script-verified only. Section 8 has nothing recorded yet.
+> results are recorded in place. Section 0b is one of three done. Section 2 is fully
+> human-verified. The parts of sections 7 and 9 that have results are script-verified only.
+> Section 8 has nothing recorded yet.
 >
 > **How results are marked.** Every recorded result says which kind it is:
 >
@@ -154,18 +154,22 @@ APPS_EXTRA=VLC=C:\Program Files\VideoLAN\VLC\vlc.exe|Bad=notepad.exe /A
 The two console lines appear **in this order** — problems are printed first, then what was
 added (`main.ts` loops over `problems` before it reports `entries`):
 
-- [ ] The console shows `[main] I ignored the APPS_EXTRA app "Bad" — "notepad.exe /A" has
-      arguments, and I only launch a bare command.`
-- [ ] The console shows `[main] APPS_EXTRA added: VLC`.
+- [x] The console shows `[main] I ignored the APPS_EXTRA app "Bad" — "notepad.exe /A" has
+      arguments, and I only launch a bare command.` **Human-verified.**
+- [x] The console shows `[main] APPS_EXTRA added: VLC`. **Human-verified**, as
+      `APPS_EXTRA added: Paint`.
 - [x] "open VLC" works. **Human-verified, with Paint standing in for VLC:** "open Paint"
       opened Paint.
 - [x] "open Bad" is refused and **nothing launches** — the malformed entry is never in the
-      catalog, only in the report. **Human-verified:** "open Bad" was refused.
+      catalog, only in the report. **Human-verified:** "open bad" was refused, with the app
+      list.
 
-Both were run with `APPS_EXTRA=Paint=mspaint.exe|Bad=notepad.exe /A`.
+All four were seen in the running app with `APPS_EXTRA=Paint=mspaint.exe|Bad=notepad.exe /A`.
+The terminal showed the em dash in these messages as "ΓÇö"; that is the console's encoding
+only, and the bar renders it correctly (parked in spec.md §9).
 
-> **Script-verified (2026-10-07), all four. The two launch checks have since been
-> human-verified above; the two console lines have still not been seen in the running app.** The real
+> **Script-verified (2026-10-07), all four — and all four have since been human-verified
+> above, which supersedes this.** The real
 > `parseExtraApps` and `createAppLauncher` were run on the exact `APPS_EXTRA` value above, with
 > `main.ts`'s three lines of wiring replayed by the script and the two launch functions
 > replaced by recorders:
