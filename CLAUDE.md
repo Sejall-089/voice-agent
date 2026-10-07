@@ -85,6 +85,28 @@ patterns behind them — each cost a real debugging session.
   implementation is not testing that implementation. The fix is usually to assert the new rule's
   *precondition* alongside its outcome, and to add a case that the old rule would have failed.
 
+- **A remote tool's NAME is not its capability (M19).** Linear's docs list no tools; the
+  third-party directories that do said `create_issue`. The live server has `save_issue`, which
+  creates when `id` is absent and *edits any issue* when it is present. An allowlist written
+  from those directories would have shipped "edit anything" under the name "create", and every
+  test would have passed against a fake built from the same wrong list. Two rules came out of it:
+  **ask the real server what it offers before pinning anything** (`scripts/linear-recon.mjs`),
+  and **define what a connector tool can do by a closed argument schema, never by which remote
+  tool it calls** — then have the fake implement the dangerous half on purpose, so "it cannot
+  reach it" is a test that could fail rather than an assumption.
+- **A mutation that survives is a test that does not exist yet.** M19's adapter tests were
+  green on the first run, which proves nothing. Breaking seven rules one at a time found that
+  six were pinned and one — "code-fixed arguments beat the model's" — was not: Linear's schemas
+  reject the key before the merge is reached, so no test with the real definition could tell
+  which side won. It needed a definition written to *allow* the key. When a suite passes first
+  time, break the code and check the suite notices. And do the breaking with the Edit tool — two "surviving" mutations in
+  M19 were `sed`/heredoc edits that silently matched nothing, which is the same failure one
+  level up: a check that reported nothing wrong because it never ran.
+- **Recon the failure shapes, not just the happy path.** Linear reports every failure as a
+  normal result with `isError: true` and throws nothing; a rejected key is the one thing that
+  does throw, as a different type, at a different moment. A wrapper written from the happy-path
+  capture alone would have reported a failed create as done.
+
 ## Scope added mid-milestone
 
 If something is added to a milestone's plan AFTER its build order is written, **fold it into the

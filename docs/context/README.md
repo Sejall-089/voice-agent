@@ -5,23 +5,18 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status: see `PROJECT_CONTEXT_UPDATE_8.md`.** M0–M14 shipped and
-live-tested (memory, voice in/out, Gmail, Notion, Calendar, dictation). M15
-(vision-guidance) was built and honestly tested to failure — see Update 7
-for why. M16 (UI Automation-based redesign) is **complete**: built, its
-predecessor's vision code deleted, live-verified through the real app by a
-human at the keyboard (including two real bugs verification found and that
-session fixed), and merged to `master`. One honest gap remains — a
-refusal's live wording was never provoked, held rather than chased. Two
-design questions raised during live verification (the overlay's dismiss
-timer, the Chromium settle delay) are both decided as of 2026-08-27, kept
-as measured — see Update 8.
+**Current status: see `PROJECT_CONTEXT_UPDATE_9.md`.** M0-M18 shipped. M19 (MCP support,
+with Linear as the first connector) is **code-complete and has never been run by a
+person**: 1125 tests pass, two read-only scripts have exercised the real Linear workspace,
+and `docs/M19-live-checklist.md` is entirely open. Its box in `spec.md` section 9 is
+deliberately unticked until that pass is done. `docs/M18-live-checklist.md` also still has
+open items.
 
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
-2. `PROJECT_CONTEXT_UPDATE_8.md` — current status
+2. `PROJECT_CONTEXT_UPDATE_9.md` — current status
 3. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
-   through `PROJECT_CONTEXT_UPDATE_7.md` in numeric order, plus
+   through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`
 
 ## What's superseded (don't treat these as current status)
@@ -43,3 +38,6 @@ as measured — see Update 8.
   on UI Automation — reasoning still holds and is worth reading for *why*,
   but its "M16 decided, not yet started" status line is superseded by
   `PROJECT_CONTEXT_UPDATE_8.md`, which covers the actual build.
+- `PROJECT_CONTEXT_UPDATE_8.md`: M16 built and live-verified - still accurate about M16, but
+  it stops there. M17 (chained plans), M18 (apps and media keys) and M19 (MCP, Linear) are
+  covered by `PROJECT_CONTEXT_UPDATE_9.md`.

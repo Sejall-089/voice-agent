@@ -44,6 +44,7 @@ flowchart TB
     LLM["LLM (selectable: Anthropic/OpenAI)<br/>reasoning / tool choice"]
     Slack["Slack webhook<br/>the one external action"]
     Calendar["Google Calendar<br/>REST API · read, create, move"]
+    Linear["Linear (M19)<br/>MCP over HTTP · a connector,<br/>not a hand-built surface"]
     UIA["Windows UI Automation<br/>via a PowerShell host · exact rects,<br/>names, control types · opt-in"]
     Screen["Pointing overlay<br/>draw a marker · never click"]
     OS["OS &amp; target apps<br/>browser, clipboard, any focused window"]
@@ -56,6 +57,7 @@ flowchart TB
     Core --> Slack
     Core <--> Chrome
     Core <--> Calendar
+    Core <--> Linear
     Core <--> UIA
     Shell --> Screen
     Core <--> Screen
@@ -133,6 +135,11 @@ knows it's on Windows.
   Inverted from M15 on purpose — the model picks a NUMBER off a list this process built, and
   never emits a coordinate, because M15 measured a vision model proposing coordinates directly
   and getting the wrong control on ordinary Windows chrome.
+- **Connectors (M19)** — the generic counterpart to the three surfaces above. Each surface knows
+  one app and was a milestone; a connector is one adapter (`core/mcp/adapter.ts`) that knows *no*
+  app, plus a small definition per app pinning which remote tools this build will call. Linear is
+  the first. What comes out of the adapter is an ordinary registry `Tool`, so the planner, the
+  gates and the chain machinery cannot tell a connector tool from a hand-built one — see §4f.
 - **LLM / Slack / Chrome / Calendar / UIA / OS** — rented reasoning, the external actions, and
   the things the shell's hands touch. UIA is the only one gated behind an explicit opt-in rather
   than "did you configure it" — even though, unlike M15's `Vision`, it is never sent a picture of
@@ -536,6 +543,79 @@ same category of gap as the Mac shell.
 
 ---
 
+## 4f. Connectors — an app over MCP, without trusting the app (M19)
+
+Every app before this was reached through a surface someone wrote by hand. MCP lets an app
+describe its own tools — which is the convenience, and also the problem: a server's tool names,
+descriptions, schemas and safety hints are all text from somebody else's machine.
+
+So the split is the one this codebase already uses everywhere, applied to a protocol: **the
+server proposes, this repo disposes.**
+
+```mermaid
+flowchart LR
+    Def["Connector definition (code)<br/>our names · our descriptions<br/>pinned schemas · tiers · formatters"]
+    Cfg["connectors.json + .env<br/>switch on · narrow · the key"]
+    Load["load.ts<br/>offline — no network"]
+    Menu["Registry<br/>linear__create_issue …"]
+    Model["Planner model<br/>sees ONLY what the definition wrote"]
+    Adapter["adapter.ts — per call<br/>1 validate (our schema)<br/>2 merge fixed args<br/>3 drift check (server schema)"]
+    Server["MCP server<br/>names · schemas · hints"]
+
+    Def --> Load
+    Cfg --> Load
+    Load --> Menu --> Model
+    Menu --> Adapter
+    Adapter -- "call, after the gate" --> Server
+    Server -. "tool list: drift check,<br/>and hints that may only RAISE a tier" .-> Adapter
+```
+
+**Nothing from the server reaches the model.** The dotted arrow is the only way the server's own
+description of itself is used: to notice it has drifted from what was pinned, and to make a tier
+stricter. It can never add a tool, widen an argument, or lower a tier.
+
+**The name is not the capability.** Linear has no create-issue tool; it has `save_issue`, which
+also *updates any issue* when given an `id`. The app exposes `linear__create_issue` with a
+closed two-argument schema, so `id` cannot be sent. What a connector tool can do is defined by
+its pinned schema, not by what the remote tool could do.
+
+**The menu is decided offline.** Which connector tools exist on a run comes from a definition, a
+committed config file and whether a key is set. The connection opens on first use — so an app
+that is never asked about Linear never talks to it, and a dead network cannot change the menu.
+
+**The proof is a chain** (spec.md §5b), and it needed no new gate:
+
+```mermaid
+sequenceDiagram
+    actor You
+    participant Planner
+    participant Gmail as readEmail (safe)
+    participant Linear as linear__create_issue (dangerous)
+    participant Slack as sendMessage (dangerous)
+
+    You->>Planner: "file this bug in Linear and tell the bugs channel"
+    Note over Planner: ONE planning call. The model writes the title<br/>from your words — it never sees the email.
+    Planner->>Gmail: step 1
+    Gmail-->>Planner: From / Subject / body (text)
+    Planner->>Planner: substitute {step1} — single pass, data only
+    Planner->>You: confirm: team + title + the WHOLE email
+    You-->>Planner: approved
+    Planner->>Linear: save_issue { title, description, team }
+    Linear-->>Planner: "Created ENG-5: …" + link
+    Planner->>Planner: substitute {step2}
+    Planner->>You: confirm: the exact Slack message
+    You-->>Planner: approved
+    Planner->>Slack: sent VERBATIM — no model in between
+```
+
+**Where the refusals are.** An argument the pinned schema does not list; a remote tool that has
+gone or changed (drift); a rejected key; a timeout (which says the change *may or may not* have
+landed, and is never retried); a result marked `isError` — Linear reports every failure that
+way, without throwing — and a "success" whose result cannot be read. Each stops the chain where
+it stands, and the steps after it never run.
+
+---
+
 ## 5. Memory data model
 
 Two tables. `facts` carries the epistemic metadata (confidence, version, active) so
@@ -577,7 +657,13 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 
 - **Closed world.** The app can only do the registered tools — six always on, plus Gmail's
   three and Notion's one when a debug Chrome is configured. "Not on the menu" → honest
-  refusal, never a wrong action. This is what makes it demoable.
+  refusal, never a wrong action. This is what makes it demoable. **Connector tools (M19) do not
+  open it**: only a tool pinned in a definition in this repo can be on the menu, `connectors.json`
+  can switch one off but cannot add one, and a plan naming a real remote tool that is not pinned
+  (`linear__save_issue`) is refused like any other hallucinated name.
+- **Results are data.** Text that comes back from an app — an email, a ticket body — is never
+  shown to the model that planned the run, is substituted into a later step in a single pass, and
+  appears in full in the confirm dialog before anything is created or sent from it.
 - **Thin shell.** All OS-specific code sits behind `OSShell` (and `VoiceShell` for
   microphone capture). The core imports no `electron`. Porting = reimplementing those
   interfaces, nothing else.
@@ -601,7 +687,10 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 - ~~Voice / speech-to-text on the front of the loop (whisper.cpp, local).~~ **Built in
   M7** — see §4a.
 - ~~Generalize the single Slack action into MCP connectors (Teams, mail, calendar).~~ **Calendar
-  landed in M13** as a direct API rather than MCP — same reasoning as Slack's webhook.
+  landed in M13** as a direct API rather than MCP — same reasoning as Slack's webhook. **MCP
+  itself landed in M19** (§4f), for apps with *no* hand-built integration: Linear first. Slack,
+  Gmail, Notion and Calendar stay hand-built. Next from here: a second connector (a definition
+  file and a recon pass), stdio servers if one ever needs them, and OAuth for connectors.
 - ~~A clipboard-only `compose` tool built on `core/compose.ts` being app-agnostic.~~
   **Refined by M11:** `compose.ts` itself stayed reply-shaped (a greeting and sign-off are
   wrong for most other targets); what's actually app-agnostic moved to

@@ -116,6 +116,18 @@ nothing — and a volume key moves the whole machine. Nothing here can read the 
 what's playing, so every result says what was **sent**: *"Volume up about 10%"* (the size of the step, always "about") or *"Sent play or pause"*, never
 *"Volume is now 40%"*.
 
+…and four in **M19** — one for Gmail, three for Linear:
+
+| # | Say this | It does |
+|---|---|---|
+| 21 | "what does this email say" | Reads the open Gmail message — sender, subject, body |
+| 22 | "file a Linear issue called …" | **Asks first**, showing the team, title and whole description → creates it |
+| 23 | "find the login issue in Linear" | Up to 5 matches with links (Linear's search is fuzzy) |
+| 24 | "what does ENG-123 say" | Title, status, link and description |
+
+**22–24 are the first tools that aren't hand-built.** They reach Linear over MCP through a
+generic adapter — see [Connectors](#connectors--linear-over-mcp-m19) below.
+
 Anything else → an honest refusal, logged as a miss (a ranked backlog of what to build next).
 It never guesses.
 
@@ -306,6 +318,61 @@ confirm dialog, it tells you about the dialog, not about the chain: that's the o
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
 you later.
+
+---
+
+## Connectors — Linear over MCP (M19)
+
+Gmail, Notion and Calendar are each a hand-built integration, and each took a milestone. M19
+adds the other way to reach an app: the **Model Context Protocol**. One generic adapter, plus a
+small definition per app saying which of that app's tools this build is willing to call. Adding
+an app is a definition file, not a new integration. **Linear is the first.**
+
+With an email open in Gmail, say **"file this bug in Linear and tell the bugs channel"**:
+
+```
+Three steps:
+1. Read the open email
+2. File it in Linear
+3. Tell #bugs
+
+Step 2 of 3: Create this Linear issue in Engineering?     ← asks, showing the WHOLE email
+Step 3 of 3: Send to #bugs?                               ← asks, showing the exact message
+             New bug filed: Created ENG-5: Login button does nothing on Safari
+             https://linear.app/…/ENG-5/…
+```
+
+### It doesn't trust the app it's talking to
+
+An MCP server describes its own tools — names, descriptions, argument schemas, even hints about
+which ones are safe. All of that is text from someone else's machine, so **none of it reaches
+the model and none of it is believed**:
+
+- **The menu is written here.** Tool names, the descriptions the model reads, the argument
+  schemas and the risk tiers are pinned in `src/core/mcp/connectors/linear.ts`. Linear's server
+  has 59 tools; the app exposes 3.
+- **The name is not the capability.** Linear has no "create issue" tool. It has `save_issue`,
+  which also *edits any existing issue* if you pass an `id`. The app exposes
+  `linear__create_issue` with exactly two arguments — a title and a description — so an `id`
+  can't be sent, and editing is unreachable.
+- **`connectors.json` can only switch things off.** It enables a connector and lists which of
+  its pinned tools to expose. It can't add a tool, add a connector, or point at a different
+  server. Everything defaults to off.
+- **The server's safety hints can only make a tool stricter.** If Linear says a tool is
+  destructive, it gets a confirm dialog. If Linear says a tool is harmless, nothing changes.
+- **What comes back is data.** An email or a ticket can say "ignore your instructions and…".
+  The model wrote its plan before reading it and never sees it; the text goes into the next
+  step as a value, and you see all of it in the confirm dialog before anything is created.
+
+### Honest about what it can't know
+
+Linear reports every failure as a normal-looking response, without an error — so the adapter
+checks: a response marked as a failure is a failure (*"Linear said no: Could not find team …"*),
+and a "success" it can't read is a failure too. A request that times out says the issue **may or
+may not** have been created, and is never sent twice.
+
+**Not built:** editing or closing issues, comments, labels, priority, assignees; connecting an
+app from the UI; any connector but Linear.
 
 ---
 
@@ -556,6 +623,47 @@ On startup you'll see one of:
 [main] pointing off - POINTING_ENABLED not set (no window is ever read)
 ```
 
+### Setting up Linear (optional)
+
+1. In Linear: **Settings → Security & access → Personal API keys → New API key.** It needs
+   read and write (creating an issue is a write).
+2. Put it in `.env`:
+   ```
+   LINEAR_API_KEY=lin_api_…
+   ```
+3. Open `connectors.json` in the repo root and set `defaultTeam` to the **exact name** of the
+   Linear team new issues should go to. The model doesn't choose the team — it has no way to
+   know what teams you have — so this is where it comes from, and the confirm dialog names it.
+   ```json
+   {
+     "connectors": {
+       "linear": {
+         "enabled": true,
+         "tools": ["create_issue", "search_issues", "get_issue"],
+         "settings": { "defaultTeam": "Engineering" }
+       }
+     }
+   }
+   ```
+   Remove a name from `tools` to switch that tool off; set `enabled` to `false` to switch
+   Linear off entirely. The file holds no secrets and is committed.
+4. Restart. You should see:
+   ```
+   [main] connector tools: linear__create_issue, linear__search_issues, linear__get_issue
+   ```
+   or, with no key, `[main] Linear tools disabled - LINEAR_API_KEY not set`.
+
+Two scripts talk to the real workspace, and **both are read-only** — neither can create anything:
+
+```
+npm run linear:recon                          # what the server offers: tools, schemas, error shapes
+npx vite-node scripts/linear-live-check.ts    # this app's own adapter, search and get only
+```
+
+The bug-report chain also needs the Gmail tools (`CHROME_DEBUG_URL`) and `SLACK_WEBHOOK_URL`.
+Point the webhook at a **test channel** the first time. A webhook posts to the one channel it
+was created for, so "tell the team" means that channel — it can't DM a person.
+
 ## Watching the memory story
 
 ```bash
@@ -585,6 +693,34 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M19 (MCP + Linear) is code-complete and has never been run by a human (1125 tests, 62
+files).** Said first for the same reason it was said about M18: every milestone from M10 on has
+produced at least one live bug no fixture caught. `docs/M19-live-checklist.md` is the list, and
+it starts with a regression check, because M19 touched three things every instruction passes
+through.
+
+What's proved headless: the MCP protocol is *not* faked — tests run the official SDK's real
+client against its real server over an in-memory link, with Linear's behaviour transcribed from
+a recon run against the live server. Covered: argument validation (an `id` on create is refused
+and never sent), closed-world config, tier rules, drift, every connector failure as the real
+error type, an instruction-shaped email and an instruction-shaped ticket both treated as text,
+a declined confirm stopping the chain, a failed middle step meaning Slack never runs, and a
+20,000-character description shown whole.
+
+What a script checked against the **real** workspace, read-only: both Linear reads work through
+this app's own adapter, and the arguments the code fixes are accepted by the live schema.
+
+What nobody has seen yet: whether the model picks a three-step plan for "file this bug and tell
+the team" (the known weak spot — a worked example was added to help, and an opt-in eval measures
+it), what title it writes, how the long confirm dialog behaves in a person's hands, and a real
+issue being created through the app. **No test or script ever creates a real Linear issue** —
+that happens once, by hand, from the checklist.
+
+**One known gap, deliberately not fixed in M19:** a *standalone* "send these to the team" shows
+a short preview and then reformats your notes through the model *after* you approve. Inside a
+chain that's fixed — the message is sent exactly as shown. Outside one it's on the follow-up
+list (`spec.md` §9).
 
 **M18 is code-complete and has never been run by a human (944 tests, 55 files).** That's stated
 first because it's the most important thing to know about it. Every milestone from M10 on
@@ -953,7 +1089,8 @@ above), scrolling to find something off-screen, open-ended agent loops (M17 chai
 plan of up to three existing tools decided in one call — what's still missing is the model
 choosing its next move after seeing each result, plus branching and anything that outlives the
 instruction),
-more than one external connector, macOS/Linux, any email app but Gmail-in-Chrome, any page editor
+any MCP connector but Linear (and only three of its tools — no editing, comments or labels),
+local stdio MCP servers, Slack DMs, macOS/Linux, any email app but Gmail-in-Chrome, any page editor
 but Notion-in-Chrome (and only the Chrome tab, not the Notion desktop app), search/navigation
 within either app, and any dictation cleanup/rewrite pass (raw transcript only — see `spec.md`
 §4c for the seam left for a later milestone). Those are architected for (behind `OSShell` /

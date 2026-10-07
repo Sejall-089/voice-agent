@@ -99,6 +99,31 @@ Fuzzy human sentence  →  exact function call.
     `openApp`, and nothing else ever launches it as a side effect. A search request opens a
     search; it does not start an application on the user's behalf.
 
+**Added after v0 (M19):**
+- **The app speaks MCP, and Linear is the first connector.** Until now every external app was a
+  hand-built *surface* — `GmailSurface`, `NotionSurface`, `CalendarSurface` — and each one was a
+  milestone. A connector is the other way round: one generic adapter that knows no app
+  (`core/mcp/adapter.ts`), plus a small **definition per app** that pins which remote tools this
+  build will call and how. Adding an app is a definition file, not a new surface. See §6e.
+  - **The far side does not define the menu.** An MCP server announces its own tool names,
+    descriptions, schemas and safety hints, and all of that is text from somewhere else. None of
+    it reaches the model. The names, the descriptions the model reads, the schemas arguments are
+    validated against and the risk tiers are pinned in this repo; the server's list is used for
+    exactly two things — noticing it has **drifted** from what was pinned, and making a tier
+    **stricter**.
+  - **Closed world, kept through a config file.** `connectors.json` (repo root, committed, no
+    secrets) can switch a connector on and narrow its tools. It cannot add a connector, name a
+    URL, add a tool, or change a tier. The key lives in `.env` as `LINEAR_API_KEY`.
+  - **Three Linear tools at launch**: `linear__create_issue` (`dangerous`), `linear__search_issues`
+    and `linear__get_issue` (both `safe`). Linear's server has 59.
+  - **`readEmail`**, a hand-built `safe` tool over the Gmail read that has existed since M10, so
+    a chain can *start* from an email's content rather than only reply to it.
+  - **The proof is a chain**: read a Gmail bug email → create a Linear issue → post the issue's
+    link to Slack (§5b). Hand-built Gmail, Notion and Calendar are untouched: MCP is for apps
+    that have no hand-built integration.
+  - **Still out**: stdio MCP servers (nothing needs one — Linear is hosted), OAuth for
+    connectors, a "connect an app" UI, Slack DMs, and every Linear tool beyond those three.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
   live-verified. It was out of v0 deliberately — voice is a second way to produce the
@@ -153,7 +178,13 @@ Fuzzy human sentence  →  exact function call.
   them that stopped measuring anything once the second one was built to them. A sixth connector
   is a cost question (another OAuth flow, another live-verification pass, another thing to keep
   working), not a scope violation — so **ask before adding one**, and expect the three rules
-  above to be the whole of the answer.
+  above to be the whole of the answer. **Linear (M19) is the sixth, and was asked for.** It is
+  also the first that is not a hand-built surface: it arrives over MCP through a generic
+  adapter, and the three rules map across unchanged — an `McpConnection` interface in `/core`
+  with an `UnavailableConnection` default, gated on `connectors.json` plus its key so an
+  unconfigured connector is never on the menu, and tested against an in-memory server rather
+  than the real workspace (§6e). What M19 changes is the *cost* of the seventh: a definition
+  file and a recon pass, not a surface.
 - **Open-ended** agent loops. Narrowed at M17, not lifted: a FIXED plan of up to 3 existing
   tools, decided in one planning call and executed by deterministic code, is now in scope (§5b).
   What stays out is the shape where the model sees each result and decides its next move — no
@@ -187,6 +218,7 @@ If a task seems to require anything in the OUT list, stop and flag it.
 | Text to speech (M14)| **Piper**, local, via a spawned `piper.exe` | No cloud TTS, no API key, no new npm dependency — the same shape and the same reasoning as whisper.cpp above, and local for the same reason voice INPUT is. Behind `SpeechSynthesizer` (`core/types.ts`, beside `Transcriber`), so an ElevenLabs implementation is a later swap that touches nothing else. Rejected: SAPI / Chromium's `speechSynthesis` (zero install and trivial to stop mid-word, but the built-in Windows voices are the robotic ones — kept as the named fallback if Piper's setup friction proves worse than it looks), and Kokoro via `onnxruntime-node` (better still, but a second native addon, which this repo has now refused twice for the same reason). The maintained build is `OHF-Voice/piper1-gpl` (`pip install piper-tts`); the archived `rhasspy/piper` v1.2.0 zip is the no-Python option. The wrapper spawns a path from `.env`, so which one is installed is a README decision, not an architecture one. The voice model is downloaded ONCE, ahead of time — a "nothing leaves the machine" feature must not make a network call on its first utterance. **It receives non-ASCII input as mojibake, and this is now measured rather than inferred**: an en dash (U+2013, bytes `E2 80 93`) came back as spoken "â €" — the Windows-1252 reading of those bytes. Recon's Q6 synthesized the same sentence with and without `PYTHONUTF8=1` and only the second was intelligible, so `PiperSynthesizer` sets it (and `PYTHONIOENCODING`) **by default** rather than leaving it to composition: it is a property of the engine, not a choice, and a fact a caller can forget is a bug waiting to happen. `core/speech.ts` still maps typographic characters to ASCII, now as belt-and-braces rather than as the only defence. **The word conversions are a separate matter and remain load-bearing**: with the encoding fixed, `3:00–4:00 PM` is still read as disconnected digits with the dash dropped silently, so "to" has to be supplied by us — the engine applies no time normalisation of its own, and a colon is read digit by digit. Empty and whitespace-only input exit non-zero, so an empty utterance is an error to prevent, not a silence to tolerate. |
 | Screen capture (M15)| **`desktopCapturer`** (electron), with `setContentProtection` on our own windows | Measured, not assumed — `scripts/screen-recon.mjs` runs under electron and answers eight questions before any of it was designed around. What it found: `thumbnailSize` is honoured EXACTLY in both directions (asking for the display's native pixel size returns exactly that; asking in DIP returns exactly that); `source.display_id` carries the same identifier as `Display.id`, so the source↔display join is real; one capture of a 1920x1080 display takes ~310ms and is 170 KB as PNG / 115 KB as JPEG(q80); `nativeImage.resize()` to a 1568 long edge costs 14ms and preserves the aspect ratio exactly. **The load-bearing finding is Q3**: `setContentProtection(true)` (Windows' `WDA_EXCLUDEFROMCAPTURE`) excludes one of our own windows from our OWN `desktopCapturer` call — measured at 98.4% of a probe window captured unprotected against 0.0% protected, taking effect on the very next frame with no lag. That is what makes LAZY capture viable: the screenshot is taken inside the `pointAt` handler, while the command bar is sitting open in front of whatever is being asked about, and the bar is simply not in the picture. Without it the fallback was to capture at hotkey-press time into planner-owned scratch state, which would photograph the screen on every instruction including the ones that never look at it. `Graphics.CopyFromScreen` over the existing PowerShell host was the alternative considered; a native addon was not, for the reason this repo has now refused one three times. |
 | ~~Vision model (M15)~~ — **REMOVED at M16.10** | n/a | Grounding no longer uses a vision model at all. M15 sent a downscaled screenshot to Anthropic (or OpenAI) behind a `VisionLocator` interface and took a bounding box back; live testing found it returning the WRONG CONTROL on dense native chrome, so M16 replaced it with UI Automation, which supplies exact rectangles, and the planner's own `LLMClient`, which picks one BY NUMBER. `VISION_ENABLED` / `VISION_PROVIDER` / `VISION_MODEL`, `ModelVisionLocator`, both provider adapters, the frame-size policy and `ScreenSurface.capture()` are all deleted. See §6d and the M15 write-up for the measurements that decided it. |
+| Connectors (M19)   | **MCP**, via the official `@modelcontextprotocol/sdk` (pinned `1.32.1`, the v1 line) over **Streamable HTTP**; **`ajv`** (2020 build) for argument validation | Measured before it was designed around: the SDK's client runs in Electron 33's **main process** (`process.type === "browser"`, Node 20.18) and under Node 24 with identical output, in both its ESM and CJS builds; 91 packages, no native modules, so no third rebuild. The SDK's own `InMemoryTransport.createLinkedPair()` links the real `Client` to a real `Server` in one process, which is what makes every M19 test headless without faking the protocol. **Only the HTTP transport is built**, with the key as a bearer header: Linear's server is hosted, so stdio would mean spawning `npx` on Windows for something nothing needs yet. API key rather than OAuth: Linear accepts either, its OAuth scope is the same coarse `read write`, and a key in `.env` needs no browser flow and no token store. Linear's schemas are JSON Schema **draft 2020-12**, hence Ajv's 2020 build; `ajv` was already present transitively and is declared directly because `core/mcp/adapter.ts` imports it. The SDK also ships server-side packages (express, hono) this app never loads. |
 | Config / secrets   | `.env` (dotenv), never committed         | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` (whichever matches), `SLACK_WEBHOOK_URL`, and (M7, optional) `WHISPER_EXE_PATH`, `WHISPER_MODEL_PATH`, `WHISPER_LANGUAGE`, and (M10/M11, optional) `CHROME_DEBUG_URL` — one debug Chrome, both Gmail and Notion tools gate on it, and (M12, optional) `DICTATE_HOTKEY` — dictation itself needs no new secret, only the whisper config it already shares with voice, and (M14, optional) `PIPER_EXE_PATH`, `PIPER_MODEL_PATH` — unset means the app simply does not speak, the same way unset whisper paths mean it does not listen, and (M16, optional) `POINTING_ENABLED`. **`POINTING_ENABLED` is the one gate in this app that is an explicit opt-in rather than inferred configuration**, and the asymmetry is deliberate: every other capability answers "is there a thing to talk to?" from a value set for no other purpose (a debug Chrome URL, a refresh token, a piper binary path), but the credential vision would otherwise key off — `ANTHROPIC_API_KEY` — is usually already there because the planner is using it. Reading its presence as permission would silently turn "I configured an LLM" into "I consented to the app reading my windows", which are not the same decision. Unset means the tool is never on the menu, no reader process is started, and no window is ever read. (Through M15 this gate was `VISION_ENABLED` and authorised a screenshot; M16 replaced the grounding, so nothing is captured any more.) |
 
 Target OS for v0: **Windows**. Everything OS-specific lives behind the `OSShell`
@@ -726,6 +758,58 @@ likely the reply box the chain is writing.
 `[main]` ground-truth line as `(chain 2/3)` — `refused` alone cannot distinguish a plan that died
 on step 1 from one that died on step 3.
 
+### Chains and connectors (M19)
+
+A namespaced connector tool is an ordinary registry `Tool`, so it can be a plan step with no
+change to anything above: `validatePlan` checks its name against this run's menu like any other,
+the step cap is still 3, and it passes the same per-step gate. The milestone's proof chain is
+exactly three steps:
+
+```
+1. readEmail                                       safe       → From / Subject / body, as text
+2. linear__create_issue { title, description: "{step1}" }   dangerous  → "Created ENG-5: <title>\n<url>"
+3. sendMessage { channel, notes: "New bug filed: {step2}" } dangerous  → posted
+```
+
+Three things had to be true for that to be safe, and each is a rule rather than a property of
+this one chain:
+
+- **The model writes the title; it never sees the email.** The plan is fixed before step 1 runs
+  (the whole point of §5b), so anything that depends on the email is a placeholder and anything
+  that is not a placeholder is the model's own words from the spoken instruction. `team` is not
+  the model's to choose at all — it has no way to know what teams exist — so it comes from
+  `connectors.json` and is merged in by code.
+- **A result is text a later step can use.** Linear returns one text block holding a JSON
+  string; passed through raw, step 3 would post a JSON blob. Each pinned tool has a formatter
+  that produces a short human line with the link on its own line (§6e).
+- **Inside a chain, `sendMessage` sends verbatim and shows everything.** Standalone it shows a
+  140-character preview and then reformats the notes through a model *after* the user has
+  approved — a gap that predates chains and is on the M19 follow-up list (§9). A chain must not
+  inherit it: the text is another step's output, the user has seen it nowhere else, and a ticket
+  link is not something a rewrite gets to drop. So `ToolDeps` carries `chained: boolean`, set by
+  the planner from where the call sits (never by the model), and when it is true `sendMessage`
+  skips the rewrite and its confirm text is the whole message. "Chained" means the whole chain:
+  any `sendMessage` step, whether or not its text came from `{stepN}`.
+
+**Tool results are data, never instructions.** A step's result can be an email or a ticket body
+— text written by someone else. Nothing interprets it: the model that wrote the plan is never
+shown it, `{stepN}` substitution is a single pass (a result containing `{step2}` is characters),
+it reaches the next step only as an argument value, that argument is validated against a closed
+schema, and it appears in full in the confirm dialog before anything is created or sent. The
+one argument a hostile email could want to set on Linear — `id`, which turns a create into an
+update — does not exist in the pinned schema. **One channel is left as it was**: the previous
+turn's result (first 300 characters) still goes into the *next* instruction's planning prompt
+(§5 step 1), and after a chain that can be external text. Bounded, pre-existing, and recorded
+here rather than changed.
+
+**The worked example.** `planToolFor(tools)` (`core/llm/plan.ts`) appends this chain to the
+`plan` tool's description as a concrete example — a response to the standing live finding that
+models under-reach for `plan`. It is appended **only when all three tools are on this run's
+menu**: the description tells the model every step must come from the list it was given, and an
+example naming a tool it was not given would be the description contradicting itself. Whether it
+changes behaviour is live-only; `tests/eval/planChoice.eval.test.ts` (opt-in,
+`M19_PLAN_EVAL=1`) is the measurement, including a single-tool control for over-teaching.
+
 ### Deliberately deferred
 
 No new tools; no conditional branching mid-chain ("if I'm free at 3, book X, otherwise Y" — a
@@ -762,7 +846,7 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16, +1 in M18 and +2 more with Spotify)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16, +1 in M18 and +2 more with Spotify, +1 in M19 and 3 connector tools)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -794,6 +878,17 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `systemVolume`| 18. Turn the volume up/down/mute      | no            | reversible   | 1–15 presses of a real volume key via `SendInput`; says what was SENT as a change in percent ("Volume up about 10%"), never a level |
 | `mediaControl`| 19. Play/pause, next, previous        | no            | reversible   | one press of a real media key, to whichever app owns the media session |
 | `searchSpotify`| 20. Find something on Spotify        | no            | reversible   | `openUrl` to a fixed-template Spotify search URL; the USER presses play |
+| `readEmail`   | 21. What does this email say          | no            | safe         | read the open Gmail message → From / Subject / body as text (M19; gated with the Gmail group) |
+| `linear__create_issue` | 22. File an issue in Linear  | **never** (`resolvesReferences: false`) | **dangerous** | validate → merge `team` from config → drift check → remote `save_issue` → `Created ID: title` + link (§6e) |
+| `linear__search_issues`| 23. Find an issue in Linear  | never         | safe (a server hint may raise it) | remote `list_issues` with `limit` and `fields` fixed in code → up to 5 lines with links |
+| `linear__get_issue`    | 24. What does ENG-123 say    | never         | safe (a server hint may raise it) | remote `get_issue` → title, status, link, description |
+
+> **The three `linear__` rows are not constants of `registry.ts`**, unlike every row above them:
+> they are built at startup by `core/mcp/load.ts` from a connector definition, `connectors.json`
+> and the presence of a key, and handed to `buildRegistry` as a list. They are still a closed
+> list — only a tool a definition in `core/mcp/connectors/` pins can be in it — and
+> `tests/risk.test.ts` builds every pinned connector tool and holds it to the same whole-menu
+> invariants as the rest.
 
 > **`elaborate` and `pointAt` were missing from this table for four milestones** (added M14 and
 > M15/M16 respectively; the section heading counted them, the rows were never written). Noted
@@ -1557,6 +1652,135 @@ second guess after a rejected first one is a worse guess dressed up as diligence
 
 ---
 
+## 6e. Connectors over MCP (M19)
+
+An app reached over the Model Context Protocol rather than through a hand-built surface. Linear
+is the first. Everything is in `src/core/mcp/`:
+
+| File | What it decides |
+|---|---|
+| `types.ts` | `McpConnection` (list tools, call tool), `ConnectorDef`, `ConnectorToolDef` |
+| `connectors/linear.ts` | Linear's definition: every name, description, schema, tier and formatter |
+| `config.ts` | what `connectors.json` means, and which tools survive it |
+| `load.ts` | the join: config + `.env` → built `Tool[]`; `CONNECTORS` is the closed list |
+| `adapter.ts` | a pinned tool → an ordinary registry `Tool` |
+| `tiers.ts` | what a connector tool costs |
+| `flatten.ts` | an MCP result → one string |
+| `failure.ts` | what a failed call means |
+| `SdkConnection.ts` | the real connection (official SDK), and the unavailable default |
+
+### What recon found, and what it forced
+
+`scripts/linear-recon.mjs` (strictly read-only) asked the live server before any of this was
+written. Linear's docs list no tools, and the third-party directories that do were **wrong**:
+
+- **There is no `create_issue`.** The server has `save_issue`, which creates when `id` is absent
+  and **updates any issue** when it is present — and takes `patch`, `removeLabels`, `state`,
+  `assignee` and some thirty other fields. An allowlist written from those directories would
+  have exposed "edit any issue" under the name "create".
+- **A result is one text block holding a JSON string.** No `structuredContent`, no
+  `resource_link`, no `outputSchema` on any of the 59 tools. An issue's link is the `url` field
+  inside that string.
+- **Every failure is a normal result with `isError: true`.** Nothing is thrown. Two formats from
+  one server: a bare sentence (`Error: Could not find team "X"`) and JSON carrying a `message`.
+- **A rejected key is a thrown `StreamableHTTPError`, code 401**, at connect.
+- **Schemas are draft 2020-12 with `additionalProperties: false`.**
+- **Search is fuzzy** (found by the live check, not recon): a nonsense query still returned an
+  issue. An empty result is rare and a non-empty one is not proof of a match.
+
+### The name is not the capability
+
+So our tool name is not the remote name. `linear__create_issue` maps to remote `save_issue`
+with a pinned schema of exactly two model-supplied arguments, `title` and `description`, and
+`additionalProperties: false`. `id` is not in the schema, so it cannot be sent, so update is
+unreachable. **The capability exposed is defined by the pinned schema, not by the reach of the
+remote tool** — and the adapter refuses at startup to build a tool whose schema does not close.
+
+### Closed-world loading
+
+- A connector exists because there is a definition for it in `core/mcp/connectors/` and it is
+  listed in `CONNECTORS`. A tool exists because that definition pins it.
+- `connectors.json` (repo root, committed, no secrets) chooses among those:
+  ```json
+  { "connectors": { "linear": { "enabled": true,
+      "tools": ["create_issue", "search_issues", "get_issue"],
+      "settings": { "defaultTeam": "…" } } } }
+  ```
+  **Everything defaults to off.** A connector is on only when `enabled` is literally `true`; a
+  tool is exposed only when listed by name; an enabled connector with no `tools` list exposes
+  nothing. A name the definition does not pin — including a real remote tool like `save_issue`
+  or `delete_comment` — is logged and ignored. A malformed allowlist drops the whole connector
+  rather than being half-read.
+- A tool whose required setting is missing (`create_issue` needs `defaultTeam`) is left off the
+  menu rather than offered and then refused.
+- **The menu is decided offline**, from that file and whether `LINEAR_API_KEY` is set — the rule
+  `main.ts` has kept since M13. The connection opens lazily, on the first call.
+- `/core` never reads `process.env` or the file: `main.ts` reads both and supplies the
+  transport, and `loadConnectorTools` is where the join is tested.
+
+### What the adapter does, every call
+
+Before the call, in order — and the **gates run the same three steps**, so a confirm dialog is
+never shown for a call that could not have been made, and what it shows is what will be sent:
+
+1. **Validate** the model's arguments against **our** pinned schema (Ajv). An unlisted argument
+   is refused here and nothing is sent.
+2. **Merge** the arguments code fixes — `team` for a create, `limit: 5` and `fields` for a
+   search. Fixed wins.
+3. **Check drift** against the **server's** schema: the remote tool must still exist and still
+   accept exactly what is about to be sent. This is the only use the server's schema is put to.
+   A mismatch is a named refusal that never echoes an argument's value.
+
+After it: an `isError` result is a **failure** (`tool-failed`, in the server's own words,
+bounded to 300 characters); an empty result, or one the tool's formatter cannot read, is a
+failure too (`bad-result`) — M11's rule that reporting success proves nothing. A failed call is
+**never retried**: a dropped connection is reopened by the *next* call, because the one that
+failed may have been a create that landed.
+
+Connector tools set `resolvesReferences: false`. Memory resolution rewrites any top-level string
+beginning "the" or "my", and this install's fact for "the team" is a Slack channel.
+
+### Tiers (`core/mcp/tiers.ts`)
+
+Built to fail toward caution at every step, because a connector tool is one line in a
+definition and it is easy to add one without thinking about it:
+
+1. A tool is `safe` **only by being declared so**, in code, in its connector's definition.
+2. A tool with no declared tier is `caution`.
+3. A name that reads as a delete, a removal or a send (whole words: `delete`, `remove`,
+   `destroy`, `purge`, `erase`, `send`) is `dangerous` whatever was declared — checked on
+   **both** names, ours and the server's.
+4. **The server's hints may only raise a tier.** `destructiveHint: true` → `dangerous`;
+   `readOnlyHint: false` → at least `caution`. Nothing a server says lowers anything, and an
+   *absent* hint is not a hint.
+
+Rules 1–3 are known without a connection. Rule 4 needs the server's tool list, so any tool
+below `dangerous` carries a `RiskPolicy` (§6, M13) that reads it; if that read fails,
+`resolveRisk` escalates to the worst declared tier and the confirm summary then fails on the
+same connection — fail-closed twice. `linear__create_issue` is `dangerous` as a constant.
+
+### Failures (`ConnectorError`, a `UserFixableError`)
+
+| Reason | Means | Says |
+|---|---|---|
+| `not-configured` | no connection was built | I'm not connected to Linear. |
+| `denied` | the key was rejected (401/403) | names `LINEAR_API_KEY`; repeats nothing the server said |
+| `unreachable` | network, DNS, closed link | I couldn't reach Linear: … |
+| `timeout` | no answer in 20 s | says the change **may or may not** have gone through |
+| `invalid-arguments` | failed our schema | nothing was sent |
+| `drift` | the server changed under the pin | nothing was sent; the connector needs updating |
+| `tool-failed` | the server said no | Linear said no: *its words* |
+| `bad-result` | "success" we cannot read | check Linear before trying again |
+
+No message can contain the key: only the *name* of its variable is ever passed in.
+
+### Not built
+
+Stdio servers; OAuth; any Linear tool beyond the three; priority, labels and assignee on create;
+a UI for adding connectors (the config file only).
+
+---
+
 ## 7. Memory engine (core/memory/)
 
 Local SQLite via better-sqlite3. This is the v0 stand-in for / seed of the personal
@@ -1847,8 +2071,25 @@ Post-v0:
       > volume tool must refuse on both rather than defaulting a null to 0 and then applying a
       > relative change to it.
 
-**v0 status: complete.** **993 tests green** (`npm test`) across 57 files, plus 46 skipped —
-the opt-in real-model eval, which makes no API calls unless asked. M18's live pass added 49 to
+- [ ] **M19 — MCP support, with Linear as the first connector.** **Code-complete and unticked
+      on purpose**, following M18's precedent: the box is held open for the live pass
+      (`docs/M19-live-checklist.md`), because every milestone from M10 on has produced at least
+      one live bug no fixture caught. Adds `core/mcp/` — a generic adapter that turns a pinned
+      connector tool into an ordinary registry `Tool`, a closed-world loader driven by
+      `connectors.json`, tiers that a server's hints can raise but never lower, and Linear's
+      definition (three tools of the server's 59). Adds `readEmail`, and makes `sendMessage`
+      verbatim inside a chain. The proof is one chained instruction: Gmail bug email → Linear
+      issue → Slack link. The planner's gate, the registry's closed world and M17's per-step
+      gating are unchanged; hand-built Gmail, Notion and Calendar are untouched. See §6e, §5b's
+      "Chains and connectors", and "M19 — proven vs. live-only" below.
+
+**v0 status: complete.** **1125 tests green** (`npm test`) across 62 files, plus 50 skipped —
+the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
+993, in five new files: 17 for the connection and failure classification
+(`mcpConnection.test.ts`), 16 for the config loader (`mcpConfig.test.ts`), 50 for the adapter,
+tiers, flattening and formatters (`mcpAdapter.test.ts`), 7 for the loader (`mcpLoad.test.ts`),
+40 for the planner end to end (`planner.mcp.test.ts`), and 2 new registry invariants in
+`risk.test.ts`. The M18 count follows: 993 across 57 files, plus 46 skipped. M18's live pass added 49 to
 the 944 it shipped with: the input-host protocol layer (`hostChannel.test.ts`), the percent
 conversion and wording, and the not-installed launch failure. As shipped, M18 added 146 over
 M17's 798, in five new files: 28 for the app catalog (`apps.test.ts`), 40 for the launch table
@@ -2030,6 +2271,95 @@ have to rediscover.
 
 - **The taskbar, the desktop, and open popup menus are out of scope.** They are separate
   top-level windows, and enumeration is scoped to the foreground window.
+
+### M19 — proven vs. live-only
+
+**No person has run any of this yet.** Stated first, as M18's section was, because it is the
+most important fact about the milestone. `docs/M19-live-checklist.md` is the list.
+
+**Measured against the real thing, by script, read-only** (weaker than a person seeing it, and
+marked as such in the checklist):
+
+- `scripts/linear-recon.mjs` — the live server's 59 tools, their schemas and hints, the shape of
+  a read result, the wording of five failures, and a rejected key. Every fixture in
+  `tests/fixtures/linear/` is transcribed from it (sanitised: workspace, team and user names and
+  UUIDs replaced; structure untouched). The **create** result shape was captured once, by hand,
+  during recon — the only real issue anything automated-adjacent has made (`SEJ-5`).
+- `scripts/linear-live-check.ts` — the **real adapter** over the real transport, driving only the
+  tools whose pinned tier is `safe`. Passed 2026-10-07: both reads resolved to `safe` under the
+  live hints, the code-fixed `limit` and `fields` were accepted by the live schema (the drift
+  check ran against a real `tools/list`), the formatters read live results, and a missing issue
+  came back as *"Linear said no: Could not find referenced Issue."* It also found that search is
+  fuzzy.
+- The SDK under Electron 33's real main process, ESM and CJS, and `npm run build`.
+- The native confirm dialog with long text: at 5k, 10k, 20k and 40k characters UI Automation
+  reports the whole string present, the window capped at the work-area height, the body in a
+  scrolling pane, and both buttons on screen. A 20k dialog took more than 1.5 s to appear.
+
+**Proven deterministically (132 new tests, no key and no network).** The protocol is *not* faked:
+`tests/FakeMcpServer.ts` is the SDK's real `Server` on its real in-memory transport, talking to
+the real `Client` inside `SdkMcpConnection`. Its rules are written from the recon captures and
+from the server's captured schema, not from the adapter. Covered:
+
+- **Tool listing and naming** — namespaced names, this repo's descriptions and schemas (asserted
+  to share nothing with the server's captured ones), the remote name never shown to the model,
+  and the menu built without a connection.
+- **Argument validation** — `id` on create is refused and never sent, as is every other field
+  the remote tool would have accepted; the fake implements the update half *on purpose* so this
+  can be proven rather than assumed. Model-supplied `limit`/`fields` refused; fixed-wins proven
+  against a definition that deliberately allows the key.
+- **Connector failure** — rejected key, timeout, server-side throw, dropped link (reconnect on
+  the next call, never a re-send), each as the real SDK error type with the captured code and
+  message.
+- **Disabled connector**, missing key, no config file, malformed config, a config naming a
+  remote tool or a connector the build does not define.
+- **Tier defaults** — unclassified → caution, dangerous-sounding names on either name, hints
+  raise and never lower, absent hints ignored, a failed tier read escalating and then refusing.
+- **Drift** — remote tool gone, a fixed argument no longer accepted, a newly required argument.
+- **Injected instructions**, both directions: an instruction-shaped email becomes a ticket body
+  and nothing it says happens (one planning call, one create, zero updates, Slack to the planned
+  channel); an instruction-shaped ticket body is posted as text.
+- **Declining a confirm stops the chain** at step 2 and at step 3, with `MockShell.holdConfirm`
+  so the dialog genuinely blocks and "nothing was touched while it was up" is asserted *during*.
+- **A failed middle step means later steps never run** — refused by Linear, unreachable,
+  unreadable result, timeout — each a `ConnectorError` raised by the real adapter, never a bare
+  `Error`, and the Slack dialog never shown.
+- **Verbatim send** — the Slack text equals the confirm text exactly, with zero `complete` calls;
+  the standalone path asserted unchanged.
+- **A 20,000-character description** carried whole into the confirm text.
+
+Seven rules were checked by breaking the code and watching a test fail (ignoring `isError`,
+skipping validation, letting hints lower a tier, leaving memory resolution on, marking chain
+steps unchained, skipping `prepare` in the confirm summary, previewing the chained message).
+One mutation **survived** — "model arguments win over fixed ones" — because Linear's own
+schemas reject the key before the merge is reached; a test against a permissive definition was
+added to close it.
+
+**Live-only, and genuinely unverified.**
+
+- Whether a real model **chooses `plan`** for the bug-report instruction, and whether the worked
+  example helps or over-teaches. The opt-in eval measures it; it has not been run.
+- Whether the model writes a sensible **title** from a spoken sentence.
+- Whether `app.getAppPath()` finds `connectors.json` under `npm run dev`.
+- Every rendered thing: the plan preview, the `Step 2 of 3:` dialogs, whether the long-text
+  dialog actually scrolls for a person, how a result with a URL and an identifier like `SEJ-5`
+  **sounds**.
+- The first-call latency of a lazily opened connection.
+- A real create through the adapter. Deliberately never automated.
+
+**Follow-up list (not M19).**
+
+- **Standalone `sendMessage` reformats after the confirm.** The dialog shows a 140-character
+  preview of the notes; the handler then rewrites them through a model and sends that. What is
+  sent is not what was approved. Fixed for chains in M19; unchanged for a lone send.
+- The previous turn's result (300 characters) reaches the next planning prompt; after a chain it
+  can be external text. Left as is, by decision.
+- Gmail's "no email open" is a bare `Error`, so as step 1 of a chain it reads "Something went
+  wrong: …" rather than as a plain refusal. Pre-existing (M10); hand-built Gmail was not touched.
+- `findTool` in `registry.ts` keeps a static list and cannot resolve connector tools. Nothing in
+  `src/` calls it; the planner uses `registry.find`.
+- Priority, labels and assignee on create; a `speakResult` for connector tools if URLs or
+  identifiers are read badly.
 
 ### M18 — proven vs. live-only
 
