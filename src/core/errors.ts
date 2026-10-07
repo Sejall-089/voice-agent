@@ -299,3 +299,90 @@ export function speechEngineError(
       );
   }
 }
+
+// The ways a connector — an app reached over MCP rather than a hand-built surface — can decline
+// or fail (M19).
+//
+// One family for every connector, because the planner is told the connector's NAME rather than
+// knowing its type: "Linear rejected the key" and "Jira rejected the key" are the same fact
+// about two apps. The reasons are split for the reason every enum in this file is — each has a
+// different fix, and M13's 403-means-revoked loop is what collapsing them costs.
+//
+// `tool-failed` is the one recon made necessary. Linear reports every failure as an ordinary
+// RESULT with `isError: true` — an unknown team, a missing issue, a rejected argument — and
+// throws nothing. A wrapper that only caught exceptions would have reported a failed create as
+// done (M11's rule: an operation reporting success is not proof it did anything).
+//
+// `drift` and `bad-result` are the two that mean the SERVER changed under a schema or a result
+// shape this build pinned. Neither is fixable from the keyboard, and both say so, rather than
+// surfacing as a confusing argument error from the far side.
+export type ConnectorReason =
+  | "not-configured" // no connection was ever built for it
+  | "denied" // the key was rejected
+  | "unreachable" // network, DNS, a dropped connection
+  | "timeout"
+  | "invalid-arguments" // refused HERE, against our own pinned schema, before any call
+  | "drift" // the server no longer offers or accepts what this build pinned
+  | "tool-failed" // the server ran the tool and said no
+  | "bad-result"; // it claimed success and returned something we cannot read
+
+export class ConnectorError extends UserFixableError {
+  constructor(
+    public readonly reason: ConnectorReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ConnectorError";
+  }
+}
+
+// The one place these are worded. `app` is the connector's display name ("Linear"); `keyName`
+// is the NAME of the .env variable, never its value — no message here can contain a secret
+// because none is ever passed in (spec §10).
+export function connectorError(
+  reason: ConnectorReason,
+  app: string,
+  detail = "",
+  keyName = "",
+): ConnectorError {
+  const said = detail.trim();
+  switch (reason) {
+    case "not-configured":
+      return new ConnectorError(reason, `I'm not connected to ${app}.`);
+    case "denied":
+      return new ConnectorError(
+        reason,
+        `${app} rejected my access` +
+          (keyName ? ` — check ${keyName} in .env and restart me.` : "."),
+      );
+    case "unreachable":
+      return new ConnectorError(reason, `I couldn't reach ${app}${said ? `: ${said}` : "."}`);
+    case "timeout":
+      // "May or may not" is the honest part. A request that timed out was SENT; whether the
+      // far side acted on it is unknown, and for a create that matters more than the delay.
+      return new ConnectorError(
+        reason,
+        `${app} didn't answer in time, so I stopped waiting. If I was changing something, ` +
+          `check ${app} before trying again — it may or may not have gone through.`,
+      );
+    case "invalid-arguments":
+      return new ConnectorError(
+        reason,
+        `I worked out the wrong details for ${app}${said ? ` (${said})` : ""}, so I didn't send anything.`,
+      );
+    case "drift":
+      return new ConnectorError(
+        reason,
+        `${app} has changed since this app was built${said ? ` (${said})` : ""}, so I didn't ` +
+          `send anything. Its connector needs updating before this will work.`,
+      );
+    case "tool-failed":
+      return new ConnectorError(reason, `${app} said no${said ? `: ${said}` : "."}`);
+    case "bad-result":
+      return new ConnectorError(
+        reason,
+        `${app} reported success but I couldn't read what it sent back${said ? ` (${said})` : ""}. ` +
+          `Check ${app} before trying again.`,
+      );
+  }
+}
