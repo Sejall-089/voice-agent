@@ -24,6 +24,9 @@ export interface JSONSchema {
   type: "object";
   properties: Record<string, unknown>;
   required?: string[];
+  // M19. Set to false by connector tools (core/mcp/), whose arguments are validated against the
+  // schema in code: an argument that is not listed must not reach someone else's server.
+  additionalProperties?: boolean;
 }
 
 // The public description of a tool, shown to the LLM for tool-calling.

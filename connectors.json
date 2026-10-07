@@ -1,0 +1,11 @@
+{
+  "connectors": {
+    "linear": {
+      "enabled": true,
+      "tools": ["create_issue", "search_issues", "get_issue"],
+      "settings": {
+        "defaultTeam": "Sejal Gupta"
+      }
+    }
+  }
+}
