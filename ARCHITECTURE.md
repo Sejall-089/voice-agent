@@ -177,6 +177,14 @@ flowchart TB
     J -- "step refused (M17)" --> S["Stop the chain<br/>say how much ran"]
 ```
 
+**What the model is told about the screen (M19).** The clipboard, and — when the Gmail surface
+says so — one fixed sentence: "An email is open in Gmail." It is asked concurrently with context
+capture under a short deadline, so a slow or missing Chrome costs an instruction nothing, and it
+is a bare fact on purpose: nothing the email says reaches the prompt that decides what the app
+does. A proposed tool name is canonicalised before the registry check — a leading `functions.`
+(the provider's own namespace, which a model sometimes types into a plan) is dropped when, and
+only when, the remainder is exactly a name on the menu.
+
 **The one rule that matters:** the LLM *proposes*, the planner *disposes*. The
 registry check, the validation, and the risk gates are deterministic code — the
 model never gets to invent a capability or fire a dangerous action unchecked.

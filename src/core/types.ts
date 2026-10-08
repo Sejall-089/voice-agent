@@ -150,6 +150,15 @@ export interface EmailMessage {
 // either does exactly the named thing or throws with a human-readable reason.
 export interface GmailSurface {
   readOpenEmail(): Promise<EmailMessage>; // SAFE — read-only
+  // SAFE. Is there exactly one message open that `readOpenEmail` could read right now? (M19)
+  //
+  // The one method here that NEVER THROWS, and that is its contract: it exists to give the
+  // planner a hint before it plans, on every instruction, including the ones that have nothing
+  // to do with email. No Chrome, no Gmail tab, nothing open, two tabs that both match — every
+  // one of those is simply "false". It returns a boolean and nothing else: no subject, no
+  // sender. What an email says is its author's text, and it does not belong in the prompt that
+  // decides what the app does (spec §5b, "tool results are data").
+  hasOpenEmail(): Promise<boolean>;
   openReplyBox(): Promise<void>; // CAUTION — no undo, low stakes
   readComposeText(): Promise<string | null>; // SAFE — null when no compose box is open
   // SAFE. Read from the COMPOSE box, not from the original email: the confirm dialog must name
@@ -704,4 +713,13 @@ export interface PlannerOutcome {
   // `completed` counts steps that ran to `ok`, so a chain that stopped at step 2 of 3 reports
   // `{ completed: 1, total: 3 }`.
   chain?: { completed: number; total: number };
+  // What the model actually sent, when what it sent was REFUSED before anything ran (M19) — a
+  // plan that failed validation, or a single call naming a tool that is not on the menu.
+  //
+  // For the console only (`runInstruction.ts`), and it exists because of a debugging session:
+  // "My plan used a tool I don't have" quotes one name, and whether the rest of that plan was
+  // sound — or what other name forms a model produces — was unrecoverable afterwards. It is
+  // deliberately NOT written to the action log in full: arguments can hold the user's words,
+  // and the last log row is fed into the next planning prompt. The log row gets the tool names.
+  proposed?: { tool?: string; plan?: readonly PlannedStep[] };
 }

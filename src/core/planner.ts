@@ -12,7 +12,9 @@ import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
 import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
 import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts";
+import { emailOpenHint } from "./contextHints.ts";
 import {
+  canonicalToolName,
   previewHoldRemaining,
   previewPlan,
   resolveStepArgs,
@@ -124,8 +126,16 @@ export class Planner {
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
-    // 1. Capture context from the shell.
-    const context = await this.shell.getContext();
+    // 1. Capture context from the shell — and, CONCURRENTLY, ask Gmail the one thing the shell
+    //    cannot know: is an email open? (M19, core/contextHints.ts.) Concurrent and deadlined,
+    //    because this precedes every planning call and must not be able to slow one down or
+    //    fail it; a check that is slow, broken or unconfigured simply contributes nothing, and
+    //    the context is then exactly what it was before this existed.
+    const [captured, emailOpen] = await Promise.all([
+      this.shell.getContext(),
+      emailOpenHint(this.gmail),
+    ]);
+    const context: CapturedContext = emailOpen ? { ...captured, emailOpen: true } : captured;
 
     // 2. LLM picks a tool (or declines). The previous turn — the planner's one turn of
     //    state — goes along too, so a bare correction ("no, I meant...") has something to
@@ -155,12 +165,21 @@ export class Planner {
     if (choice.kind === "plan") {
       return await this.runChain(instruction, choice.steps, context);
     }
-    const tool = this.registry.find((t) => t.name === choice.name);
+    // The name is canonicalised first (M19, core/chain.ts): a model that wrote the provider's
+    // own "functions." prefix in front of a real menu name meant that tool. The result is still
+    // looked up by EXACT match, so anything that is not on this run's menu is refused as before
+    // — and the refusal carries what the model actually sent, for the console.
+    const name = canonicalToolName(choice.name, this.menuNames());
+    const tool = this.registry.find((t) => t.name === name);
     if (!tool) {
-      return await this.refuse(instruction);
+      return { ...(await this.refuse(instruction)), proposed: { tool: choice.name } };
     }
 
     return await this.runStep(instruction, tool, choice.input, context, SINGLE);
+  }
+
+  private menuNames(): string[] {
+    return this.registry.map((tool) => tool.name);
   }
 
   // ONE step: everything from memory resolution to the recorded outcome. Extracted at M17 so a
@@ -349,15 +368,26 @@ export class Planner {
   // comes after it.
   private async runChain(
     instruction: string,
-    steps: readonly PlannedStep[],
+    proposed: readonly PlannedStep[],
     context: CapturedContext,
   ): Promise<PlannerOutcome> {
+    // Each step's tool name is canonicalised before anything else looks at it (M19): the same
+    // one rule the single-step path applies, so `functions.readEmail` in a plan means
+    // `readEmail` exactly when `readEmail` is on this run's menu, and is otherwise left as the
+    // model wrote it — to be refused, by name, by the validation below. `proposed` is kept
+    // untouched for the record of what was actually sent.
+    const menu = this.menuNames();
+    const steps: readonly PlannedStep[] = proposed.map((step) => ({
+      ...step,
+      tool: canonicalToolName(step.tool, menu),
+    }));
+
     // Everything structurally knowable is settled BEFORE the plan is narrated. Announcing a
     // plan and then dying on step 2 because step 2 named a tool that does not exist would have
     // told the user something untrue at the one moment they were counting on it.
     const check = validatePlan(steps, toToolSchemas(this.registry));
     if (!check.ok) {
-      return await this.refusePlan(instruction, steps.length, check.reason);
+      return await this.refusePlan(instruction, proposed, check.reason);
     }
 
     // A one-step "plan". The prompt tells the model not to do this twice over, but if it does,
@@ -470,14 +500,19 @@ export class Planner {
   // `refuseIncomplete` set for exactly this reason.
   private async refusePlan(
     instruction: string,
-    total: number,
+    proposed: readonly PlannedStep[],
     reason: string,
   ): Promise<PlannerOutcome> {
     this.log.logAction({
       ts: new Date().toISOString(),
       instruction,
       tool: null,
-      arguments: null,
+      // THE TOOL NAMES AS THE MODEL SENT THEM, in order (M19). The reason quotes one name; this
+      // keeps the shape of the whole plan, which is what tells a stray prefix from a plan that
+      // was wrong throughout. NAMES ONLY: a step's arguments can hold the user's own words, and
+      // this row is the previous turn fed into the next planning prompt. The full plan goes to
+      // the console instead, via `proposed` on the outcome.
+      arguments: { plan: proposed.map((step) => step.tool) },
       result: reason,
       status: "refused",
     });
@@ -487,7 +522,8 @@ export class Planner {
       status: "refused",
       tool: null,
       result: reason,
-      chain: { completed: 0, total },
+      chain: { completed: 0, total: proposed.length },
+      proposed: { plan: proposed },
     };
   }
 

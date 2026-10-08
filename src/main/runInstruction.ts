@@ -44,6 +44,16 @@ export function createRunInstruction(
       // milestone was.
       const chain = outcome.chain ? ` (chain ${outcome.chain.completed}/${outcome.chain.total})` : "";
       console.log(`[main] ${outcome.status}${chain}: ${outcome.result ?? ""}`);
+      // M19. When the model's answer was refused before anything ran, print what it actually
+      // sent. The message on screen quotes one tool name; diagnosing the "functions." prefix
+      // took the action log and a guess, because the plan itself had been thrown away. Console
+      // only, and in full — the action log gets the tool names and nothing else.
+      if (outcome.proposed?.plan !== undefined) {
+        console.log(`[main] refused plan, as sent: ${JSON.stringify(outcome.proposed.plan)}`);
+      }
+      if (outcome.proposed?.tool !== undefined) {
+        console.log(`[main] refused tool name, as sent: ${JSON.stringify(outcome.proposed.tool)}`);
+      }
     } finally {
       // finally, not after: a thrown planner must not leave the bar claiming to think
       // forever. There is no path out of here that keeps the indicator up.

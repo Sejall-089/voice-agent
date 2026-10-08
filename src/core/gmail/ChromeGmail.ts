@@ -47,6 +47,19 @@ export class ChromeGmail implements GmailSurface {
     });
   }
 
+  // M19. The same tab selection `readOpenEmail` uses, with nothing read from the tab it finds —
+  // so "true" means precisely "readOpenEmail would have a message to read". Every refusal that
+  // selection can produce (Chrome unreachable, no Gmail tab, no message open, several tabs
+  // matching) is a reason there is nothing to hint at, and collapses to false on purpose: this
+  // runs before every planning call, and must not be able to fail one.
+  async hasOpenEmail(): Promise<boolean> {
+    try {
+      return await this.withTab("hasOpenMessage", () => Promise.resolve(true));
+    } catch {
+      return false;
+    }
+  }
+
   async openReplyBox(): Promise<void> {
     await this.withTab("hasOpenMessage", async (session) => {
       const outcome = await this.run<string>(session, "openReplyBox");

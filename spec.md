@@ -610,7 +610,12 @@ Given the user's instruction and captured context, run exactly this sequence:
    schemas from the registry (§6), plus one turn of state: the single most recently
    logged action (`ActionLog.getLast()`), scoped strictly to resolving a correction or
    pronoun in the CURRENT instruction ("no, I meant..."). This is not conversation
-   history — it's one bounded fact. **The current local time** goes in too (M13) — see
+   history — it's one bounded fact. **Since M19, so may one line about the screen: "An email is
+   open in Gmail."** — asked of the Gmail surface concurrently with context capture, under a
+   short deadline, and never carrying anything the email says (§9, M19 live finding 3). A
+   proposed tool name is also canonicalised before the registry check in step 3: a leading
+   `functions.` is dropped when, and only when, what is left is exactly a name on the menu.
+   **The current local time** goes in too (M13) — see
    "The clock in the prompt" below. Through M16 this step produced exactly one tool call and
    the planner never chained anything; M17 adds a second possible answer — a fixed plan of
    several tools — without changing anything below it. See §5b.
@@ -2083,14 +2088,14 @@ Post-v0:
       gating are unchanged; hand-built Gmail, Notion and Calendar are untouched. See §6e, §5b's
       "Chains and connectors", and "M19 — proven vs. live-only" below.
 
-**v0 status: complete.** **1138 tests green** (`npm test`) across 62 files, plus 50 skipped —
+**v0 status: complete.** **1184 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
 993, in five new files: 17 for the connection and failure classification
 (`mcpConnection.test.ts`), 16 for the config loader (`mcpConfig.test.ts`), 50 for the adapter,
 tiers, flattening and formatters (`mcpAdapter.test.ts`), 7 for the loader (`mcpLoad.test.ts`),
 40 for the planner end to end (`planner.mcp.test.ts`), and 2 new registry invariants in
 `risk.test.ts`. The first live finding (the covered confirm dialog, 2026-10-09) added 13 more in
-`WindowsShell.capture.test.ts`, taking 1125 to 1138. The M18 count follows: 993 across 57 files, plus 46 skipped. M18's live pass added 49 to
+`WindowsShell.capture.test.ts`, taking 1125 to 1138; findings 2 and 3 (the email hint, the `functions.` prefix, refused-plan logging) added 46 in `contextHints.test.ts` and `planner.mcp.test.ts`, taking it to 1184. The M18 count follows: 993 across 57 files, plus 46 skipped. M18's live pass added 49 to
 the 944 it shipped with: the input-host protocol layer (`hostChannel.test.ts`), the percent
 conversion and wording, and the not-installed launch failure. As shipped, M18 added 146 over
 M17's 798, in five new files: 28 for the app catalog (`apps.test.ts`), 40 for the launch table
@@ -2416,6 +2421,70 @@ added to close it.
    wording as a reasonable tightening with a clean bill on over-teaching, not as a proven fix;
    the live re-run is what decides it. **Part B — telling the planner that an email is open in
    Gmail — is deliberately not built**, and is to be proposed again only if this fails live.
+
+3. **With unrelated text on the clipboard, the same instruction was refused for naming
+   `functions.linear__create_issue` — and the refusal was hiding something worse.** Two
+   separate things, found together:
+
+   **(a) A provider prefix in a tool name.** OpenAI's models see every tool internally as
+   `functions.<name>`. A direct tool call's name travels in a structured field and arrives
+   clean; a plan step's `tool` is a string the model types, and sometimes it types the name the
+   way it sees it. The action log holds five unknown-tool refusals in two families:
+   `functions.linear__create_issue` and `functions.readSchedule` (a real tool, prefixed), and
+   `multi_tool_use.parallel` ×2 and `parallel` (the model reaching for parallel calls — naming
+   nothing). **Fixed with one rule**, `canonicalToolName` in `core/chain.ts`, applied to plan
+   steps and to the single-step path alike: a name already on the menu is kept; otherwise, if
+   it starts with exactly `functions.` — once, case-sensitive — the prefix is dropped and the
+   remainder accepted **only if it is exactly a name on this run's menu**; anything else is
+   returned untouched and refused as before, quoting what the model wrote. The function can
+   only ever return a menu name or its own input, so the closed world is not loosened:
+   `functions.plan`, a double prefix, `Functions.…`, a mis-cased name, a prefixed real remote
+   tool that is not pinned (`functions.linear__save_issue`) and both `parallel` forms all stay
+   refused. An automatic re-plan was rejected: a second model call, non-deterministic, and
+   against §5b's "consulted once".
+
+   **(b) The plan underneath was wrong.** Re-running the phrase in the eval with unrelated
+   clipboard text: **0 of 3** plans read the email. Two filed the *clipboard text* as the bug;
+   the third did the same with the prefix. Had (a) been fixed alone, the refusal that kept that
+   plan from the confirm dialog would have gone. The cause is the one finding 2 pointed at and
+   Part A's wording did not cure: the prompt labels the clipboard "Selected text", and nothing
+   told the planner an email was open, so "this bug" had one candidate. **Fixed (Part B)** with
+   one line in the planning prompt, `An email is open in Gmail.`, present only when Gmail says
+   so:
+   - `GmailSurface.hasOpenEmail()` — a new read-only method that reuses `readOpenEmail`'s own
+     tab selection, reads nothing from the tab, and **never throws**: no Chrome, no Gmail tab,
+     nothing open and two tabs matching are all `false`. Existing Gmail behaviour is unchanged.
+   - `core/contextHints.ts` — `emailOpenHint()` runs **concurrently with context capture** under
+     an 800 ms deadline (the real check measured 8–42 ms; an unreachable Chrome answers `false`
+     in ~1 ms). Slow, failed or unconfigured all mean *no hint* and no delay beyond the
+     deadline — the context is then exactly what it was before this existed.
+   - **A bare fact, deliberately.** No subject, no sender. Those are words written by whoever
+     sent the email, and the planning prompt is the one place text is read as instruction. The
+     accepted cost: the model still cannot write a specific title, having still not seen the
+     email.
+   - The line sits under the instruction and *above* the clipboard text.
+
+   **Logging**, because diagnosing (a) took the action log and a guess: a refused plan's row now
+   records every step's tool name **as sent**, in order, in `arguments` (`{ plan: [...] }`) —
+   names only, since that row is the previous turn fed to the next planning prompt — and
+   `runInstruction` prints the full raw plan, or a refused single tool name, on the console.
+
+   **Measured** (opt-in eval, `gpt-5`, 3 trials each, context as the app now sends it):
+
+   | Phrase | Context | Before | After |
+   |---|---|---|---|
+   | file this bug in linear and tell the social channel | unrelated clipboard | **0/3** | 3/3 |
+   | file this bug in Linear and tell the social channel | clean clipboard | 3/3 | 3/3 |
+   | log this as an issue and let #bugs know | clean clipboard | 3/3 | 3/3 |
+   | find the login issue in Linear (single-tool control) | clean clipboard | 3/3 | 3/3 |
+   | summarize this (must stay `summarize`) | unrelated clipboard | — | 3/3 |
+
+   "After" is with an email open and the hint present. The last row is the over-teaching risk
+   the hint introduces — "summarize this" has always meant the clipboard — and it held. 46 new
+   tests; nineteen rules were broken one at a time and all nineteen are caught. **Still a
+   model's choice measured three times**: the live re-run is what decides it, and the checklist
+   has the items. `ChromeGmail.hasOpenEmail` itself is transport and has no unit test; it was
+   run against the real debug Chrome.
 
 **Follow-up list (not M19).**
 

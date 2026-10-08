@@ -1,3 +1,4 @@
+import { EMAIL_OPEN_LINE } from "../contextHints.ts";
 import type { ActionLogEntry, CapturedContext } from "../types.ts";
 
 // Vendor-neutral prompt shaping shared by every LLMClient implementation, so the
@@ -126,6 +127,13 @@ export function renderRequest(
     parts.push(`${renderPreviousTurn(previousTurn)}\n`);
   }
   parts.push(`Instruction: ${instruction}`);
+  // M19. The one fact about the screen the planner is given beyond the clipboard — see
+  // core/contextHints.ts for why it exists and why it is a bare sentence with nothing from the
+  // email in it. Placed directly under the instruction and ABOVE the clipboard: with both
+  // present, "this bug" has two candidates, and the clipboard used to be the only one in view.
+  if (context.emailOpen === true) {
+    parts.push(`\n${EMAIL_OPEN_LINE}`);
+  }
   if (context.selectedText) {
     parts.push(`\nSelected text (clipboard):\n${context.selectedText}`);
   }

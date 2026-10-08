@@ -9,6 +9,11 @@ export interface CapturedContext {
   selectedText: string | null; // v0: current clipboard contents
   activeApp: string | null; // optional (active-win); may be null
   activeWindowTitle: string | null;
+  // M19. True when Gmail reports a message open that this app could read. NOT captured by the
+  // shell — the planner adds it from the Gmail surface (core/contextHints.ts) — and absent
+  // means "not known to be open", never "known to be closed". A bare fact on purpose: no
+  // subject, no sender, nothing the email's author wrote ever reaches the planning prompt.
+  emailOpen?: boolean;
 }
 
 export type LocalAction =

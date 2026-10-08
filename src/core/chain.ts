@@ -28,6 +28,40 @@ export const MAX_STEPS = 3;
 // means they are either substituted correctly or refused by name, and never silently sent.
 const PLACEHOLDER = /\{\s*step\s*(\d+)\s*\}/gi;
 
+// The provider's own namespace for tools, which a model sometimes writes into a tool name (M19).
+//
+// Internally OpenAI's models see every tool as `functions.<name>`. In a direct tool call the
+// name travels in a structured field and arrives clean. A plan step's `tool` is a STRING THE
+// MODEL TYPES, and now and then it types the name the way it sees it: live testing got
+// "functions.linear__create_issue", and the action log holds a "functions.readSchedule" from a
+// month earlier. Both were refused as tools the app does not have — a correct refusal of a plan
+// that was, apart from one prefix, exactly right.
+const PROVIDER_PREFIX = "functions.";
+
+// The name on this run's menu that `proposed` refers to — or `proposed` itself, unchanged, when
+// it refers to nothing.
+//
+// THE CLOSED WORLD IS NOT LOOSENED BY THIS, and the rule is written to make that checkable:
+//
+//   1. A name already on the menu is returned as it is.
+//   2. Otherwise, if it starts with EXACTLY "functions." — once, case-sensitive — the prefix is
+//      removed, and the remainder is accepted ONLY if it is EXACTLY a name on the menu.
+//   3. Anything else comes back untouched, and is refused downstream by the same unknown-tool
+//      check as ever, quoting what the model actually wrote.
+//
+// So the only strings this can ever return are a menu name or the original input. Nothing is
+// trimmed, lower-cased, fuzzy-matched or stripped twice: "Functions.readEmail",
+// "functions.functions.readEmail", "functions.reademail" and "functions.plan" (`plan` is never
+// on the menu) all stay refused. Neither do the OTHER forms the log holds —
+// "multi_tool_use.parallel" and "parallel" — which are not a prefixed tool name at all but the
+// model reaching for parallel calls, and name nothing this app has.
+export function canonicalToolName(proposed: string, menu: readonly string[]): string {
+  if (menu.includes(proposed)) return proposed;
+  if (!proposed.startsWith(PROVIDER_PREFIX)) return proposed;
+  const bare = proposed.slice(PROVIDER_PREFIX.length);
+  return menu.includes(bare) ? bare : proposed;
+}
+
 export type PlanCheck = { ok: true } | { ok: false; reason: string };
 
 export type ArgCheck =

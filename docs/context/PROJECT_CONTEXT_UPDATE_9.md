@@ -14,7 +14,7 @@ three milestones behind.
 - **M18 — opening apps and local media control.** Shipped; its live pass found four bugs and is
   ticked with items still open. `docs/M18-live-checklist.md`.
 - **M19 — MCP support, Linear first.** **Code-complete, pushed, and never run by a person.**
-  1138 tests pass, both typechecks clean, `npm run build` clean. The milestone box in spec.md §9
+  1184 tests pass, both typechecks clean, `npm run build` clean. The milestone box in spec.md §9
   is deliberately unticked until the live checklist is done.
 
 ## What M19 is

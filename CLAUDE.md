@@ -119,6 +119,19 @@ patterns behind them — each cost a real debugging session.
   by the OS with real windows: measure it (`scripts/confirm-zorder-recon.cjs`) and have a person
   look.
 
+- **Fixing a refusal can remove the only thing standing in front of a worse bug (M19).** A live
+  run was refused for naming `functions.linear__create_issue`. The obvious fix — forgive the
+  prefix — was correct, and shipping it alone would have been a regression: re-running the case
+  showed the plan under the prefix skipped `readEmail` and filed the *clipboard* as the bug
+  (0 of 3). The refusal was accidentally the gate. Before loosening any check, reproduce the
+  whole failing case and look at what the now-accepted input goes on to DO.
+- **An eval must see what the app sees, and one trial is an anecdote.** The first plan eval gave
+  the model a Gmail window title the app never sends, and passed; the live-failing phrase then
+  passed its first single trial having failed twice live. What moved the result was a variable
+  nobody had recorded — what was on the clipboard. Build the eval's context from the app's own
+  context code path, run each case several times, and when a live failure will not reproduce,
+  ask what the live run had that the eval does not.
+
 ## Scope added mid-milestone
 
 If something is added to a milestone's plan AFTER its build order is written, **fold it into the

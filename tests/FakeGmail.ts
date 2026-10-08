@@ -17,6 +17,8 @@ export interface FakeGmailOptions {
   // Optional shared ordering log. The narration-before-acting test needs to compare events
   // across two different doubles, and "who pushed first" is the only honest way to do that.
   timeline?: string[];
+  // How long `hasOpenEmail` takes to answer. Default 0 — it still answers asynchronously.
+  probeDelayMs?: number;
 }
 
 export class FakeGmail implements GmailSurface {
@@ -26,7 +28,10 @@ export class FakeGmail implements GmailSurface {
   public replyBoxOpened = 0;
   public sent = 0;
   public composeText: string | null;
+  // How many times the planner asked "is an email open?" (M19).
+  public probes = 0;
 
+  private readonly probeDelayMs: number;
   private readonly openEmail: EmailMessage | null;
   private readonly recipients: string | null;
   private readonly failWith: string | undefined;
@@ -38,6 +43,7 @@ export class FakeGmail implements GmailSurface {
     this.recipients = options.recipients ?? "alex@example.com";
     this.failWith = options.failWith;
     this.timeline = options.timeline;
+    this.probeDelayMs = options.probeDelayMs ?? 0;
   }
 
   private note(call: string): void {
@@ -52,6 +58,24 @@ export class FakeGmail implements GmailSurface {
       return Promise.reject(new Error("No email is open in Gmail — open one and try again."));
     }
     return Promise.resolve(this.openEmail);
+  }
+
+  // The planner's pre-planning hint (M19). Faithful to ChromeGmail.hasOpenEmail in the three
+  // ways that matter:
+  //   - it NEVER REJECTS. A Chrome that is not there (`failWith`) is `false`, exactly as the
+  //     real one collapses every failure of its tab selection to false;
+  //   - it is ASYNC, and with `probeDelayMs` it genuinely takes that long — the real one is a
+  //     CDP round trip, and "a slow check adds no delay beyond the deadline" cannot be tested
+  //     against a fake that answers in the same tick (CLAUDE.md, M16.9);
+  //   - it returns a boolean and nothing from the email.
+  // Deliberately NOT recorded in `calls`: that list is what tests read to assert a tool touched
+  // Gmail, and this runs before every instruction whether or not any tool does.
+  async hasOpenEmail(): Promise<boolean> {
+    this.probes += 1;
+    if (this.probeDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.probeDelayMs));
+    }
+    return this.failWith === undefined && this.openEmail !== null;
   }
 
   openReplyBox(): Promise<void> {

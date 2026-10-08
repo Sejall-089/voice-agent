@@ -694,7 +694,7 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M19 (MCP + Linear) is code-complete and has never been run end to end by a human (1138 tests, 62
+**M19 (MCP + Linear) is code-complete and has never been run end to end by a human (1184 tests, 63
 files).** Said first for the same reason it was said about M18: every milestone from M10 on has
 produced at least one live bug no fixture caught. `docs/M19-live-checklist.md` is the list, and
 it starts with a regression check, because M19 touched three things every instruction passes
@@ -724,6 +724,17 @@ focus — which a chain's step result prevents. Fixed: the dialog is now attache
 window so Windows keeps it on top, and the bar steps out of the way for as long as any confirm
 is up. A script measures the result (`npx electron scripts/confirm-zorder-recon.cjs`); a person
 re-checking it is still owed, and is in the checklist.
+
+**Two more from the same live pass, both about the plan the model writes.** Asked to "file this
+bug in Linear and tell the social channel" with a bug email open, it sometimes skipped reading
+the email — once filing an issue with a description it made up, and, with unrelated text on the
+clipboard, planning to file *the clipboard*. The planner had no way to know an email was open.
+It is now told one thing, and only when it is true: **"An email is open in Gmail."** Never the
+subject or the sender — that is someone else's text, and the planning prompt is the one place
+text is treated as instruction. Measured with the opt-in eval: 0 of 3 plans read the email
+before, 3 of 3 after, and "summarize this" still means the clipboard. The same run surfaced the
+model writing a tool name as `functions.linear__create_issue`; that prefix is now forgiven when,
+and only when, what is left is exactly a tool on the menu. Both need a live re-run.
 
 **One known gap, deliberately not fixed in M19:** a *standalone* "send these to the team" shows
 a short preview and then reformats your notes through the model *after* you approve. Inside a

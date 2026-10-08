@@ -125,6 +125,55 @@ const OVERTEACH: readonly Case[] = [
   { phrase: "reply to this and send it", expected: ["draftReply", "sendReply"] },
 ];
 
+// THE SECOND LIVE RETEST. With unrelated text on the clipboard the chain phrase was refused:
+// the plan named `functions.linear__create_issue` — the provider's own internal namespace for
+// tools, leaking into the free-text `tool` field of a plan step — and `validatePlan` rejected it
+// as a tool the app does not have. With a clean clipboard the same words planned correctly.
+// The phrase is verbatim, lower-case "linear" included. The clipboard text is a stand-in: what
+// was actually on it that day was not recorded.
+const UNRELATED_CLIPBOARD: Seen = {
+  label: "unrelated clipboard",
+  context: {
+    selectedText:
+      "Quarterly planning notes: the offsite moved to the 14th, catering is confirmed for " +
+      "forty people, and the venue still needs a deposit by Friday. Parking is limited, so " +
+      "encourage carpooling. Agenda draft is in the shared folder under Offsite/2026.",
+    activeApp: null,
+    activeWindowTitle: null,
+  },
+};
+// The same clipboard, plus the one fact the app does not currently supply: that Gmail is in
+// front. A stand-in for a context fix — the window title is not what such a fix would send,
+// but it carries the same information.
+const CLIPBOARD_AND_TOLD_GMAIL: Seen = {
+  label: "unrelated clipboard + told Gmail is open",
+  context: {
+    ...UNRELATED_CLIPBOARD.context,
+    activeApp: "chrome.exe",
+    activeWindowTitle: "Bug: login button does nothing on mobile - dana@example.com - Gmail",
+  },
+};
+// WHAT THE APP ACTUALLY SENDS since the fix: the planner asks Gmail whether a message is open
+// and, when it is, the context carries `emailOpen: true` — rendered as the single line "An
+// email is open in Gmail." (core/contextHints.ts). No window title, no subject. These two are
+// the real thing, where "told Gmail is open" above was a stand-in used to decide to build it.
+const HINTED: Seen = {
+  label: "email open (hint)",
+  context: { selectedText: null, activeApp: null, activeWindowTitle: null, emailOpen: true },
+};
+const HINTED_WITH_CLIPBOARD: Seen = {
+  label: "email open (hint) + unrelated clipboard",
+  context: { ...UNRELATED_CLIPBOARD.context, emailOpen: true },
+};
+// THE OVER-TEACHING RISK THE HINT INTRODUCES. With an email open and text on the clipboard,
+// "summarize this" has always meant the clipboard — `summarize` reads the selection and nothing
+// else. If the hint drags it toward `readEmail`, the fix has broken the app's oldest tool.
+const SUMMARIZE_CONTROL: readonly Case[] = [{ phrase: "summarize this", expected: ["summarize"] }];
+
+const CLIPBOARD: readonly Case[] = [
+  { phrase: "file this bug in linear and tell the social channel", expected: BUG_CHAIN },
+];
+
 const results: {
   seen: string;
   phrase: string;
@@ -141,6 +190,11 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
   //   M19_PLAN_SET=all        (default) every phrase once, in both contexts            9 calls
   //   M19_PLAN_SET=core       the three CORE phrases, as the app sees them, x TRIALS   3 x TRIALS
   //   M19_PLAN_SET=overteach  the phrases that must NOT gain a readEmail step          1 x TRIALS
+  //   M19_PLAN_SET=clipboard  the chain phrase with unrelated text on the clipboard    1 x TRIALS
+  //   M19_PLAN_SET=clipboard-gmail   the same, and told Gmail is open                  1 x TRIALS
+  //   M19_PLAN_SET=hinted     WHAT THE APP SENDS NOW with an email open (`emailOpen`):
+  //                           the clipboard phrase, the core set, and the control that
+  //                           "summarize this" with clipboard text stays `summarize`    5 x TRIALS
   //   M19_PLAN_TRIALS=3       repeats per phrase (default 1)
   const set = process.env["M19_PLAN_SET"] ?? "all";
   const trials = Math.max(1, Number(process.env["M19_PLAN_TRIALS"] ?? "1") || 1);
@@ -151,7 +205,17 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
       return found;
     });
   const selected =
-    set === "core"
+    set === "hinted"
+      ? [
+          ...CLIPBOARD.map((entry) => ({ ...entry, seen: HINTED_WITH_CLIPBOARD })),
+          ...pick(CORE, CASES).map((entry) => ({ ...entry, seen: HINTED })),
+          ...SUMMARIZE_CONTROL.map((entry) => ({ ...entry, seen: HINTED_WITH_CLIPBOARD })),
+        ]
+      : set === "clipboard"
+      ? CLIPBOARD.map((entry) => ({ ...entry, seen: UNRELATED_CLIPBOARD }))
+      : set === "clipboard-gmail"
+        ? CLIPBOARD.map((entry) => ({ ...entry, seen: CLIPBOARD_AND_TOLD_GMAIL }))
+      : set === "core"
       ? pick(CORE, CASES).map((entry) => ({ ...entry, seen: AS_THE_APP_SEES_IT }))
       : set === "overteach"
         ? OVERTEACH.map((entry) => ({ ...entry, seen: AS_THE_APP_SEES_IT }))

@@ -10,6 +10,7 @@ import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
 import { loadConnectorTools } from "../src/core/mcp/load.ts";
 import { SdkMcpConnection } from "../src/core/mcp/SdkConnection.ts";
+import { EMAIL_HINT_TIMEOUT_MS } from "../src/core/contextHints.ts";
 import { formatEmail } from "../src/core/tools/readEmail.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import type {
@@ -79,6 +80,9 @@ interface HarnessOptions {
   enabled?: boolean;
   memory?: Memory;
   context?: CapturedContext;
+  // How the fake Gmail answers the pre-planning "is an email open?" check.
+  probeDelayMs?: number;
+  gmailFailWith?: string;
 }
 
 function harness(choice: ToolChoice, options: HarnessOptions = {}) {
@@ -114,6 +118,8 @@ function harness(choice: ToolChoice, options: HarnessOptions = {}) {
   const gmail = new FakeGmail({
     openEmail: options.email === undefined ? BUG_EMAIL : options.email,
     timeline,
+    probeDelayMs: options.probeDelayMs,
+    failWith: options.gmailFailWith,
   });
   const log = new InMemoryActionLog();
   const chain = new InMemoryChainState();
@@ -700,5 +706,225 @@ describe("the plan tool's worked example", () => {
     ]);
     expect(BUG_CHAIN[1]?.arguments["description"]).toBe("{step1}");
     expect(BUG_CHAIN[2]?.arguments["notes"]).toBe("New bug filed: {step2}");
+  });
+});
+
+// THE SECOND LIVE RETEST. "File this bug in linear and tell the social channel", unrelated text
+// on the clipboard: refused with `My plan for that used a tool I don't have
+// ("functions.linear__create_issue")`. The model had typed the provider's own namespace into a
+// plan step. The plan below is that plan, prefix and all.
+describe("a tool name carrying the provider's 'functions.' prefix", () => {
+  const prefixed = (steps: PlannedStep[]): PlannedStep[] =>
+    steps.map((entry) => ({ ...entry, tool: `functions.${entry.tool}` }));
+
+  it("runs a plan whose every step is prefixed, exactly as it runs the clean one", async () => {
+    const h = harness(plan(prefixed(BUG_CHAIN)), { confirms: [true, true] });
+    const outcome = await h.planner.run("file this bug in linear and tell the social channel");
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.chain).toEqual({ completed: 3, total: 3 });
+    expect(outcome.proposed).toBeUndefined();
+    expect(h.server.created).toHaveLength(1);
+    expect(h.sender.calls).toHaveLength(1);
+    // Logged under the REAL names: nothing downstream ever sees the prefix.
+    expect(h.log.entries.map((entry) => entry.tool)).toEqual([
+      "readEmail",
+      "linear__create_issue",
+      "sendMessage",
+    ]);
+  });
+
+  it("gates a prefixed dangerous step exactly as the clean one", async () => {
+    const h = harness(plan(prefixed(BUG_CHAIN)), { confirms: [false] });
+    const outcome = await h.planner.run("file this bug");
+
+    expect(outcome.status).toBe("cancelled");
+    expect(h.shell.confirmMessages[0]?.startsWith("Step 2 of 3: Create this Linear issue")).toBe(true);
+    expect(h.server.created).toEqual([]);
+    expect(h.sender.calls).toEqual([]);
+  });
+
+  it("resolves a prefixed name on the single-step path too", async () => {
+    const h = harness({
+      kind: "tool",
+      name: "functions.linear__create_issue",
+      input: { title: TITLE },
+    }, { confirms: [true] });
+    const outcome = await h.planner.run("file an issue");
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.tool).toBe("linear__create_issue");
+    // The gate fired for it like any other dangerous call.
+    expect(h.shell.confirmMessages).toHaveLength(1);
+    expect(h.server.created[0]?.title).toBe(TITLE);
+  });
+
+  // The closed world. Stripping the prefix must not turn a name that is not on the menu into
+  // one that is — including real tools on Linear's server.
+  for (const name of [
+    "functions.linear__save_issue",
+    "functions.linear__delete_comment",
+    "functions.save_issue",
+    "functions.plan",
+    "functions.functions.linear__create_issue",
+    "Functions.linear__create_issue",
+    "functions.Linear__Create_Issue",
+    "functions.linear__create_issue ",
+    "multi_tool_use.parallel",
+    "parallel",
+  ]) {
+    it(`still refuses a plan naming ${JSON.stringify(name)}, quoting it as sent, with nothing run`, async () => {
+      const h = harness(
+        plan([
+          step("readEmail", {}, "read"),
+          // parsePlan trims a step's tool name; this harness hands the planner a parsed plan
+          // directly, so the trailing-space case arrives exactly as written here.
+          step(name, { title: TITLE, description: "{step1}" }, "do it"),
+        ]),
+        { confirms: [true, true] },
+      );
+      const outcome = await h.planner.run("do the thing");
+
+      expect(outcome.status).toBe("refused");
+      expect(outcome.chain).toEqual({ completed: 0, total: 2 });
+      expect(h.shell.results.at(-1)).toContain(`a tool I don't have ("${name}")`);
+      expect(h.gmail.calls).toEqual([]);
+      expect(h.server.connections).toBe(0);
+      expect(h.shell.confirmMessages).toEqual([]);
+    });
+  }
+
+  it("still refuses a lone prefixed name that is not on the menu, as a miss", async () => {
+    const h = harness({ kind: "tool", name: "functions.linear__save_issue", input: { id: "ENG-4" } });
+    const outcome = await h.planner.run("cancel ENG-4");
+
+    expect(outcome.status).toBe("no_tool");
+    expect(outcome.proposed).toEqual({ tool: "functions.linear__save_issue" });
+    expect(h.server.connections).toBe(0);
+  });
+
+  it("does not resolve a prefixed name when the tool it names is switched off", async () => {
+    const h = harness(plan(prefixed(BUG_CHAIN)), { confirms: [true, true], allow: ["get_issue"] });
+    const outcome = await h.planner.run("file this bug");
+
+    expect(outcome.status).toBe("refused");
+    expect(h.shell.results.at(-1)).toContain('a tool I don\'t have ("functions.linear__create_issue")');
+    expect(h.gmail.calls).toEqual([]);
+  });
+});
+
+describe("a refused plan is recorded as the model sent it", () => {
+  const BAD = [
+    step("functions.readEmail", {}, "read"),
+    step("functions.nope", { title: "A SECRET TITLE", description: "{step1}" }, "file it"),
+    step("multi_tool_use.parallel", { notes: "PRIVATE NOTES" }, "tell them"),
+  ];
+
+  it("logs every step's tool name, raw and in order — and no arguments", async () => {
+    const h = harness(plan(BAD));
+    await h.planner.run("file this bug");
+
+    const row = h.log.entries.at(-1);
+    expect(row?.status).toBe("refused");
+    expect(row?.tool).toBeNull();
+    // RAW: the first step WOULD have resolved, and is still recorded as it was typed.
+    expect(row?.arguments).toEqual({
+      plan: ["functions.readEmail", "functions.nope", "multi_tool_use.parallel"],
+    });
+    // The row is fed into the next planning prompt, so nothing the user said rides along.
+    expect(JSON.stringify(row)).not.toContain("A SECRET TITLE");
+    expect(JSON.stringify(row)).not.toContain("PRIVATE NOTES");
+  });
+
+  it("hands the full plan to the caller, for the console", async () => {
+    const h = harness(plan(BAD));
+    const outcome = await h.planner.run("file this bug");
+    expect(outcome.proposed?.plan).toEqual(BAD);
+  });
+
+  it("records the names for every kind of plan refusal, not only an unknown tool", async () => {
+    const h = harness(
+      plan([...BUG_CHAIN, step("linear__search_issues", { query: "x" }, "check")]),
+    );
+    const outcome = await h.planner.run("four things");
+    expect(outcome.status).toBe("refused");
+    expect(h.log.entries.at(-1)?.arguments).toEqual({
+      plan: ["readEmail", "linear__create_issue", "sendMessage", "linear__search_issues"],
+    });
+  });
+});
+
+// THE CAUSE BEHIND THAT RETEST. With unrelated clipboard text, 0 of 3 real-model plans read the
+// email — the planner did not know one was open and took "this bug" to mean the clipboard.
+describe("the planner is told when an email is open in Gmail", () => {
+  const search: ToolChoice = { kind: "tool", name: "linear__search_issues", input: { query: "x" } };
+
+  it("tells the model, as a bare flag, when Gmail has a message open", async () => {
+    const h = harness(search);
+    await h.planner.run("find x");
+
+    expect(h.llm.lastContext?.emailOpen).toBe(true);
+    expect(h.gmail.probes).toBe(1);
+    // Asking was not reading: no tool touched Gmail, and nothing else was learned from it.
+    expect(h.gmail.calls).toEqual([]);
+    expect(Object.keys(h.llm.lastContext ?? {}).sort()).toEqual([
+      "activeApp",
+      "activeWindowTitle",
+      "emailOpen",
+      "selectedText",
+    ]);
+  });
+
+  it("carries nothing from the email into what the model is given", async () => {
+    const h = harness(search, {
+      email: { ...BUG_EMAIL, subject: "SUBJECT-MARKER", body: "BODY-MARKER", fromName: "NAME-MARKER" },
+    });
+    await h.planner.run("find x");
+
+    const given = JSON.stringify(h.llm.lastContext);
+    expect(h.llm.lastContext?.emailOpen).toBe(true);
+    for (const marker of ["SUBJECT-MARKER", "BODY-MARKER", "NAME-MARKER", "dana@example.com"]) {
+      expect(given).not.toContain(marker);
+    }
+  });
+
+  it("says nothing when no message is open, or Chrome cannot be reached", async () => {
+    for (const options of [{ email: null }, { gmailFailWith: "Chrome is not there" }] as const) {
+      const h = harness(search, options);
+      const outcome = await h.planner.run("find x");
+
+      expect(outcome.status).toBe("ok"); // and the instruction is none the worse for it
+      expect(h.llm.lastContext).not.toHaveProperty("emailOpen");
+      expect(h.llm.lastContext).toEqual(NO_CONTEXT);
+    }
+  });
+
+  it("leaves the shell's own context untouched alongside the hint", async () => {
+    const context = { selectedText: "UNRELATED CLIPBOARD", activeApp: null, activeWindowTitle: null };
+    const h = harness(search, { context });
+    await h.planner.run("find x");
+    expect(h.llm.lastContext).toEqual({ ...context, emailOpen: true });
+  });
+
+  // REAL TIME. The default deadline is 800ms and this check takes 1.5s; the run must not wait
+  // for it, and must proceed exactly as if Gmail had said nothing.
+  it("gives no hint and no delay beyond the deadline when the Gmail check is slow", async () => {
+    const h = harness(search, { probeDelayMs: 1_500 });
+    const started = performance.now();
+    const outcome = await h.planner.run("find x");
+    const elapsed = performance.now() - started;
+
+    expect(outcome.status).toBe("ok");
+    expect(h.gmail.probes).toBe(1);
+    expect(h.llm.lastContext).not.toHaveProperty("emailOpen");
+    expect(elapsed).toBeGreaterThanOrEqual(EMAIL_HINT_TIMEOUT_MS - 50);
+    expect(elapsed).toBeLessThan(1_350); // the 1.5s check was not waited for
+  });
+
+  it("asks once per instruction, whatever the instruction is", async () => {
+    const h = harness(plan(BUG_CHAIN), { confirms: [true, true] });
+    await h.planner.run("file this bug");
+    // A three-step chain is still one instruction and one planning call.
+    expect(h.gmail.probes).toBe(1);
   });
 });

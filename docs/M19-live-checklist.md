@@ -1,7 +1,7 @@
 # M19 — live verification checklist (by hand)
 
 > **OPEN. Nothing below has been run by a person yet.** M19 is code-complete and tested headless
-> (1138 tests), and two scripts have exercised real code against the real Linear workspace —
+> (1184 tests), and two scripts have exercised real code against the real Linear workspace —
 > read-only. No one has yet seen the app do any of this.
 >
 > Written before the live pass, like M18's: each item names what could actually be wrong. Every
@@ -294,6 +294,45 @@ orphans from this. SEJ-5 is the recon issue.
 
 **Noted, not fixed (follow-up list, spec.md §9):** a chain stops *after* the issue is created
 when the Slack channel is unknown — which is how SEJ-7 and SEJ-8 were orphaned.
+
+### 3. "functions.linear__create_issue" refused — and behind it, the clipboard filed as the bug — fixed, live re-run owed
+
+**Said:** "file this bug in linear and tell the social channel", bug email open, **unrelated
+text on the clipboard**. **Seen:** *My plan for that used a tool I don't have
+("functions.linear__create_issue"), so I didn't start it.* Nothing ran — one `refused` row in
+the action log, no Linear call, no Slack post. With a clean clipboard the same words planned
+three steps.
+
+**Two causes, found together:**
+
+- **The prefix.** The model typed the provider's internal namespace into a plan step. The log
+  holds five such refusals: `functions.linear__create_issue`, `functions.readSchedule`,
+  `multi_tool_use.parallel` (twice) and `parallel`. **Fix:** a leading `functions.` is dropped —
+  once, exact case — and the result accepted only if it is exactly a name on this run's menu.
+  Plans and single calls alike. The `parallel` forms, `functions.plan`, a double prefix and
+  mixed case are still refused.
+- **The plan underneath.** In the eval, with unrelated clipboard text, **0 of 3** plans read the
+  email: the model filed the *clipboard* as the bug. The planner was never told an email was
+  open. **Fix:** when Gmail reports a message open, the planning prompt gets one line, "An
+  email is open in Gmail." — nothing from the email itself.
+
+**Eval after (3 trials each):** the clipboard phrase 3/3 (was 0/3); the core set 9/9;
+"summarize this" with clipboard text and an email open still `summarize`, 3/3.
+
+**Still owed — by hand, after a restart:**
+
+- [ ] **The exact failing case:** copy some unrelated text, open the bug email, say "file this
+      bug in linear and tell the social channel". It plans **three** steps, `readEmail` first,
+      and step 2's dialog shows **the email**, not what you copied.
+- [ ] Same again, twice more. Three for three is the bar the eval set.
+- [ ] **"summarize this"** with text on the clipboard *and* an email open summarizes **the
+      clipboard**, in one step.
+- [ ] With **no** email open (Gmail on the inbox): "summarize this" still works, and "file this
+      bug in Linear…" does not pretend there is an email — note what it does.
+- [ ] **Quit Chrome**, then run any instruction ("turn the volume up"). No added delay, no
+      error: the Gmail check fails silently and planning proceeds.
+- [ ] If any plan is refused, the terminal now shows `[main] refused plan, as sent: [...]` —
+      copy that line into the results below. That is what was missing last time.
 
 **Noted, not fixed (follow-up list, spec.md §9):** Esc is both "stop speaking" and the dialog's
 Cancel, and the app speaks the confirm question — so silencing it with Esc cancels the confirm.

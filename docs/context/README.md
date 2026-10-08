@@ -7,7 +7,7 @@ for *status*, not for reasoning or philosophy.
 
 **Current status: see `PROJECT_CONTEXT_UPDATE_9.md`.** M0-M18 shipped. M19 (MCP support,
 with Linear as the first connector) is **code-complete and has never been run by a
-person** end to end: 1138 tests pass, two read-only scripts have exercised the real Linear workspace,
+person** end to end: 1184 tests pass, two read-only scripts have exercised the real Linear workspace,
 and `docs/M19-live-checklist.md` is entirely open. Its box in `spec.md` section 9 is
 deliberately unticked until that pass is done. `docs/M18-live-checklist.md` also still has
 open items.

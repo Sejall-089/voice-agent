@@ -17,6 +17,8 @@ export class FakeLLM implements LLMClient {
   // "revise this draft" and "answer this email again" is visible only in the prompt.
   public lastSystemPrompt: string | null = null;
   public lastUserPrompt: string | null = null;
+  // The context the planner handed over (M19) — what the model was TOLD about the world.
+  public lastContext: CapturedContext | null = null;
   // How many times each half was asked (M19). "The model is consulted ONCE for a chain" and
   // "nothing is rewritten by a model on its way out" are both claims about a count.
   public chooseCalls = 0;
@@ -29,12 +31,13 @@ export class FakeLLM implements LLMClient {
 
   chooseTool(
     _instruction: string,
-    _context: CapturedContext,
+    context: CapturedContext,
     tools: ToolSchema[],
     previousTurn: ActionLogEntry | null,
   ): Promise<ToolChoice> {
     this.chooseCalls += 1;
     this.lastToolsOffered = tools;
+    this.lastContext = context;
     this.lastPreviousTurnOffered = previousTurn;
     return Promise.resolve(this.choice);
   }

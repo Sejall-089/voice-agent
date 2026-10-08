@@ -15,6 +15,10 @@ export class UnavailableGmail implements GmailSurface {
   readOpenEmail(): Promise<EmailMessage> {
     return Promise.reject(new Error(REASON));
   }
+  // Not a refusal: with no browser configured there is simply no open email to hint at.
+  hasOpenEmail(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
   openReplyBox(): Promise<void> {
     return Promise.reject(new Error(REASON));
   }
