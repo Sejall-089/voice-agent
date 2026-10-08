@@ -2084,10 +2084,13 @@ Post-v0:
       tool name on top). All three are fixed. **Seen live by a person:** the Gmail → Linear →
       Slack chain working end to end; the step 2 and step 3 confirm dialogs fully visible; and,
       after the plan-choice fixes, the short instruction planning three steps with the real
-      email in the description in 3 of 3 runs, including with unrelated clipboard text.
+      email in the description — in **one** live run. (An earlier version of this entry said
+      3 of 3; it was one. Whether unrelated text was on the clipboard for that run was not
+      recorded, so the exact failing case is not claimed as re-verified live: the 3-of-3
+      figure for it is the eval's, not a person's.)
       **NOT run live, and resting on tests alone:** every decline and failure case, the
       long-email dialog, the injected-instruction email, and the `functions.` prefix rule
-      (seen live only as the refusal that prompted it). 39 checklist boxes remain open and say
+      (seen live only as the refusal that prompted it). 49 checklist boxes remain open and say
       so; see `docs/M19-live-checklist.md`, "Live results 4". Adds `core/mcp/` — a generic adapter that turns a pinned
       connector tool into an ordinary registry `Tool`, a closed-world loader driven by
       `connectors.json`, tiers that a server's hints can raise but never lower, and Linear's
@@ -2291,7 +2294,8 @@ have to rediscover.
 
 **The live pass was run on 2026-10-08/09 and the box is ticked — with named gaps.** A person
 saw the proof chain work, the step 2 and step 3 dialogs fully visible, and the short instruction
-plan three steps with the real email in 3 of 3 runs including with unrelated clipboard text.
+plan three steps with the real email in one live run (the clipboard's contents for that run
+were not recorded).
 **Not run live, resting on tests alone:** the decline and failure cases, the long-email dialog,
 the injected-instruction email, and the `functions.` prefix rule. `docs/M19-live-checklist.md`
 has the per-item record and "Live results 4" lists the gaps. *(The rest of this section was

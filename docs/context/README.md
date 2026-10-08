@@ -7,8 +7,8 @@ for *status*, not for reasoning or philosophy.
 
 **Current status: see `PROJECT_CONTEXT_UPDATE_9.md`.** M0-M19 shipped. M19 (MCP support,
 with Linear as the first connector) was run live and ticked on 2026-10-09 **with named
-gaps**: the Gmail -> Linear -> Slack chain, the confirm dialogs and the plan-choice fix were
-seen by a person; the decline/failure cases, the long-email dialog, the injected-instruction
+gaps**: the Gmail -> Linear -> Slack chain, the confirm dialogs and one run of the plan-choice
+fix were seen by a person; the decline/failure cases, the long-email dialog, the injected-instruction
 email and the `functions.` prefix rule are covered by tests only. 1184 tests pass.
 `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` both still have open items,
 and say which.

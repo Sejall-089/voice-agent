@@ -697,7 +697,8 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 **M19 (MCP + Linear) has been run live and is ticked, with named gaps (1184 tests, 63 files).**
 A person saw the Gmail → Linear → Slack chain work end to end, the confirm dialogs for steps 2
 and 3 fully visible, and "file this bug in linear and tell the social channel" plan three steps
-with the real email in 3 of 3 runs, including with unrelated text on the clipboard. The pass
+with the real email — once. (The 3-of-3 figure further down is the eval's, not a person's;
+what was on the clipboard for the one live run wasn't recorded.) The pass
 found three bugs no test caught — as every milestone from M10 on has — and all three are fixed
 (below). **Not run live, covered by tests only:** the decline and failure cases, the long-email
 dialog, the injected-instruction email, and the `functions.` prefix rule.

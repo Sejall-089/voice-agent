@@ -15,7 +15,7 @@ three milestones behind.
   ticked with items still open. `docs/M18-live-checklist.md`.
 - **M19 — MCP support, Linear first.** **Shipped and ticked 2026-10-09, with named gaps.** The
   live pass saw the proof chain work, the confirm dialogs fully visible, and the plan-choice fix
-  hold 3 of 3. It found three bugs, all fixed (below). Not run live and covered by tests only:
+  hold in one live run. It found three bugs, all fixed (below). Not run live and covered by tests only:
   the decline/failure cases, the long-email dialog, the injected-instruction email, the
   `functions.` prefix rule. 1184 tests pass, both typechecks clean, `npm run build` clean.
 
@@ -65,7 +65,7 @@ for them. Linear's search turned out to be fuzzy (found by the live check). Deta
   `scripts/linear-live-check.ts`. The second drives this app's own adapter and passed.
 - **A person at the keyboard (2026-10-08/09):** the proof chain end to end, the step 2 and 3
   dialogs fully visible, and the short instruction planning three steps with the real email
-  3 of 3 including with unrelated clipboard text. Not the decline/failure cases, the
+  once (clipboard contents not recorded). Not the decline/failure cases, the
   long-email dialog, the injected-instruction email, or the `functions.` prefix rule.
 
 ## What the next session needs
@@ -75,7 +75,7 @@ M19 is closed. Nothing is owed to ship it; these are what is left around it.
 1. **Clean up Linear by hand** (its MCP server has no delete tool): SEJ-5 (recon), SEJ-6
    ("test"), SEJ-7 (the empty issue), SEJ-8 and SEJ-11 (created, Slack step never sent), and
    whichever of SEJ-9, SEJ-10, SEJ-12 are unwanted copies of the test bug.
-2. **39 checklist boxes are open on purpose** — not run live, covered by tests only. If a
+2. **49 checklist boxes are open on purpose** — not run live, covered by tests only. If a
    future session has an hour at the keyboard, the ones worth the time are the decline and
    failure cases, a genuinely long email, and the injected-instruction email (section 5).
    `docs/M19-live-checklist.md`, "Live results 4".
@@ -105,7 +105,8 @@ M19 is closed. Nothing is owed to ship it; these are what is left around it.
    email is open in Gmail." when a new read-only `GmailSurface.hasOpenEmail()` says so —
    never the subject or sender — and a leading `functions.` is forgiven when, and only
    when, the remainder is exactly a name on the menu. Eval after: 15 of 15, including
-   "summarize this" still meaning the clipboard. Confirmed 3 of 3 live.
+   "summarize this" still meaning the clipboard. Seen working live once; the unrelated-clipboard
+   case itself was not re-run by a person with the clipboard recorded.
 
 The lessons are in `CLAUDE.md`: a property that holds by side effect; fixing a refusal can
 remove the only thing in front of a worse bug; an eval must see what the app sees.

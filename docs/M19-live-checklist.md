@@ -2,8 +2,8 @@
 
 > **CLOSED 2026-10-09, with named gaps.** The live pass was run by a person and M19's box in
 > `spec.md` §9 is ticked. The proof chain works, the confirm dialogs are fully visible, and the
-> plan-choice fix held 3 of 3. The pass found **three bugs no test caught**, all fixed. **39
-> boxes below are still open** — they were not run live, and "Live results 4" at the bottom
+> plan-choice fix held in the one live run made after it. The pass found **three bugs no test
+> caught**, all fixed. **49 boxes below are still open** — they were not run live, and "Live results 4" at the bottom
 > says exactly which ones are covered by tests only. An open box here means *not seen by a
 > person*, not *failing*.
 >
@@ -36,8 +36,8 @@ M19 changed three things that every existing instruction passes through: `ToolDe
 `chained`, both provider adapters now build the `plan` schema per run, and `sendMessage`'s
 confirm and send paths branch on `chained`.
 
-- [x] A lone instruction still works: `summarize this` on copied text.
-- [x] A lone Slack send still works exactly as before M19: copy some rough notes, say
+- [ ] A lone instruction still works: `summarize this` on copied text.
+- [ ] A lone Slack send still works exactly as before M19: copy some rough notes, say
       `send these to <your test channel>`. The dialog shows a short preview; what arrives in
       Slack is **reformatted** by the model. *(That reformat-after-confirm gap is known and is
       on the follow-up list — what matters here is that it has not changed.)*
@@ -75,10 +75,10 @@ reads resolved to `safe` under Linear's live hints, the code-fixed `limit` and `
 accepted by the live schema, the formatters read the live results, and a missing issue came
 back as *"Linear said no: Could not find referenced Issue."*
 
-- [x] `find the onboarding issue in Linear` → a short list, each with identifier, title, status
+- [ ] `find the onboarding issue in Linear` → a short list, each with identifier, title, status
       and a link. **No confirm dialog, no "Using Linear…" narration.**
-- [x] `what does SEJ-3 say` → title, status, link, then the description.
-- [x] `what does ZZZ-999 say` → *"Linear said no: Could not find referenced Issue."* — a plain
+- [ ] `what does SEJ-3 say` → title, status, link, then the description.
+- [ ] `what does ZZZ-999 say` → *"Linear said no: Could not find referenced Issue."* — a plain
       refusal, **not** "Something went wrong".
 - [ ] Listen to a search result being spoken. A URL should be said as its host, not spelled
       out. If it reads `h t t p s colon slash slash`, the generic speech derivation is not
@@ -97,8 +97,8 @@ tool description says so.
 - [ ] `file a Linear issue called test from the voice agent`. The dialog reads
       `Create this Linear issue in <defaultTeam>?`, then `Title: …`, then `(no description)`.
       The team named is the one in `connectors.json`.
-- [x] **Cancel.** Check Linear: nothing was created.
-- [x] Repeat and **approve.** The result is `Created SEJ-n: <title>` with the link on the next
+- [ ] **Cancel.** Check Linear: nothing was created.
+- [ ] Repeat and **approve.** The result is `Created SEJ-n: <title>` with the link on the next
       line. Open the link — it is the issue, in the right team.
 - [ ] Only the question is spoken (the first paragraph), not the title and body.
 - [ ] While the dialog is up, press the instruction hotkey. It is blocked and says a
@@ -286,7 +286,7 @@ it shows nothing was over-taught, not that the bug is fixed.
 
 **Still owed — re-run these by hand:**
 
-- [x] "file this bug in Linear and tell the social channel" with the email open → **three**
+- [ ] "file this bug in Linear and tell the social channel" with the email open → **three**
       steps, `readEmail` first. Try it three times, and at least once with unrelated text on
       the clipboard.
 - [ ] If it plans two steps again: **decline the create dialog** (its description will be
@@ -327,10 +327,10 @@ three steps.
 
 **Still owed — by hand, after a restart:**
 
-- [x] **The exact failing case:** copy some unrelated text, open the bug email, say "file this
+- [ ] **The exact failing case:** copy some unrelated text, open the bug email, say "file this
       bug in linear and tell the social channel". It plans **three** steps, `readEmail` first,
       and step 2's dialog shows **the email**, not what you copied.
-- [x] Same again, twice more. Three for three is the bar the eval set.
+- [ ] Same again, twice more. Three for three is the bar the eval set.
 - [ ] **"summarize this"** with text on the clipboard *and* an email open summarizes **the
       clipboard**, in one step.
 - [ ] With **no** email open (Gmail on the inbox): "summarize this" still works, and "file this
@@ -352,10 +352,17 @@ It fails safe (nothing is sent) but it stops the chain.
   the email as its description, posted the issue's link to the Slack test channel.
 - **The confirm dialogs for steps 2 and 3 are fully visible** after the fix in live result 1.
 - **After the plan-choice fixes** (live results 2 and 3), "file this bug in linear and tell the
-  social channel" **planned three steps and put the real email in the description in 3 of 3
-  live runs, including with unrelated text on the clipboard.**
+  social channel" **planned three steps and put the real email in the description — in one
+  live run.** *Corrected 2026-10-09: this first read "3 of 3 live runs, including with
+  unrelated text on the clipboard". It was one run.* What was on the clipboard for that run
+  was not recorded, so the exact failing case (unrelated clipboard text) is **not** claimed as
+  re-verified by a person; the three boxes that ask for it, or for three runs, are open again.
 
-**What the app's own action log holds** (it records planner runs, not what was on screen):
+**What the app's own action log holds** — it records that a planner run happened and how it
+ended, not what was on screen. **None of these is a checklist result.** Seven boxes were first
+ticked from this table and have been unticked: the person who ran the pass did not watch those
+items, and a row in a log is not someone seeing the right thing happen (CLAUDE.md: a log line
+proves what the app decided, not what the user saw).
 
 | Item | Log rows |
 |---|---|
@@ -366,8 +373,8 @@ It fails safe (nothing is sent) but it stops the chain.
 | the full chain, three steps | #355–357, #358–360, #367–369 |
 | the short phrase after the last fix (commit `e4eab73`) | #367–369 → SEJ-12 |
 
-The log has **one** run of the short phrase since the last fix was committed (#367–369); the
-other two of the reported three could not be matched to rows. Recorded as reported.
+The log has **one** run of the short phrase since the last fix was committed (#367–369), which
+matches the one live run reported above.
 
 Two things the log shows that are **not** claimed as checklist results: a create cancelled at
 step 2 (#362) and a send cancelled at step 3 (#365). Both ran before the dialog fix and neither
@@ -385,6 +392,10 @@ was checked against what the checklist asks, so "Stopping partway" stays open.
 - **The `functions.` prefix.** Seen live once *before* the fix, as a refusal. Since the fix no
   real model has produced one, in the app or in 15 eval calls — so the rule that forgives it has
   only ever run in tests.
+- Not watched, though the log shows the runs happened: `summarize this`, the lone Slack send,
+  the three Linear reads (section 2), and the lone create's cancel and approve (section 3).
+- The plan-choice re-run **three times**, and **with unrelated text on the clipboard** — run
+  once, clipboard not recorded.
 - Also not reported: section 1's startup toggles, the spoken-result and keyboard items, the
   not-foreground dialog case (the one thing no script could measure), `summarize this` and
   `reply to this and send it` after the hint was added, and running with Chrome quit.
