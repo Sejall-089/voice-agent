@@ -127,6 +127,11 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
 
   private registerEscape(): void {
     if (this.escapeRegistered) return;
+    // Never while a confirm dialog is up (M19 live fix). The dialog owns Escape as its own
+    // Cancel, and `confirm()` releases this hook for exactly that reason — but this method is
+    // bound to the window's "show" event, so anything that showed the bar mid-dialog would have
+    // quietly taken the key back. `confirm()` re-arms it itself once the answer is in.
+    if (this.confirmPending) return;
     this.escapeRegistered = globalShortcut.register("Escape", () => {
       // Escape means "never mind" everywhere else in this app, and live use found the only way
       // to interrupt speech was the instruction hotkey — which also opens the bar and the
@@ -271,6 +276,9 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // dismissal bookkeeping live together.
   handleBlur(): void {
     if (this.pinnedAgainstBlur) return; // unfocused on purpose, must stay visible
+    // `confirm()` has already hidden the bar and will put it back; a blur arriving while the
+    // dialog is up must not run the dismissal path over the top of that.
+    if (this.confirmPending) return;
     this.hide();
   }
 
@@ -282,6 +290,14 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   showResult(text: string): void {
     // A modal confirm dialog blurs the bar, and the blur handler hides it. Re-show it, or the
     // result of the action the user just approved would land in an invisible window.
+    //
+    // NOT while a confirm dialog is up (M19 live fix). The bar is hidden for the dialog's whole
+    // lifetime on purpose — see `confirm()` — so the text is delivered and the window is left
+    // alone; `confirm()` brings the bar back, already showing this, once the answer is in.
+    if (this.confirmPending) {
+      this.window.webContents.send("commandbar:echo", text);
+      return;
+    }
     if (!this.window.isVisible()) {
       // showInactive, not show: a voice result must not yank focus out of whatever the user
       // is actually working in. A typed run already owns focus, so nothing changes there.
@@ -300,7 +316,11 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // it is about to type into ("Dictating into — Untitled - Notepad") rather than adding a
   // parallel status surface for a second narration source.
   narrate(text: string): void {
-    if (!this.window.isVisible()) this.window.showInactive();
+    // While a confirm dialog is up the bar stays hidden (M19 live fix; see `confirm()`). This is
+    // the path the instruction hotkey takes to say "there's a confirmation waiting" — and
+    // re-showing an always-on-top bar to say so is how the bar ended up covering the very
+    // dialog it was pointing at. The line is still delivered, and it is still spoken.
+    if (!this.window.isVisible() && !this.confirmPending) this.window.showInactive();
     this.cancelAutoHide();
     this.window.webContents.send("commandbar:status", text);
   }
@@ -635,8 +655,32 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // relies on Escape meaning "no" (cancelId below), so our global hook has to step aside
     // for as long as the dialog owns the keyboard, or the two would race for the same key.
     this.unregisterEscape();
+
+    // THE BAR GETS OUT OF THE WAY, DELIBERATELY (M19 live fix).
+    //
+    // The bar is a 640x640 always-on-top window in the middle of the screen, and the dialog
+    // opens in the same place. Until now the only thing keeping one off the other was a side
+    // effect: the dialog took focus, the bar blurred, and the blur handler hid it. That works
+    // only when the bar HAD focus. In a chain it does not — step 2's result re-shows the bar
+    // with showInactive(), an unfocused window never blurs, and step 3's dialog opened
+    // underneath it with its text and both buttons covered. Found by a person, on the first
+    // live chain; scripts/confirm-zorder-recon.cjs reproduces it.
+    //
+    // Two changes, and they do different jobs:
+    //   1. The bar is hidden here, on purpose, whatever its focus — and put back in the
+    //      `finally`. A plain window hide, not `this.hide()`: nothing is being dismissed, so no
+    //      capture is ended and the bar's contents are not reset.
+    //   2. The dialog is PARENTED to the bar window (below). Windows keeps an owned window
+    //      above its owner whatever the owner does, and an owned window of a topmost window is
+    //      topmost itself — so even if something re-shows the bar mid-dialog it lands behind
+    //      the dialog, and another application cannot cover the dialog either. Measured: the
+    //      dialog stays on top with the bar hidden, visible, hidden mid-dialog and re-shown
+    //      mid-dialog, and the confirm stays pending throughout.
+    const wasVisible = this.window.isVisible();
+    this.cancelAutoHide();
+    if (wasVisible) this.window.hide();
     try {
-      const { response } = await dialog.showMessageBox({
+      const { response } = await dialog.showMessageBox(this.window, {
         type: "question",
         buttons: ["Send", "Cancel"],
         defaultId: 1, // Cancel — a stray Enter must never fire a destructive action
@@ -656,8 +700,18 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       // Safe to do here and not a moment later: the handler's own result is spoken AFTER this
       // returns, so nothing that matters is dropped.
       this.stopSpeaking();
-      // Re-arm only if the bar is still on screen — it normally is (confirm always follows
-      // a still-open bar), but don't force it back open if something else already hid it.
+      // Put the bar back if — and only if — it was on screen when the question was asked.
+      // showInactive, never show: the answer was given in the dialog, and the bar must not
+      // take focus from wherever it went next. An unfocused bar gets no blur to dismiss it, so
+      // it is given the same auto-hide a voice result gets; a result arriving a moment later
+      // simply restarts that timer.
+      if (wasVisible && !this.window.isVisible()) {
+        this.window.showInactive();
+        this.scheduleAutoHide();
+      }
+      // Re-arm Escape only if the bar is on screen. The "show" event above normally does it;
+      // this covers a bar something else made visible while the dialog was up, when
+      // registerEscape() was refusing.
       if (this.window.isVisible()) this.registerEscape();
     }
   }

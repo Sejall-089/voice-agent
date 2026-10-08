@@ -107,6 +107,18 @@ patterns behind them — each cost a real debugging session.
   does throw, as a different type, at a different moment. A wrapper written from the happy-path
   capture alone would have reported a failed create as done.
 
+- **A property that holds by SIDE EFFECT holds only on the path that produces the side effect
+  (M19).** The confirm dialog was never covered by the always-on-top bar for fourteen
+  milestones — not because anything arranged that, but because the dialog took focus, the bar
+  blurred, and the blur handler hid it. A chain's step result re-shows the bar *unfocused*, an
+  unfocused window never blurs, and step 3's dialog opened underneath it with both buttons
+  hidden. Nothing was changed to break it; a new path simply did not pass through the accident.
+  When something that must always be true (the gate is readable and clickable) turns out to be
+  true only because of an unrelated handler, make it true ON PURPOSE at the one place it matters
+  — and remember the test for it can only assert the decision. Which window is in front is done
+  by the OS with real windows: measure it (`scripts/confirm-zorder-recon.cjs`) and have a person
+  look.
+
 ## Scope added mid-milestone
 
 If something is added to a milestone's plan AFTER its build order is written, **fold it into the

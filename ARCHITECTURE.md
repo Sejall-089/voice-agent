@@ -463,7 +463,13 @@ text is on screen — which is what makes barge-in safe rather than destructive.
 - an utterance queued more than 8s ago is **dropped rather than said**: speech describes a
   moment, and a queue that always drains eventually will happily announce one that has passed;
 - while a confirm dialog waits, **both hotkeys are blocked and say so** rather than starting a
-  second run over the top of an undecided one.
+  second run over the top of an undecided one;
+- while a confirm dialog waits, **the bar is not on screen and cannot be put there** (M19 live
+  fix). The bar is always-on-top and the dialog opens in the same place; the dialog is parented
+  to the bar window so Windows keeps it above the bar and above other apps, the bar is hidden
+  for the dialog's lifetime and restored after, and "there's a confirmation waiting" is spoken
+  without re-showing the bar over the thing it is pointing at. The first live chain found the
+  dialog covered — it had only ever been kept clear by the bar happening to lose focus.
 
 ---
 

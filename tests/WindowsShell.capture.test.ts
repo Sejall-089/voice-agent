@@ -99,6 +99,9 @@ const { WindowsShell } = await import("../src/main/shell/WindowsShell.ts");
 // talk to each other, not in either one alone.
 const { VoiceSession } = await import("../src/main/shell/VoiceSession.ts");
 const { DictationSession } = await import("../src/main/shell/DictationSession.ts");
+const { createOnInstructionHotkey, CONFIRM_WAITING, CHAIN_RUNNING } = await import(
+  "../src/main/instructionHotkey.ts"
+);
 const { FakeTranscriber } = await import("./FakeTranscriber.ts");
 const { MockInputInjector } = await import("./MockInputInjector.ts");
 
@@ -391,9 +394,10 @@ describe("WindowsShell Escape — works whenever the bar is visible, not only wh
   });
 
   it("steps aside for the native confirm dialog, which already relies on Escape as Cancel", async () => {
-    // confirm() runs while the bar is still open (nothing hides it between submit and the
+    // confirm() is reached with the bar still open (nothing hides it between submit and the
     // confirm gate), so without this the global hook and the dialog's own cancelId would be
-    // fighting over the same keypress.
+    // fighting over the same keypress. Since the M19 live fix confirm() also hides the bar for
+    // the dialog's lifetime and brings it back — see "the bar gets out of the dialog's way".
     const capture = shell.showInput();
     ipcMain.emit("commandbar:submit", {}, "send this");
     await capture;
@@ -416,7 +420,34 @@ describe("WindowsShell Escape — works whenever the bar is visible, not only wh
     expect(escapeHandler()).toBeDefined();
   });
 
-  it("does not re-arm after the dialog if the bar was hidden in the meantime", async () => {
+  // RE-JUSTIFIED FOR THE M19 LIVE FIX, not merely re-run (CLAUDE.md). This used to read "does
+  // not re-arm after the dialog if the bar was hidden in the meantime", and it hid the window
+  // by hand mid-dialog to set that up. confirm() now hides the bar ITSELF for every dialog, so
+  // that setup no longer distinguishes anything — and the old expectation is now wrong for it:
+  // a bar that was visible when the question was asked comes back, and Escape with it.
+  //
+  // The rule the old test was protecting survives in a different precondition: Escape is armed
+  // only for a bar that is on screen, so a confirm asked with NO bar showing must leave it
+  // un-armed and must not conjure a bar. Both halves are asserted, so the test can tell the two
+  // rules apart.
+  it("does not re-arm, or re-show anything, after a dialog asked while the bar was hidden", async () => {
+    expect(window.isVisible()).toBe(false); // the precondition: no bar on screen
+
+    let resolveDialog!: (value: { response: number }) => void;
+    dialogShowMessageBox.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveDialog = resolve)),
+    );
+    const confirming = shell.confirm("Send to #design-team?");
+    await Promise.resolve();
+
+    resolveDialog({ response: 0 });
+    await confirming;
+
+    expect(window.isVisible()).toBe(false);
+    expect(escapeHandler()).toBeUndefined(); // nothing to arm Escape for
+  });
+
+  it("re-arms after the dialog for a bar that was visible when it was asked", async () => {
     const capture = shell.showInput();
     ipcMain.emit("commandbar:submit", {}, "send this");
     await capture;
@@ -427,12 +458,13 @@ describe("WindowsShell Escape — works whenever the bar is visible, not only wh
     );
     const confirming = shell.confirm("Send to #design-team?");
     await Promise.resolve();
+    expect(escapeHandler()).toBeUndefined();
 
-    window.hide(); // something else hid the bar while the dialog was open
     resolveDialog({ response: 0 });
     await confirming;
 
-    expect(escapeHandler()).toBeUndefined(); // nothing to arm Escape for anymore
+    expect(window.isVisible()).toBe(true);
+    expect(escapeHandler()).toBeDefined();
   });
 });
 
@@ -884,5 +916,314 @@ describe("WindowsShell — silencing (M14 step 7)", () => {
     await shell.confirm("Send this invite to alex@example.com?");
 
     expect(speaker.calls).toContain("stop");
+  });
+});
+
+// THE M19 LIVE BUG. In a three-step chain a person saw "Step 3 of 3: Send to #social?" with its
+// text and both buttons covered by the instruction bar.
+//
+// The bar is an always-on-top window and the dialog opened unparented in the same place. What
+// had been keeping them apart was a side effect — the dialog took focus, the bar blurred, the
+// blur handler hid it — and that only works for a bar that HAD focus. After a chain's step 2,
+// `showResult` re-shows the bar with showInactive(); an unfocused window never blurs, so step
+// 3's dialog opened underneath it.
+//
+// WHAT THESE TESTS CAN AND CANNOT SHOW. They hold the dialog open (the shell-level equivalent of
+// MockShell's `holdConfirm`) and assert what the shell DID with the window while it was up:
+// hidden, parented, Escape released. That is a decision, not a picture (CLAUDE.md: a log line
+// proves what the app decided, not what the user saw). Whether the dialog is actually on top is
+// a z-order fact about real windows — measured by scripts/confirm-zorder-recon.cjs, and seen by
+// a person in docs/M19-live-checklist.md.
+describe("WindowsShell — the bar gets out of the confirm dialog's way (M19 live fix)", () => {
+  // A dialog that stays up until the test answers it. `calls` is every showMessageBox call's
+  // arguments, so a test can see what the dialog was parented to.
+  function holdDialog() {
+    const answers: ((value: { response: number }) => void)[] = [];
+    dialogShowMessageBox.mockImplementation(
+      () => new Promise<{ response: number }>((resolve) => answers.push(resolve)),
+    );
+    return {
+      answer: (response: number): void => answers.shift()?.({ response }),
+      calls: (): unknown[][] => dialogShowMessageBox.mock.calls as unknown as unknown[][],
+    };
+  }
+
+  // A typed run up to the moment a gate fires: bar open, FOCUSED, input submitted.
+  async function submitted(): Promise<void> {
+    const capture = shell.showInput();
+    ipcMain.emit("commandbar:submit", {}, "file this bug and tell the team");
+    await capture;
+  }
+
+  const sentOn = (channel: string): unknown[] =>
+    window.sent.filter((entry) => entry.channel === channel).map((entry) => entry.args[0]);
+
+  it("reproduces the chain: a result shown INACTIVE between two confirms no longer leaves the bar up", async () => {
+    const dialog = holdDialog();
+    await submitted();
+
+    // Step 2's gate. The bar had focus, so even the old code got this one right.
+    const second = shell.confirm("Step 2 of 3: Create this Linear issue in Engineering?");
+    await Promise.resolve();
+    expect(window.isVisible()).toBe(false);
+    dialog.answer(0);
+    await expect(second).resolves.toBe(true);
+
+    // Step 2's result: the bar is visible again and — this is the precondition the bug needs —
+    // NOT focused, so no blur will ever hide it.
+    shell.showResult("Created SEJ-9: Login broken");
+    expect(window.isVisible()).toBe(true);
+    expect(window.isFocused()).toBe(false);
+
+    // Step 3's gate, the one that was covered.
+    const third = shell.confirm("Step 3 of 3: Send to #social?");
+    await Promise.resolve();
+    expect(shell.isConfirmPending()).toBe(true);
+    expect(window.isVisible()).toBe(false);
+    expect(escapeHandler()).toBeUndefined();
+
+    dialog.answer(0);
+    await expect(third).resolves.toBe(true);
+  });
+
+  it("parents every dialog to the bar window, so Windows keeps it above the bar and above other apps", async () => {
+    const dialog = holdDialog();
+    await submitted();
+
+    const asking = shell.confirm("Send to #social?");
+    await Promise.resolve();
+
+    const [parent, options] = dialog.calls()[0] ?? [];
+    expect(parent).toBe(window);
+    // The safety properties of the dialog itself are untouched by the reparenting.
+    expect(options).toMatchObject({
+      buttons: ["Send", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "Send to #social?",
+    });
+
+    dialog.answer(1);
+    await asking;
+  });
+
+  it("hides the bar whether or not it had focus", async () => {
+    for (const focused of [true, false]) {
+      const dialog = holdDialog();
+      window = makeWindow();
+      shell = new WindowsShell(window as unknown as Electron.BrowserWindow);
+      if (focused) window.show();
+      else window.showInactive();
+      expect(window.isFocused()).toBe(focused);
+
+      const asking = shell.confirm("Send?");
+      await Promise.resolve();
+      expect(window.isVisible(), `focused: ${String(focused)}`).toBe(false);
+
+      dialog.answer(1);
+      await asking;
+    }
+  });
+
+  it("does not treat hiding for the dialog as a dismissal", async () => {
+    const dialog = holdDialog();
+    let dismissed = 0;
+    shell.onDismissed(() => (dismissed += 1));
+    await submitted();
+    const resetsBefore = sentOn("commandbar:reset").length;
+
+    const asking = shell.confirm("Send?");
+    await Promise.resolve();
+
+    // Nothing was abandoned and the bar's contents were not wiped: it is coming back.
+    expect(dismissed).toBe(0);
+    expect(sentOn("commandbar:reset")).toHaveLength(resetsBefore);
+
+    dialog.answer(0);
+    await asking;
+    expect(dismissed).toBe(0);
+  });
+
+  it("keeps the bar hidden, and Escape released, whatever tries to show it while the dialog is up", async () => {
+    vi.useFakeTimers();
+    const dialog = holdDialog();
+    await submitted();
+    // An auto-hide already ticking from an earlier, unfocused result.
+    window.focused = false;
+    shell.showResult("an earlier result");
+
+    const resetsBefore = sentOn("commandbar:reset").length;
+    let answered: boolean | null = null;
+    const asking = shell.confirm("Step 3 of 3: Send to #social?").then((value) => {
+      answered = value;
+      return value;
+    });
+    await Promise.resolve();
+
+    const check = (what: string): void => {
+      expect(window.isVisible(), what).toBe(false);
+      expect(escapeHandler(), what).toBeUndefined();
+      expect(shell.isConfirmPending(), what).toBe(true);
+      expect(answered, what).toBeNull();
+      // Nothing ran the dismissal path either: the bar's contents are intact for its return.
+      expect(sentOn("commandbar:reset"), what).toHaveLength(resetsBefore);
+    };
+    check("at the start");
+
+    // FIRST, before anything else touches the bar: the auto-hide timer that was already
+    // ticking. It must come first because narrate() cancels that timer as a side effect — with
+    // the order the other way round this step asserted on a timer that no longer existed, and a
+    // mutation removing the cancel in confirm() survived it.
+    vi.advanceTimersByTime(60_000);
+    check("after the earlier auto-hide timer's deadline");
+
+    // The instruction hotkey's "there's a confirmation waiting" goes out through narrate() —
+    // the path that used to re-show the bar straight over the dialog it was pointing at.
+    shell.narrate("There's a confirmation waiting — answer it on screen.");
+    check("after narrate()");
+    shell.showResult("a result that landed late");
+    check("after showResult()");
+    shell.handleBlur();
+    check("after a blur");
+
+    // The words were still delivered — only the window was left alone.
+    expect(sentOn("commandbar:status")).toContain(
+      "There's a confirmation waiting — answer it on screen.",
+    );
+    expect(sentOn("commandbar:echo")).toContain("a result that landed late");
+
+    dialog.answer(1);
+    await expect(asking).resolves.toBe(false);
+  });
+
+  // Escape is bound to the window's "show" event. Even if some path this file has not thought
+  // of DOES show the bar mid-dialog, the key must stay with the dialog — where it means Cancel.
+  it("does not take Escape back even if the window itself is shown mid-dialog", async () => {
+    const dialog = holdDialog();
+    await submitted();
+    const asking = shell.confirm("Send?");
+    await Promise.resolve();
+
+    window.showInactive(); // behind the shell's back
+    expect(escapeHandler()).toBeUndefined();
+
+    dialog.answer(1);
+    await asking;
+    // And it is re-armed afterwards, because that bar is now on screen.
+    expect(escapeHandler()).toBeDefined();
+  });
+
+  it("brings the bar back after the answer, unfocused, with Escape re-armed", async () => {
+    for (const response of [0, 1]) {
+      const dialog = holdDialog();
+      window = makeWindow();
+      shell = new WindowsShell(window as unknown as Electron.BrowserWindow);
+      await submitted();
+
+      const asking = shell.confirm("Send?");
+      await Promise.resolve();
+      dialog.answer(response);
+      await asking;
+
+      expect(window.isVisible(), `response ${response}`).toBe(true);
+      // showInactive, never show: the answer was given in the dialog and the bar must not
+      // pull focus back from wherever it went.
+      expect(window.isFocused(), `response ${response}`).toBe(false);
+      expect(escapeHandler(), `response ${response}`).toBeDefined();
+    }
+  });
+
+  it("shows the result of the approved action in the restored bar", async () => {
+    const dialog = holdDialog();
+    await submitted();
+    const asking = shell.confirm("Step 3 of 3: Send to #social?");
+    await Promise.resolve();
+    dialog.answer(0);
+    await asking;
+
+    shell.showResult("Sent to #social.");
+
+    expect(window.isVisible()).toBe(true);
+    expect(sentOn("commandbar:echo")).toContain("Sent to #social.");
+  });
+
+  it("does not leave a restored, unfocused bar on screen forever", async () => {
+    // A cancelled lone confirm produces no result, so nothing else would ever hide this bar:
+    // it has no focus to lose. It gets the same auto-hide an unfocused result gets.
+    vi.useFakeTimers();
+    const dialog = holdDialog();
+    await submitted();
+    const asking = shell.confirm("Send?");
+    await Promise.resolve();
+    dialog.answer(1);
+    await asking;
+    expect(window.isVisible()).toBe(true);
+
+    vi.advanceTimersByTime(13_000);
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("does not conjure a bar for a confirm that was asked with none showing", async () => {
+    const dialog = holdDialog();
+    expect(window.isVisible()).toBe(false);
+
+    const asking = shell.confirm("Send?");
+    await Promise.resolve();
+    // Still parented: the dialog must be topmost even with no bar on screen.
+    expect(dialog.calls()[0]?.[0]).toBe(window);
+    dialog.answer(0);
+    await asking;
+
+    expect(window.isVisible()).toBe(false);
+    expect(escapeHandler()).toBeUndefined();
+  });
+
+  it("restores the bar and clears the flag even when the dialog throws", async () => {
+    await submitted();
+    dialogShowMessageBox.mockImplementation(() => Promise.reject(new Error("dialog exploded")));
+
+    await expect(shell.confirm("Send?")).rejects.toThrow("dialog exploded");
+
+    expect(shell.isConfirmPending()).toBe(false);
+    expect(window.isVisible()).toBe(true);
+    expect(escapeHandler()).toBeDefined();
+  });
+
+  // The real hotkey handler over the real shell. Guard order is unchanged — this is what the
+  // user-visible half of it now does while a dialog is up.
+  it("answers the instruction hotkey with 'confirmation waiting' without opening the bar over the dialog", async () => {
+    const dialog = holdDialog();
+    await submitted();
+    const speaker = fakeSpeaker();
+    let ran = 0;
+    const onHotkey = createOnInstructionHotkey({
+      shell,
+      dictation: null,
+      voice: null,
+      speech: speaker,
+      // A chain is running too, as it is when a chained step is parked at its gate. Confirm
+      // pending must still be the answer given.
+      chain: { isRunning: () => true },
+      runInstruction: () => {
+        ran += 1;
+        return Promise.resolve();
+      },
+    });
+
+    const asking = shell.confirm("Step 3 of 3: Send to #social?");
+    await Promise.resolve();
+    onHotkey();
+    await flush();
+
+    expect(sentOn("commandbar:status")).toContain(CONFIRM_WAITING);
+    expect(sentOn("commandbar:status")).not.toContain(CHAIN_RUNNING);
+    expect(speaker.calls.some((call) => call.startsWith("speak:"))).toBe(true);
+    expect(window.isVisible()).toBe(false);
+    expect(escapeHandler()).toBeUndefined();
+    expect(shell.isConfirmPending()).toBe(true);
+    expect(ran).toBe(0);
+
+    dialog.answer(1);
+    await asking;
   });
 });

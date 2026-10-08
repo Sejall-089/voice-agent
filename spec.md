@@ -2083,13 +2083,14 @@ Post-v0:
       gating are unchanged; hand-built Gmail, Notion and Calendar are untouched. See §6e, §5b's
       "Chains and connectors", and "M19 — proven vs. live-only" below.
 
-**v0 status: complete.** **1125 tests green** (`npm test`) across 62 files, plus 50 skipped —
+**v0 status: complete.** **1138 tests green** (`npm test`) across 62 files, plus 50 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
 993, in five new files: 17 for the connection and failure classification
 (`mcpConnection.test.ts`), 16 for the config loader (`mcpConfig.test.ts`), 50 for the adapter,
 tiers, flattening and formatters (`mcpAdapter.test.ts`), 7 for the loader (`mcpLoad.test.ts`),
 40 for the planner end to end (`planner.mcp.test.ts`), and 2 new registry invariants in
-`risk.test.ts`. The M18 count follows: 993 across 57 files, plus 46 skipped. M18's live pass added 49 to
+`risk.test.ts`. The first live finding (the covered confirm dialog, 2026-10-09) added 13 more in
+`WindowsShell.capture.test.ts`, taking 1125 to 1138. The M18 count follows: 993 across 57 files, plus 46 skipped. M18's live pass added 49 to
 the 944 it shipped with: the input-host protocol layer (`hostChannel.test.ts`), the percent
 conversion and wording, and the not-installed launch failure. As shipped, M18 added 146 over
 M17's 798, in five new files: 28 for the app catalog (`apps.test.ts`), 40 for the launch table
@@ -2347,8 +2348,52 @@ added to close it.
 - The first-call latency of a lazily opened connection.
 - A real create through the adapter. Deliberately never automated.
 
+**What the live pass has found so far (2026-10-09).**
+
+1. **The confirm dialog was covered by the instruction bar.** On the first live chain, step 3's
+   dialog opened behind the bar with its text and both buttons hidden. The bar is an
+   always-on-top window in the centre of the screen and the dialog was unparented in the same
+   place; what had kept them apart since M5 was a side effect (the dialog takes focus → the bar
+   blurs → the blur handler hides it) that only works for a bar that *had* focus. A chain's
+   step result re-shows the bar with `showInactive()`, and an unfocused window never blurs.
+   **Fixed in `WindowsShell.confirm()`**, with three rules that now hold for every confirm, not
+   only chained ones:
+   - the dialog is **parented to the bar window** — Windows keeps an owned window above its
+     owner whatever the owner does, and an owned window of a topmost window is topmost, so
+     neither the bar nor another application can cover it;
+   - the bar is **hidden for the dialog's lifetime** by a plain window hide (not the dismissal
+     path: no capture is ended, nothing is reset) and **restored afterwards if it was showing**,
+     unfocused, with the same auto-hide an unfocused result gets;
+   - **while a confirm is pending, nothing shows the bar, arms the global Escape, or runs the
+     dismissal path** — `narrate()` and `showResult()` deliver their text and leave the window
+     alone, `registerEscape()` refuses, and a blur is ignored. This closed a second route into
+     the same bug: the hotkey's "there's a confirmation waiting" re-showed the bar over the
+     dialog and took Escape back from it.
+
+   The hotkey guard order is unchanged (dictation → confirm pending → chain running), and
+   Escape on a focused dialog is still the dialog's own Cancel. 13 more tests in
+   `tests/WindowsShell.capture.test.ts` hold the dialog open and assert what the shell did with
+   the window while it was up; ten rules were broken one at a time and all ten are caught (one
+   survived the first pass — a test step ran after `narrate()` had already cancelled the timer
+   it was meant to exercise — and was reordered). One existing test was **re-justified rather
+   than re-run**: "does not re-arm after the dialog if the bar was hidden in the meantime" set
+   itself up by hiding the bar mid-dialog, which `confirm()` now does itself, so its
+   precondition distinguished nothing and its expectation had become wrong. **None of that
+   proves the dialog is visible**: z-order is something Windows does with real windows, so
+   `scripts/confirm-zorder-recon.cjs` measures it (0/9 points on top before, 9/9 after) and the
+   re-check by a person is in the checklist.
+
+   One visible change outside chains: a **declined lone confirm** used to leave the bar hidden;
+   it now comes back briefly and hides itself.
+
 **Follow-up list (not M19).**
 
+- **Esc to stop speaking cancels a pending confirm.** Escape is this app's "be quiet" key, and
+  it is also the native dialog's Cancel. The app speaks the confirm question, so someone
+  silencing it with Esc cancels the confirm — fail-safe (nothing is sent), but it stops a chain.
+  Left as native Cancel by decision. One idea, not designed: stop speaking the question a
+  different way, or do not speak it while the dialog has focus. Electron offers no clean way to
+  turn Esc off on this dialog without risking it mapping to the first button, which is Send.
 - **Standalone `sendMessage` reformats after the confirm.** The dialog shows a 140-character
   preview of the notes; the handler then rewrites them through a model and sends that. What is
   sent is not what was approved. Fixed for chains in M19; unchanged for a lone send.

@@ -1,7 +1,7 @@
 # M19 — live verification checklist (by hand)
 
 > **OPEN. Nothing below has been run by a person yet.** M19 is code-complete and tested headless
-> (1125 tests), and two scripts have exercised real code against the real Linear workspace —
+> (1138 tests), and two scripts have exercised real code against the real Linear workspace —
 > read-only. No one has yet seen the app do any of this.
 >
 > Written before the live pass, like M18's: each item names what could actually be wrong. Every
@@ -123,6 +123,38 @@ Open a real bug-report email in the debug Chrome's Gmail tab, then say something
 - [ ] The issue in Linear has the email as its description, unmodified.
 - [ ] The `[main]` line ends `(chain 3/3)`.
 
+### The dialogs themselves — the first live bug (fixed; re-check it)
+
+The first live chain showed step 3's dialog **covered by the instruction bar**: text and both
+buttons hidden. Cause and fix are under "Live results" at the bottom. These items are the
+re-check, and the fix is not done until a person has ticked them.
+
+- [ ] **Step 2's dialog is fully visible**: the question, the title, the whole email, and both
+      buttons. The bar is **not on screen** while it is up.
+- [ ] **Step 3's dialog is fully visible** the same way. This is the one that was covered.
+- [ ] **Mouse:** click **Send** on step 2. It registers on the first click.
+- [ ] **Keyboard:** on step 3, press **Tab** to move to Send and **Enter** to choose it — the
+      dialog has keyboard focus without your having to click it first. *(The default button is
+      Cancel on purpose, so a bare Enter must cancel, never send. Check that too on another
+      run: Enter alone → cancelled.)*
+- [ ] **When the app is not the foreground app.** Start the chain, and while step 2's Linear
+      call is in flight click into another window (Chrome, the editor). Step 3's dialog must
+      still appear **on top of that window**, readable and clickable. Note whether it also takes
+      keyboard focus or needs one click first — this is the one thing no script could measure.
+- [ ] While a dialog is up, press the instruction hotkey. You hear "There's a confirmation
+      waiting", and **the bar does not appear over the dialog.**
+- [ ] While a dialog is up, press **Esc**. The dialog cancels (native behaviour, unchanged);
+      nothing is sent, and the chain reports what did and did not run.
+- [ ] **After the chain, the final result still shows in the bar** — `Sent to #…` and the
+      message — and the bar goes away on its own a few seconds later.
+- [ ] Decline a **lone** send (`send these to <channel>` → Cancel). The bar comes back briefly
+      and then hides itself. *(New behaviour: before the fix it simply stayed hidden.)*
+
+Script-verified on 2026-10-09 by `npx electron scripts/confirm-zorder-recon.cjs`, which asks
+Windows which window is on top at nine points across the dialog: **0/9 before the fix, 9/9
+after**, including with the bar hidden or re-shown while the dialog is up. That is z-order, not
+a person reading the dialog.
+
 ### The long-email case
 
 - [ ] Do it again with a **long** email (a thread, a stack trace — several screens).
@@ -201,4 +233,31 @@ For each surprise: what you said, what you saw, the `[main]` line. In particular
 
 ## Live results
 
-*(none yet)*
+### 1. The confirm dialog was covered by the instruction bar (2026-10-09) — fixed, re-check owed
+
+**Seen:** in a three-step chain, "Step 3 of 3: Send to #social?" appeared partly behind the bar
+("Speak, or type… (Enter to run · Esc to cancel)"). The dialog's text and the Send/Cancel
+buttons were hidden.
+
+**Cause:** the bar is an always-on-top window in the centre of the screen, and the dialog was
+opened with no parent in the same place. The only thing that had ever kept them apart was a
+side effect — the dialog takes focus, the bar blurs, the blur handler hides it — which works
+only for a bar that *had* focus. After step 2, `showResult` re-shows the bar with
+`showInactive()`; an unfocused window never blurs, so step 3's dialog opened underneath it.
+Step 2 was fine on a typed run for the same reason step 3 was not. A second route into the same
+bug: pressing the hotkey mid-dialog narrated "confirmation waiting" by re-showing the bar, which
+also took the Escape key back from the dialog.
+
+**Fix (`WindowsShell.confirm`):** the dialog is parented to the bar window, so Windows keeps it
+above the bar and above other applications; the bar is hidden for the dialog's lifetime and
+brought back afterwards if it was showing; and while a confirm is pending nothing may show the
+bar, arm Escape, or run the dismissal path. 13 more tests (12 new, plus one existing test re-justified and split in two), each rule checked by breaking it.
+
+**Why no test caught it:** which of two windows is in front is not a decision the shell makes
+and can be asserted on. `scripts/confirm-zorder-recon.cjs` now measures it.
+
+**Still owed:** the items under "The dialogs themselves" in section 4.
+
+**Noted, not fixed (follow-up list, spec.md §9):** Esc is both "stop speaking" and the dialog's
+Cancel, and the app speaks the confirm question — so silencing it with Esc cancels the confirm.
+It fails safe (nothing is sent) but it stops the chain.

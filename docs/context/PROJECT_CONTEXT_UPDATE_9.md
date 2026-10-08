@@ -14,7 +14,7 @@ three milestones behind.
 - **M18 — opening apps and local media control.** Shipped; its live pass found four bugs and is
   ticked with items still open. `docs/M18-live-checklist.md`.
 - **M19 — MCP support, Linear first.** **Code-complete, pushed, and never run by a person.**
-  1125 tests pass, both typechecks clean, `npm run build` clean. The milestone box in spec.md §9
+  1138 tests pass, both typechecks clean, `npm run build` clean. The milestone box in spec.md §9
   is deliberately unticked until the live checklist is done.
 
 ## What M19 is
@@ -80,7 +80,23 @@ for them. Linear's search turned out to be fuzzy (found by the live check). Deta
 5. Tick the M19 box in spec.md §9 only after the live pass, and record what it found in the
    checklist's "Live results".
 
+## Live pass, so far (2026-10-09)
+
+The first live chain found the first bug: **step 3's confirm dialog opened behind the
+instruction bar**, text and buttons covered. The always-on-top bar had only ever been kept clear
+of the dialog by losing focus; a chain's step result re-shows it unfocused. Fixed in
+`WindowsShell.confirm()` — the dialog is parented to the bar window, the bar is hidden for the
+dialog's lifetime and restored after, and nothing may show the bar or arm Escape while a confirm
+is pending. 13 more tests; `scripts/confirm-zorder-recon.cjs` measures the z-order. **A person
+re-checking it is still owed** — the items under "The dialogs themselves" in section 4 of the
+checklist, including the one no script could measure: whether the dialog takes keyboard focus
+when the app is not the foreground app.
+
 ## Follow-up list (carried, not started)
+
+- Esc is both "stop speaking" and the confirm dialog's Cancel, and the app speaks the confirm
+  question, so silencing it cancels the confirm. Left as native Cancel by decision (2026-10-09).
+  Idea, not designed: stop speaking the question some other way.
 
 - Standalone `sendMessage` reformats the notes through a model *after* the confirm; what is sent
   is not what was approved. Fixed for chains only.

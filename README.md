@@ -694,7 +694,7 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M19 (MCP + Linear) is code-complete and has never been run by a human (1125 tests, 62
+**M19 (MCP + Linear) is code-complete and has never been run end to end by a human (1138 tests, 62
 files).** Said first for the same reason it was said about M18: every milestone from M10 on has
 produced at least one live bug no fixture caught. `docs/M19-live-checklist.md` is the list, and
 it starts with a regression check, because M19 touched three things every instruction passes
@@ -716,6 +716,14 @@ the team" (the known weak spot — a worked example was added to help, and an op
 it), what title it writes, how the long confirm dialog behaves in a person's hands, and a real
 issue being created through the app. **No test or script ever creates a real Linear issue** —
 that happens once, by hand, from the checklist.
+
+**The live pass has started, and found its first bug on the first chain (2026-10-09):** step 3's
+confirm dialog opened *behind* the instruction bar, with its text and both buttons covered. The
+bar is always-on-top and had only ever been kept clear of the dialog by happening to lose
+focus — which a chain's step result prevents. Fixed: the dialog is now attached to the bar
+window so Windows keeps it on top, and the bar steps out of the way for as long as any confirm
+is up. A script measures the result (`npx electron scripts/confirm-zorder-recon.cjs`); a person
+re-checking it is still owed, and is in the checklist.
 
 **One known gap, deliberately not fixed in M19:** a *standalone* "send these to the team" shows
 a short preview and then reformats your notes through the model *after* you approve. Inside a
