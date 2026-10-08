@@ -2386,8 +2386,53 @@ added to close it.
    One visible change outside chains: a **declined lone confirm** used to leave the bar hidden;
    it now comes back briefly and hides itself.
 
+2. **A plan that skipped `readEmail` filed an issue about nothing.** "File this bug in Linear and
+   tell the social channel", with a bug email open, was planned as two steps — create, then
+   send — and the create's description was written by the model ("Filed from the desktop
+   assistant. User instruction provided: …"). The confirm gate fired and was approved, so a real
+   issue (SEJ-7) was created with no email in it; step 2 then refused on an unknown channel. The
+   same words a minute later came back as chat asking for the details. Cause: the planner sees
+   only the clipboard — `WindowsShell.getContext()` returns null for the window title and app —
+   so "this bug" pointed at nothing, and no wording said that content the user is pointing at
+   must be *read by a tool*, never invented or asked for. **Fixed by wording only (Part A)**, in
+   three places: the planner prompt (never invent content, never ask for what a listed tool can
+   read; plan the read as an earlier step), `readEmail`'s description ("this email / this bug /
+   this report" → `readEmail` first), and `linear__create_issue`'s description (the description
+   is the user's words or an earlier step's result, never made up; omit it if there is nothing).
+   Measured with the opt-in eval, three trials per phrase, as the app sees it (no window title):
+
+   | Phrase | Before | After |
+   |---|---|---|
+   | file this bug in Linear and tell the social channel | 3/3 | 3/3 |
+   | log this as an issue and let #bugs know | 2/3 (one chat reply) | 3/3 |
+   | find the login issue in Linear (single-tool control) | 3/3 | 3/3 |
+   | reply to this and send it (must not gain `readEmail`) | — | 3/3 |
+
+   **What that does and does not show.** The control held and nothing was over-taught. But the
+   live-failing phrase already passed 3/3 *before* the change — the eval never reproduced the
+   live failure, so it cannot show the change fixed it. The live run differed in ways the eval
+   does not model: whatever was on the clipboard, and the previous turn in the prompt. The
+   earlier single-trial run also had this phrase's neighbour choose `summarize` once. Treat the
+   wording as a reasonable tightening with a clean bill on over-teaching, not as a proven fix;
+   the live re-run is what decides it. **Part B — telling the planner that an email is open in
+   Gmail — is deliberately not built**, and is to be proposed again only if this fails live.
+
 **Follow-up list (not M19).**
 
+- **A chain stops AFTER the issue is created when the Slack channel is unknown, orphaning the
+  issue.** `sendMessage` refuses an unresolved channel ("the social channel" with no fact for
+  it) in its own handler — at step 3, by which time step 2 has already created a real issue
+  nobody was told about (SEJ-7 and SEJ-8 in live testing). Everything structurally knowable is
+  meant to be settled before a plan is narrated (§5b); whether a channel reference resolves is
+  knowable then, and is not checked. Not designed: it needs a way for a tool to pre-flight its
+  arguments at plan-validation time without that becoming a second gate.
+- **The confirm dialog's approve button says "Send" on every confirm, including a create.**
+  `WindowsShell.confirm()` hard-codes `buttons: ["Send", "Cancel"]`, which was accurate while
+  the only `dangerous` tools sent something (Slack, Gmail). It now also fronts
+  `linear__create_issue` and calendar events with guests, where "Send" describes nothing — and
+  it was the button pressed to approve SEJ-7. Name it after the action ("Create issue", "Send
+  message"). Not designed: the label has to come from the tool, so it needs a way to reach
+  `shell.confirm()` (today it takes one string), with "Cancel" staying the default button.
 - **Esc to stop speaking cancels a pending confirm.** Escape is this app's "be quiet" key, and
   it is also the native dialog's Cancel. The app speaks the confirm question, so someone
   silencing it with Esc cancels the confirm — fail-safe (nothing is sent), but it stops a chain.

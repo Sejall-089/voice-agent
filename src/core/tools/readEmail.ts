@@ -24,8 +24,12 @@ export const readEmailTool: Tool = {
     "Read the email currently open in Gmail and return its sender, subject and full text. Use " +
     "this when the user asks what the open email says, or as the FIRST step of a plan that " +
     "needs the email's content for a later step — for example filing it as an issue, or adding " +
-    "it to a page. Do NOT use this before draftReply: that tool reads the email itself. This " +
-    "only reads; it changes nothing in Gmail.",
+    "it to a page. When the user points at what they are looking at — 'this email', 'this " +
+    "bug', 'this report', 'this message' — and another tool needs its content, plan readEmail " +
+    "as the first step and pass its result on as {step1}; do not ask them to paste it and do " +
+    "not write the content yourself. (If the request shows selected text, 'this' usually means " +
+    "that text instead.) Do NOT use this before draftReply: that tool reads the email itself. " +
+    "This only reads; it changes nothing in Gmail.",
   inputSchema: { type: "object", properties: {} },
   risk: "safe",
   handler: async (_input: ToolInput, deps: ToolDeps): Promise<string> => {

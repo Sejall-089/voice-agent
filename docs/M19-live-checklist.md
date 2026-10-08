@@ -258,6 +258,43 @@ and can be asserted on. `scripts/confirm-zorder-recon.cjs` now measures it.
 
 **Still owed:** the items under "The dialogs themselves" in section 4.
 
+### 2. A two-step plan skipped `readEmail` and filed an empty issue (2026-10-08) — wording changed, live re-run owed
+
+**Said:** "file this bug in Linear and tell the social channel", bug email open in Gmail.
+
+**Seen, from the action log:** the model planned create → send with no read. The create's
+description was invented ("Filed from the desktop assistant. User instruction provided: …"); the
+confirm dialog fired and was approved; **SEJ-7 was created with no email in it**; step 2 refused
+on the unknown channel. The same words again came back as chat asking for the details.
+"Read this email, file it as a bug in Linear, and post the link in the social channel" planned
+all three steps and worked.
+
+**Cause:** the planner is not told an email is open — it sees the clipboard and nothing else —
+and nothing said that content the user points at must be read by a tool rather than invented.
+
+**Change (wording only):** the planner prompt, `readEmail`'s description and
+`linear__create_issue`'s description. Eval, 3 trials each: the two chain phrases 3/3 and 3/3
+after (5/6 before), the single-tool control 3/3, "reply to this and send it" 3/3 with no
+`readEmail`. **The eval never reproduced the live failure** (that phrase was 3/3 before too), so
+it shows nothing was over-taught, not that the bug is fixed.
+
+**Still owed — re-run these by hand:**
+
+- [ ] "file this bug in Linear and tell the social channel" with the email open → **three**
+      steps, `readEmail` first. Try it three times, and at least once with unrelated text on
+      the clipboard.
+- [ ] If it plans two steps again: **decline the create dialog** (its description will be
+      something you never wrote), and note what was on the clipboard. That is the case for
+      Part B (telling the planner an email is open).
+- [ ] "find the login issue in Linear" is still one step, no plan preview.
+- [ ] "reply to this and send it" is still two steps, and does not read the email separately.
+
+**Clean-up:** SEJ-7 (the empty issue) and SEJ-8 (created, then the Slack step refused) are
+orphans from this. SEJ-5 is the recon issue.
+
+**Noted, not fixed (follow-up list, spec.md §9):** a chain stops *after* the issue is created
+when the Slack channel is unknown — which is how SEJ-7 and SEJ-8 were orphaned.
+
 **Noted, not fixed (follow-up list, spec.md §9):** Esc is both "stop speaking" and the dialog's
 Cancel, and the app speaks the confirm question — so silencing it with Esc cancels the confirm.
 It fails safe (nothing is sent) but it stops the chain.

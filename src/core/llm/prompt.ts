@@ -41,6 +41,16 @@ export const CHOOSE_SYSTEM = [
   "call the `plan` tool instead and give it the steps. Never put a single step in a plan, and",
   "never plan a step whose arguments you cannot write down now: you will not be consulted",
   "again once you answer, and the steps run exactly as you wrote them.",
+  // M19 live finding. Asked to "file this bug in Linear and tell the social channel" with an
+  // email open, the model planned create + send with no read, and filled the issue with a
+  // description it made up — a real ticket, approved by a person, about nothing. On the retry
+  // it asked for the details in chat instead. Both are the same gap: nothing said that content
+  // the user is POINTING at has to be fetched by a tool, and may be neither invented nor asked
+  // for. Stated here, once, as a rule about every tool rather than about email.
+  "Never invent content the user did not give you, and never ask the user for something a",
+  "tool in the list can read. When a step needs what the user is looking at or referring to —",
+  "an open email, a schedule — plan the tool that reads it as an EARLIER step and pass its",
+  "result on with {stepN}.",
   "If no tool fits: when you have something genuinely useful to tell the user — a clarifying",
   "question needed before you could act, or a specific reason this particular request can't be",
   "done — reply with that, in one or two plain sentences. If the request simply does not match",

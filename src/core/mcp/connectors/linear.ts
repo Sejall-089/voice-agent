@@ -47,7 +47,11 @@ export const linearConnector: ConnectorDef = {
         "Use this when the user asks to file, create, open or log an issue, ticket or bug in " +
         "Linear. Write `title` yourself: one short line saying what the issue is, taken from " +
         "what the user said. Put the detail in `description` — in a plan this is normally an " +
-        "earlier step's whole result, e.g. {step1} after reading an email. This cannot edit or " +
+        "earlier step's whole result, e.g. {step1} after reading an email. The description " +
+        "must be the user's own words or an earlier step's result: NEVER make one up, and never " +
+        "fill it with a note about the instruction or where the issue was filed from. If the " +
+        "issue is about something the user is looking at, a step that reads it comes first; if " +
+        "there is genuinely nothing to put there, leave `description` out. This cannot edit or " +
         "close an existing issue. The result is the new issue's identifier and its link.",
       inputSchema: {
         type: "object",

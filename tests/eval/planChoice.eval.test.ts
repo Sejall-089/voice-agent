@@ -111,18 +111,62 @@ const TOLD_GMAIL_IS_OPEN: Seen = {
   },
 };
 
-const results: { seen: string; phrase: string; expected: string; chosen: string }[] = [];
+// The measurement set for a wording change: the live failure, the one phrase that missed in the
+// first eval, and the single-tool control.
+const CORE = [
+  "file this bug in Linear and tell the social channel",
+  "log this as an issue and let #bugs know",
+  "find the login issue in Linear",
+] as const;
+
+// Phrases that must NOT pick up a `readEmail` step however hard the descriptions push it.
+// `draftReply` reads the email itself, and its two-step chain has worked since M17.
+const OVERTEACH: readonly Case[] = [
+  { phrase: "reply to this and send it", expected: ["draftReply", "sendReply"] },
+];
+
+const results: {
+  seen: string;
+  phrase: string;
+  expected: string;
+  chosen: string;
+  note: string;
+}[] = [];
 
 describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19)", () => {
-  const runs = [
-    ...CASES.map((entry) => ({ ...entry, seen: AS_THE_APP_SEES_IT })),
-    ...CASES.filter((entry) => entry.expected === BUG_CHAIN).map((entry) => ({
-      ...entry,
-      seen: TOLD_GMAIL_IS_OPEN,
-    })),
-  ];
-  for (const { phrase, expected, seen } of runs) {
-    it(`[${seen.label}] "${phrase}" -> ${expected.join(" > ")}`, async () => {
+  // WHICH RUN. One trial of a model's choice is an anecdote: the live-failing phrase passed its
+  // first single trial here, having failed twice in the app. So a wording change is measured on
+  // a small fixed set, several times, before and after.
+  //
+  //   M19_PLAN_SET=all        (default) every phrase once, in both contexts            9 calls
+  //   M19_PLAN_SET=core       the three CORE phrases, as the app sees them, x TRIALS   3 x TRIALS
+  //   M19_PLAN_SET=overteach  the phrases that must NOT gain a readEmail step          1 x TRIALS
+  //   M19_PLAN_TRIALS=3       repeats per phrase (default 1)
+  const set = process.env["M19_PLAN_SET"] ?? "all";
+  const trials = Math.max(1, Number(process.env["M19_PLAN_TRIALS"] ?? "1") || 1);
+  const pick = (phrases: readonly string[], from: readonly Case[]): Case[] =>
+    phrases.map((phrase) => {
+      const found = from.find((entry) => entry.phrase === phrase);
+      if (found === undefined) throw new Error(`no case for "${phrase}"`);
+      return found;
+    });
+  const selected =
+    set === "core"
+      ? pick(CORE, CASES).map((entry) => ({ ...entry, seen: AS_THE_APP_SEES_IT }))
+      : set === "overteach"
+        ? OVERTEACH.map((entry) => ({ ...entry, seen: AS_THE_APP_SEES_IT }))
+        : [
+            ...CASES.map((entry) => ({ ...entry, seen: AS_THE_APP_SEES_IT })),
+            ...CASES.filter((entry) => entry.expected === BUG_CHAIN).map((entry) => ({
+              ...entry,
+              seen: TOLD_GMAIL_IS_OPEN,
+            })),
+          ];
+  const runs = selected.flatMap((entry) =>
+    Array.from({ length: trials }, (_, index) => ({ ...entry, trial: index + 1 })),
+  );
+  for (const { phrase, expected, seen, trial } of runs) {
+    it(`[${seen.label}] #${trial} "${phrase}" -> ${expected.join(" > ")}`, async () => {
       const choice = await createLLMClient().chooseTool(phrase, seen.context, MENU, null);
 
       // A chat reply IS a choice, and its words are the diagnosis — the planner logs a miss
@@ -137,11 +181,22 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
           : choice.kind === "tool"
             ? [choice.name]
             : [`(${choice.kind}${said})`];
+      // What went into the issue when the plan did NOT read the email first — the live run
+      // filed one whose description the model had simply made up.
+      const create =
+        choice.kind === "plan"
+          ? choice.steps.find((step) => step.tool === "linear__create_issue")
+          : undefined;
+      const invented =
+        create !== undefined && !chosen.includes("readEmail")
+          ? `   [description: ${JSON.stringify(create.arguments["description"] ?? null).slice(0, 110)}]`
+          : "";
       results.push({
         seen: seen.label,
         phrase,
         expected: expected.join(" > "),
         chosen: chosen.join(" > "),
+        note: invented,
       });
       expect(chosen).toEqual(expected);
 
@@ -165,7 +220,7 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
         "  PLAN CHOICE — what the real model actually answered",
         ...results.map(
           (r) =>
-            `  ${r.chosen === r.expected ? "ok      " : "MISMATCH"}  [${r.seen}] "${r.phrase}"\n            -> ${r.chosen}`,
+            `  ${r.chosen === r.expected ? "ok      " : "MISMATCH"}  [${r.seen}] "${r.phrase}"\n            -> ${r.chosen}${r.note}`,
         ),
         `  ${results.filter((r) => r.chosen === r.expected).length}/${results.length} matched`,
         "",
