@@ -2081,7 +2081,12 @@ Post-v0:
       pass, following M18's precedent, and the pass found three bugs no fixture caught — the
       confirm dialog covered by the instruction bar, a plan that skipped `readEmail` and filed
       an invented issue, and the clipboard taken for "this bug" (with a `functions.`-prefixed
-      tool name on top). All three are fixed. **Seen live by a person:** the Gmail → Linear →
+      tool name on top). **The covered confirm dialog is fixed. The plan-choice problem is
+      REDUCED, NOT FIXED** — an earlier version of this entry said all three were fixed, and
+      that overstated it. With an email open and other text on the clipboard, the model still
+      sometimes files the clipboard: seen live once *after* the "An email is open in Gmail."
+      hint shipped, and in 1 of 12 eval trials with long, realistic clipboard text. The confirm
+      dialog shows the text in full and is what caught it — the gate held, the plan did not. **Seen live by a person:** the Gmail → Linear →
       Slack chain working end to end; the step 2 and step 3 confirm dialogs fully visible; and,
       after the plan-choice fixes, the short instruction planning three steps with the real
       email in the description — in **one** live run. (An earlier version of this entry said
@@ -2295,7 +2300,9 @@ have to rediscover.
 **The live pass was run on 2026-10-08/09 and the box is ticked — with named gaps.** A person
 saw the proof chain work, the step 2 and step 3 dialogs fully visible, and the short instruction
 plan three steps with the real email in one live run (the clipboard's contents for that run
-were not recorded).
+were not recorded). **A later live run failed**: with a long block of text on the clipboard the
+same instruction planned two steps and offered the clipboard as the issue — finding 4 below.
+Plan choice with a non-empty clipboard is unreliable, and is not claimed as fixed.
 **Not run live, resting on tests alone:** the decline and failure cases, the long-email dialog,
 the injected-instruction email, and the `functions.` prefix rule. `docs/M19-live-checklist.md`
 has the per-item record and "Live results 4" lists the gaps. *(The rest of this section was
@@ -2503,6 +2510,45 @@ added to close it.
    model's choice measured three times**: the live re-run is what decides it, and the checklist
    has the items. `ChromeGmail.hasOpenEmail` itself is transport and has no unit test; it was
    run against the real debug Chrome.
+
+4. **After the hint shipped, the model still chose the clipboard (2026-10-09).** Bug email
+   open; on the clipboard, several paragraphs of unrelated technical text. "File this bug in
+   linear and tell the social channel" was planned as two steps — *"File a new Linear issue
+   from the selected text"*, then tell the channel — with no `readEmail`. The create dialog
+   showed title "Bug report" and the clipboard text as the description, and was cancelled:
+   nothing was created. The app was running the fixed build, and the Gmail check answers `true`
+   in 7–23 ms against that tab, so the hint was almost certainly in the prompt — *almost*,
+   because neither the log nor the console records whether it was sent.
+
+   **Why the hint was not enough**, read off the prompt itself:
+   - `readEmail`'s own description, written for finding 2, says *"If the request shows
+     selected text, 'this' usually means that text instead."* It predates the hint and now
+     contradicts it.
+   - The clipboard is labelled **"Selected text"**, which asserts the user chose it. A
+     clipboard always holds something.
+   - The hint is one short line under the instruction; a thousand characters of clipboard
+     follow it and are the last thing the model reads.
+
+   **The eval had been flattering the fix.** Its clipboard case was sixty words about an
+   offsite — nothing like a bug, and nothing like a real clipboard. Rebuilt with long text that
+   competes for the word "bug" (a message about code; prose with a stack trace), email open,
+   hint present, 3 trials each on `gpt-5`:
+
+   | Clipboard | Phrase | Read the email |
+   |---|---|---|
+   | a message about code | file this bug email in Linear and tell the bugs channel | 3/3 |
+   | a message about code | file this bug in linear and tell the social channel | 3/3 |
+   | prose + stack trace | file this bug email in Linear and tell the bugs channel | 3/3 |
+   | prose + stack trace | file this bug in linear and tell the social channel | **2/3** |
+
+   Intermittent, then, not constant — and three trials per cell cannot tell a fix from luck at
+   that rate. **Status: open.** What is approved and being built next: the `readEmail`
+   sentence removed and replaced with a rule keyed on the hint, the clipboard relabelled as
+   possibly unrelated when an email is open, the hint moved after the clipboard, the confirm
+   dialog saying so when an argument *is* the clipboard text, and the hint logged on the
+   `[main]` line. Deliberately **not** built: a code rule refusing clipboard plans whenever an
+   email is open — a background Gmail tab is common, and it would block ordinary "send these
+   notes". None of this can make a model's choice certain; the gate is what is relied on.
 
 **Follow-up list (not M19).** Everything noted during the milestone and deliberately left out
 of it. None of it is started.

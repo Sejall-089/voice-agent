@@ -699,8 +699,11 @@ A person saw the Gmail → Linear → Slack chain work end to end, the confirm d
 and 3 fully visible, and "file this bug in linear and tell the social channel" plan three steps
 with the real email — once. (The 3-of-3 figure further down is the eval's, not a person's;
 what was on the clipboard for the one live run wasn't recorded.) The pass
-found three bugs no test caught — as every milestone from M10 on has — and all three are fixed
-(below). **Not run live, covered by tests only:** the decline and failure cases, the long-email
+found three bugs no test caught, as every milestone from M10 on has. The covered confirm dialog
+is fixed. **The plan-choice problem is reduced, not fixed:** with an email open and other text
+on the clipboard, the model still sometimes offers to file *the clipboard* — seen live once after
+the fix below, and in 1 of 12 eval trials with long clipboard text. The confirm dialog shows the
+text in full, which is what caught it; if the description isn't the email, cancel. **Not run live, covered by tests only:** the decline and failure cases, the long-email
 dialog, the injected-instruction email, and the `functions.` prefix rule.
 `docs/M19-live-checklist.md` has the record, including which boxes are still open.
 

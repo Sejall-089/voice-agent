@@ -1,9 +1,11 @@
 # M19 — live verification checklist (by hand)
 
 > **CLOSED 2026-10-09, with named gaps.** The live pass was run by a person and M19's box in
-> `spec.md` §9 is ticked. The proof chain works, the confirm dialogs are fully visible, and the
-> plan-choice fix held in the one live run made after it. The pass found **three bugs no test
-> caught**, all fixed. **49 boxes below are still open** — they were not run live, and "Live results 4" at the bottom
+> `spec.md` §9 is ticked. The proof chain works and the confirm dialogs are fully visible.
+> **Plan choice with a non-empty clipboard is still unreliable — see Live results 5.** The
+> pass found three bugs no test caught: the covered confirm dialog is fixed; the plan-choice
+> problem is reduced, not fixed (an earlier version of this header said "all fixed").
+> **49 boxes below are still open** — they were not run live, and "Live results 4" at the bottom
 > says exactly which ones are covered by tests only. An open box here means *not seen by a
 > person*, not *failing*.
 >
@@ -408,3 +410,35 @@ that reaches an unknown Slack channel stops *after* creating the issue; the appr
 **Clean-up still to do in Linear, by hand** (its MCP server has no delete tool): SEJ-5 (recon),
 SEJ-6 ("test"), SEJ-7 (the empty issue), SEJ-8 and SEJ-11 (created, Slack step never sent),
 and whichever of SEJ-9, SEJ-10 and SEJ-12 are not wanted — all are copies of the same test bug.
+
+### 5. After the hint shipped, the plan still used the clipboard (2026-10-09) — OPEN
+
+**Said:** "file this bug in linear and tell the social channel". Bug email open in the debug
+Chrome. **On the clipboard:** a long block of unrelated technical text, several paragraphs.
+
+**Seen:** *Two steps: 1. File a new Linear issue from the selected text 2. Tell the social
+channel about the new issue.* No `readEmail`. The step 1 confirm dialog showed title "Bug
+report" and **the clipboard text as the description**. Cancelled — nothing was created, nothing
+posted (action log #370, `cancelled`).
+
+**Was the hint sent?** Almost certainly, and not provably. The app was running the fixed build
+(started 01:49:05; the run is logged at 01:50:59), and the Gmail check answers `true` in
+7–23 ms against that tab. But nothing records whether the hint was in the prompt for a given
+run. That is being added.
+
+**Why it was not enough:** `readEmail`'s description still says selected text usually wins;
+the clipboard is labelled "Selected text"; and the one-line hint sits above a thousand
+characters of clipboard, which is the last thing the model reads.
+
+**Eval, rebuilt with long realistic clipboards** (email open, hint present, 3 trials each):
+the code-message clipboard 6/6 across both phrases; the stack-trace clipboard 3/3 on "file this
+bug email…" and **2/3** on the live phrase. The earlier "3/3 with unrelated clipboard text"
+used sixty words about an offsite and should not be read as covering this.
+
+**Status: open.** Plan choice with a non-empty clipboard is unreliable. The confirm dialog
+showed the wrong text in full and a person cancelled it; that gate is what is relied on. A
+wording change, a "from your clipboard text" line in the dialog and a log line are approved
+and not yet built. See `spec.md` §9, finding 4.
+
+**Until then, when filing from an email:** say "this email", or read step 2's dialog before
+approving — if the description is not the email, cancel.
