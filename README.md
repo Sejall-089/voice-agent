@@ -694,11 +694,14 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M19 (MCP + Linear) is code-complete and has never been run end to end by a human (1184 tests, 63
-files).** Said first for the same reason it was said about M18: every milestone from M10 on has
-produced at least one live bug no fixture caught. `docs/M19-live-checklist.md` is the list, and
-it starts with a regression check, because M19 touched three things every instruction passes
-through.
+**M19 (MCP + Linear) has been run live and is ticked, with named gaps (1184 tests, 63 files).**
+A person saw the Gmail → Linear → Slack chain work end to end, the confirm dialogs for steps 2
+and 3 fully visible, and "file this bug in linear and tell the social channel" plan three steps
+with the real email in 3 of 3 runs, including with unrelated text on the clipboard. The pass
+found three bugs no test caught — as every milestone from M10 on has — and all three are fixed
+(below). **Not run live, covered by tests only:** the decline and failure cases, the long-email
+dialog, the injected-instruction email, and the `functions.` prefix rule.
+`docs/M19-live-checklist.md` has the record, including which boxes are still open.
 
 What's proved headless: the MCP protocol is *not* faked — tests run the official SDK's real
 client against its real server over an in-memory link, with Linear's behaviour transcribed from

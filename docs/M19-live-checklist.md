@@ -1,8 +1,14 @@
 # M19 — live verification checklist (by hand)
 
-> **OPEN. Nothing below has been run by a person yet.** M19 is code-complete and tested headless
-> (1184 tests), and two scripts have exercised real code against the real Linear workspace —
-> read-only. No one has yet seen the app do any of this.
+> **CLOSED 2026-10-09, with named gaps.** The live pass was run by a person and M19's box in
+> `spec.md` §9 is ticked. The proof chain works, the confirm dialogs are fully visible, and the
+> plan-choice fix held 3 of 3. The pass found **three bugs no test caught**, all fixed. **39
+> boxes below are still open** — they were not run live, and "Live results 4" at the bottom
+> says exactly which ones are covered by tests only. An open box here means *not seen by a
+> person*, not *failing*.
+>
+> M19 is tested headless (1184 tests), and two scripts have exercised real code against the real
+> Linear workspace, read-only.
 >
 > Written before the live pass, like M18's: each item names what could actually be wrong. Every
 > milestone since M10 has produced at least one live bug no fixture caught. Budget for it.
@@ -30,8 +36,8 @@ M19 changed three things that every existing instruction passes through: `ToolDe
 `chained`, both provider adapters now build the `plan` schema per run, and `sendMessage`'s
 confirm and send paths branch on `chained`.
 
-- [ ] A lone instruction still works: `summarize this` on copied text.
-- [ ] A lone Slack send still works exactly as before M19: copy some rough notes, say
+- [x] A lone instruction still works: `summarize this` on copied text.
+- [x] A lone Slack send still works exactly as before M19: copy some rough notes, say
       `send these to <your test channel>`. The dialog shows a short preview; what arrives in
       Slack is **reformatted** by the model. *(That reformat-after-confirm gap is known and is
       on the follow-up list — what matters here is that it has not changed.)*
@@ -69,10 +75,10 @@ reads resolved to `safe` under Linear's live hints, the code-fixed `limit` and `
 accepted by the live schema, the formatters read the live results, and a missing issue came
 back as *"Linear said no: Could not find referenced Issue."*
 
-- [ ] `find the onboarding issue in Linear` → a short list, each with identifier, title, status
+- [x] `find the onboarding issue in Linear` → a short list, each with identifier, title, status
       and a link. **No confirm dialog, no "Using Linear…" narration.**
-- [ ] `what does SEJ-3 say` → title, status, link, then the description.
-- [ ] `what does ZZZ-999 say` → *"Linear said no: Could not find referenced Issue."* — a plain
+- [x] `what does SEJ-3 say` → title, status, link, then the description.
+- [x] `what does ZZZ-999 say` → *"Linear said no: Could not find referenced Issue."* — a plain
       refusal, **not** "Something went wrong".
 - [ ] Listen to a search result being spoken. A URL should be said as its host, not spelled
       out. If it reads `h t t p s colon slash slash`, the generic speech derivation is not
@@ -91,8 +97,8 @@ tool description says so.
 - [ ] `file a Linear issue called test from the voice agent`. The dialog reads
       `Create this Linear issue in <defaultTeam>?`, then `Title: …`, then `(no description)`.
       The team named is the one in `connectors.json`.
-- [ ] **Cancel.** Check Linear: nothing was created.
-- [ ] Repeat and **approve.** The result is `Created SEJ-n: <title>` with the link on the next
+- [x] **Cancel.** Check Linear: nothing was created.
+- [x] Repeat and **approve.** The result is `Created SEJ-n: <title>` with the link on the next
       line. Open the link — it is the issue, in the right team.
 - [ ] Only the question is spoken (the first paragraph), not the title and body.
 - [ ] While the dialog is up, press the instruction hotkey. It is blocked and says a
@@ -111,16 +117,16 @@ Point `SLACK_WEBHOOK_URL` at a **test channel** first.
 Open a real bug-report email in the debug Chrome's Gmail tab, then say something like
 **"file this bug in Linear and tell the bugs channel"**.
 
-- [ ] **The model chose `plan`.** The bar shows `Three steps:` and a numbered list before
+- [x] **The model chose `plan`.** The bar shows `Three steps:` and a numbered list before
       anything runs. *(This is the known weak point — see section 6 if it answers with one tool
       or with chat instead.)*
-- [ ] Step 2's dialog is prefixed `Step 2 of 3:` and shows the team, a sensible title **in the
+- [x] Step 2's dialog is prefixed `Step 2 of 3:` and shows the team, a sensible title **in the
       model's words**, and the **entire email** — From, Subject, body — not a preview.
-- [ ] Approve. Step 3's dialog is prefixed `Step 3 of 3:` and shows the **exact** Slack message,
+- [x] Approve. Step 3's dialog is prefixed `Step 3 of 3:` and shows the **exact** Slack message,
       including the `https://linear.app/...` link.
-- [ ] Approve. The message in Slack is **character-for-character** what the dialog showed. The
+- [x] Approve. The message in Slack is **character-for-character** what the dialog showed. The
       link is clickable and opens the new issue.
-- [ ] The issue in Linear has the email as its description, unmodified.
+- [x] The issue in Linear has the email as its description, unmodified.
 - [ ] The `[main]` line ends `(chain 3/3)`.
 
 ### The dialogs themselves — the first live bug (fixed; re-check it)
@@ -129,9 +135,9 @@ The first live chain showed step 3's dialog **covered by the instruction bar**: 
 buttons hidden. Cause and fix are under "Live results" at the bottom. These items are the
 re-check, and the fix is not done until a person has ticked them.
 
-- [ ] **Step 2's dialog is fully visible**: the question, the title, the whole email, and both
+- [x] **Step 2's dialog is fully visible**: the question, the title, the whole email, and both
       buttons. The bar is **not on screen** while it is up.
-- [ ] **Step 3's dialog is fully visible** the same way. This is the one that was covered.
+- [x] **Step 3's dialog is fully visible** the same way. This is the one that was covered.
 - [ ] **Mouse:** click **Send** on step 2. It registers on the first click.
 - [ ] **Keyboard:** on step 3, press **Tab** to move to Send and **Enter** to choose it — the
       dialog has keyboard focus without your having to click it first. *(The default button is
@@ -280,7 +286,7 @@ it shows nothing was over-taught, not that the bug is fixed.
 
 **Still owed — re-run these by hand:**
 
-- [ ] "file this bug in Linear and tell the social channel" with the email open → **three**
+- [x] "file this bug in Linear and tell the social channel" with the email open → **three**
       steps, `readEmail` first. Try it three times, and at least once with unrelated text on
       the clipboard.
 - [ ] If it plans two steps again: **decline the create dialog** (its description will be
@@ -321,10 +327,10 @@ three steps.
 
 **Still owed — by hand, after a restart:**
 
-- [ ] **The exact failing case:** copy some unrelated text, open the bug email, say "file this
+- [x] **The exact failing case:** copy some unrelated text, open the bug email, say "file this
       bug in linear and tell the social channel". It plans **three** steps, `readEmail` first,
       and step 2's dialog shows **the email**, not what you copied.
-- [ ] Same again, twice more. Three for three is the bar the eval set.
+- [x] Same again, twice more. Three for three is the bar the eval set.
 - [ ] **"summarize this"** with text on the clipboard *and* an email open summarizes **the
       clipboard**, in one step.
 - [ ] With **no** email open (Gmail on the inbox): "summarize this" still works, and "file this
@@ -337,3 +343,57 @@ three steps.
 **Noted, not fixed (follow-up list, spec.md §9):** Esc is both "stop speaking" and the dialog's
 Cancel, and the app speaks the confirm question — so silencing it with Esc cancels the confirm.
 It fails safe (nothing is sent) but it stops the chain.
+
+### 4. Close-out (2026-10-09)
+
+**Reported by the person who ran it:**
+
+- **The Gmail → Linear → Slack chain worked** — read the open bug email, created the issue with
+  the email as its description, posted the issue's link to the Slack test channel.
+- **The confirm dialogs for steps 2 and 3 are fully visible** after the fix in live result 1.
+- **After the plan-choice fixes** (live results 2 and 3), "file this bug in linear and tell the
+  social channel" **planned three steps and put the real email in the description in 3 of 3
+  live runs, including with unrelated text on the clipboard.**
+
+**What the app's own action log holds** (it records planner runs, not what was on screen):
+
+| Item | Log rows |
+|---|---|
+| `summarize this` | #336 |
+| a lone Slack send, reformatted by the model as before M19 | #337 |
+| search, get, and a missing issue refused as "Linear said no: …" | #339, #340, #341 |
+| a lone create: cancelled (nothing created), then approved (SEJ-6) | #345, #346 |
+| the full chain, three steps | #355–357, #358–360, #367–369 |
+| the short phrase after the last fix (commit `e4eab73`) | #367–369 → SEJ-12 |
+
+The log has **one** run of the short phrase since the last fix was committed (#367–369); the
+other two of the reported three could not be matched to rows. Recorded as reported.
+
+Two things the log shows that are **not** claimed as checklist results: a create cancelled at
+step 2 (#362) and a send cancelled at step 3 (#365). Both ran before the dialog fix and neither
+was checked against what the checklist asks, so "Stopping partway" stays open.
+
+**NOT run live — covered by tests only.** These boxes are open on purpose:
+
+- **Every decline and failure case** in "Stopping partway": declining step 2, declining step 3,
+  a team that does not exist, Linear unreachable, no email open.
+- **The long-email dialog.** Only one email was ever read live, 343 characters long. That the
+  native dialog scrolls and keeps its buttons on screen at 20,000 characters rests on
+  `scripts/confirm-zorder-recon.cjs` and the earlier UI Automation measurement, not on eyes.
+- **Section 5, the injected-instruction email.** Never sent, never run. The headless tests cover
+  both directions (an instruction-shaped email, an instruction-shaped ticket body).
+- **The `functions.` prefix.** Seen live once *before* the fix, as a refusal. Since the fix no
+  real model has produced one, in the app or in 15 eval calls — so the rule that forgives it has
+  only ever run in tests.
+- Also not reported: section 1's startup toggles, the spoken-result and keyboard items, the
+  not-foreground dialog case (the one thing no script could measure), `summarize this` and
+  `reply to this and send it` after the hint was added, and running with Chrome quit.
+
+**Observed in passing, and on the follow-up list (`spec.md` §9):** issue titles are generic
+("Bug report", "Bug from the current email") because the model never sees the email; a chain
+that reaches an unknown Slack channel stops *after* creating the issue; the approve button says
+"Send" on a create.
+
+**Clean-up still to do in Linear, by hand** (its MCP server has no delete tool): SEJ-5 (recon),
+SEJ-6 ("test"), SEJ-7 (the empty issue), SEJ-8 and SEJ-11 (created, Slack step never sent),
+and whichever of SEJ-9, SEJ-10 and SEJ-12 are not wanted — all are copies of the same test bug.

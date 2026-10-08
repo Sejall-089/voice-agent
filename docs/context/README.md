@@ -5,12 +5,13 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status: see `PROJECT_CONTEXT_UPDATE_9.md`.** M0-M18 shipped. M19 (MCP support,
-with Linear as the first connector) is **code-complete and has never been run by a
-person** end to end: 1184 tests pass, two read-only scripts have exercised the real Linear workspace,
-and `docs/M19-live-checklist.md` is entirely open. Its box in `spec.md` section 9 is
-deliberately unticked until that pass is done. `docs/M18-live-checklist.md` also still has
-open items.
+**Current status: see `PROJECT_CONTEXT_UPDATE_9.md`.** M0-M19 shipped. M19 (MCP support,
+with Linear as the first connector) was run live and ticked on 2026-10-09 **with named
+gaps**: the Gmail -> Linear -> Slack chain, the confirm dialogs and the plan-choice fix were
+seen by a person; the decline/failure cases, the long-email dialog, the injected-instruction
+email and the `functions.` prefix rule are covered by tests only. 1184 tests pass.
+`docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` both still have open items,
+and say which.
 
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current

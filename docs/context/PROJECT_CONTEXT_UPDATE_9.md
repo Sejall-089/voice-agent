@@ -13,9 +13,11 @@ three milestones behind.
   an agent loop. spec.md §5b.
 - **M18 — opening apps and local media control.** Shipped; its live pass found four bugs and is
   ticked with items still open. `docs/M18-live-checklist.md`.
-- **M19 — MCP support, Linear first.** **Code-complete, pushed, and never run by a person.**
-  1184 tests pass, both typechecks clean, `npm run build` clean. The milestone box in spec.md §9
-  is deliberately unticked until the live checklist is done.
+- **M19 — MCP support, Linear first.** **Shipped and ticked 2026-10-09, with named gaps.** The
+  live pass saw the proof chain work, the confirm dialogs fully visible, and the plan-choice fix
+  hold 3 of 3. It found three bugs, all fixed (below). Not run live and covered by tests only:
+  the decline/failure cases, the long-email dialog, the injected-instruction email, the
+  `functions.` prefix rule. 1184 tests pass, both typechecks clean, `npm run build` clean.
 
 ## What M19 is
 
@@ -61,39 +63,61 @@ for them. Linear's search turned out to be fuzzy (found by the live check). Deta
   protocol is not faked — the SDK's real client and server over its in-memory transport.
 - **Script against the real workspace, read-only:** `scripts/linear-recon.mjs` and
   `scripts/linear-live-check.ts`. The second drives this app's own adapter and passed.
-- **A person at the keyboard:** nothing yet.
+- **A person at the keyboard (2026-10-08/09):** the proof chain end to end, the step 2 and 3
+  dialogs fully visible, and the short instruction planning three steps with the real email
+  3 of 3 including with unrelated clipboard text. Not the decline/failure cases, the
+  long-email dialog, the injected-instruction email, or the `functions.` prefix rule.
 
 ## What the next session needs
 
-1. **Run `docs/M19-live-checklist.md`.** Section 0 is a regression check and goes first.
-   Section 4 is the proof chain; point the Slack webhook at a test channel.
-2. **Run the opt-in plan eval** (4 model calls):
-   `M19_PLAN_EVAL=1 npx vitest run tests/eval/planChoice.eval.test.ts`. The known gap since M17
-   is the model not reaching for `plan`. A worked example was added to the plan tool's
-   description to help; whether it does is unmeasured. The eval's single-tool control is the
-   check for over-teaching.
-3. **Delete `SEJ-5 "M19 recon - safe to delete"`** in Linear by hand. It was created once during
-   recon to capture the create-result shape; Linear's MCP server has no delete tool.
-4. Expect at least one live bug. The most likely places: `app.getAppPath()` not finding
-   `connectors.json` under `npm run dev`; the model choosing one tool instead of a plan; the
-   title it writes; how a result containing a URL and an identifier sounds.
-5. Tick the M19 box in spec.md §9 only after the live pass, and record what it found in the
-   checklist's "Live results".
+M19 is closed. Nothing is owed to ship it; these are what is left around it.
 
-## Live pass, so far (2026-10-09)
+1. **Clean up Linear by hand** (its MCP server has no delete tool): SEJ-5 (recon), SEJ-6
+   ("test"), SEJ-7 (the empty issue), SEJ-8 and SEJ-11 (created, Slack step never sent), and
+   whichever of SEJ-9, SEJ-10, SEJ-12 are unwanted copies of the test bug.
+2. **39 checklist boxes are open on purpose** — not run live, covered by tests only. If a
+   future session has an hour at the keyboard, the ones worth the time are the decline and
+   failure cases, a genuinely long email, and the injected-instruction email (section 5).
+   `docs/M19-live-checklist.md`, "Live results 4".
+3. **`npm test` has not been run plainly since the confirm fix.** The app was running and
+   held the SQLite binary, so the suite was run against a separate Node build of the same
+   better-sqlite3 version. Quit the app and run `npm test` once to confirm 1184.
+4. **OpenAI credits were running out** during the pass. The plan-choice results are for
+   `gpt-5`; `ANTHROPIC_API_KEY` is not set in `.env`. A Gemini provider is on the follow-up
+   list as its own milestone.
+5. The follow-up list in `spec.md` §9 ("M19 — proven vs. live-only") is the full list of
+   what was noted and left out. Start there before proposing an M20.
 
-The first live chain found the first bug: **step 3's confirm dialog opened behind the
-instruction bar**, text and buttons covered. The always-on-top bar had only ever been kept clear
-of the dialog by losing focus; a chain's step result re-shows it unfocused. Fixed in
-`WindowsShell.confirm()` — the dialog is parented to the bar window, the bar is hidden for the
-dialog's lifetime and restored after, and nothing may show the bar or arm Escape while a confirm
-is pending. 13 more tests; `scripts/confirm-zorder-recon.cjs` measures the z-order. **A person
-re-checking it is still owed** — the items under "The dialogs themselves" in section 4 of the
-checklist, including the one no script could measure: whether the dialog takes keyboard focus
-when the app is not the foreground app.
+## What the live pass found (three bugs, all fixed)
+
+1. **Step 3's confirm dialog opened behind the instruction bar**, text and buttons covered.
+   The always-on-top bar had only ever been kept clear of the dialog by losing focus; a
+   chain's step result re-shows it unfocused. Fixed in `WindowsShell.confirm()`: the dialog
+   is parented to the bar window, the bar is hidden for the dialog's lifetime and restored
+   after, and nothing may show the bar or arm Escape while a confirm is pending.
+   `scripts/confirm-zorder-recon.cjs` measures the z-order. Confirmed visible by a person.
+2. **A plan skipped `readEmail` and filed an issue with an invented description** (SEJ-7).
+   Wording fix in the planner prompt and two tool descriptions (commit `8baaa58`). Not
+   enough on its own —
+3. **with unrelated clipboard text the model filed the clipboard as the bug** (0 of 3 in the
+   eval), and the live run was refused only because it also wrote the tool name as
+   `functions.linear__create_issue`. Two fixes (commit `e4eab73`): the planner is told "An
+   email is open in Gmail." when a new read-only `GmailSurface.hasOpenEmail()` says so —
+   never the subject or sender — and a leading `functions.` is forgiven when, and only
+   when, the remainder is exactly a name on the menu. Eval after: 15 of 15, including
+   "summarize this" still meaning the clipboard. Confirmed 3 of 3 live.
+
+The lessons are in `CLAUDE.md`: a property that holds by side effect; fixing a refusal can
+remove the only thing in front of a worse bug; an eval must see what the app sees.
 
 ## Follow-up list (carried, not started)
 
+- The `functions.` prefix rule has never met a real prefixed name since it shipped — tests only.
+- A Gemini provider, as its own milestone (schema subset, the `plan` tool's free-form
+  arguments, truncation handling, and its own tool-choice eval).
+- The confirm approve button says "Send" on every confirm, including a create; name it after
+  the action.
+- A chain stops *after* the issue is created when the Slack channel is unknown, orphaning it.
 - Esc is both "stop speaking" and the confirm dialog's Cancel, and the app speaks the confirm
   question, so silencing it cancels the confirm. Left as native Cancel by decision (2026-10-09).
   Idea, not designed: stop speaking the question some other way.

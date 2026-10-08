@@ -2076,10 +2076,19 @@ Post-v0:
       > volume tool must refuse on both rather than defaulting a null to 0 and then applying a
       > relative change to it.
 
-- [ ] **M19 — MCP support, with Linear as the first connector.** **Code-complete and unticked
-      on purpose**, following M18's precedent: the box is held open for the live pass
-      (`docs/M19-live-checklist.md`), because every milestone from M10 on has produced at least
-      one live bug no fixture caught. Adds `core/mcp/` — a generic adapter that turns a pinned
+- [x] **M19 — MCP support, with Linear as the first connector.** **Ticked after the live pass
+      (2026-10-09), with a caveat that is part of the tick.** The box was held open for that
+      pass, following M18's precedent, and the pass found three bugs no fixture caught — the
+      confirm dialog covered by the instruction bar, a plan that skipped `readEmail` and filed
+      an invented issue, and the clipboard taken for "this bug" (with a `functions.`-prefixed
+      tool name on top). All three are fixed. **Seen live by a person:** the Gmail → Linear →
+      Slack chain working end to end; the step 2 and step 3 confirm dialogs fully visible; and,
+      after the plan-choice fixes, the short instruction planning three steps with the real
+      email in the description in 3 of 3 runs, including with unrelated clipboard text.
+      **NOT run live, and resting on tests alone:** every decline and failure case, the
+      long-email dialog, the injected-instruction email, and the `functions.` prefix rule
+      (seen live only as the refusal that prompted it). 39 checklist boxes remain open and say
+      so; see `docs/M19-live-checklist.md`, "Live results 4". Adds `core/mcp/` — a generic adapter that turns a pinned
       connector tool into an ordinary registry `Tool`, a closed-world loader driven by
       `connectors.json`, tiers that a server's hints can raise but never lower, and Linear's
       definition (three tools of the server's 59). Adds `readEmail`, and makes `sendMessage`
@@ -2280,8 +2289,13 @@ have to rediscover.
 
 ### M19 — proven vs. live-only
 
-**No person has run any of this yet.** Stated first, as M18's section was, because it is the
-most important fact about the milestone. `docs/M19-live-checklist.md` is the list.
+**The live pass was run on 2026-10-08/09 and the box is ticked — with named gaps.** A person
+saw the proof chain work, the step 2 and step 3 dialogs fully visible, and the short instruction
+plan three steps with the real email in 3 of 3 runs including with unrelated clipboard text.
+**Not run live, resting on tests alone:** the decline and failure cases, the long-email dialog,
+the injected-instruction email, and the `functions.` prefix rule. `docs/M19-live-checklist.md`
+has the per-item record and "Live results 4" lists the gaps. *(The rest of this section was
+written before the pass; "What the live pass has found" below is what it turned up.)*
 
 **Measured against the real thing, by script, read-only** (weaker than a person seeing it, and
 marked as such in the checklist):
@@ -2486,8 +2500,26 @@ added to close it.
    has the items. `ChromeGmail.hasOpenEmail` itself is transport and has no unit test; it was
    run against the real debug Chrome.
 
-**Follow-up list (not M19).**
+**Follow-up list (not M19).** Everything noted during the milestone and deliberately left out
+of it. None of it is started.
 
+- **The `functions.` prefix rule has never met a real prefixed name.** `canonicalToolName` was
+  written from one live refusal and one older log row. Since it shipped, no model has produced
+  the prefix — not in the app, not in 15 eval calls — so the rule has only ever run in tests.
+  It is safe by construction (it can return only a menu name or its own input), but "works on
+  the form a real model sends" is unobserved. When one appears, the console now prints
+  `[main] refused plan, as sent: …` if it is refused, and the action log row carries the raw
+  names; a run that *succeeds* with a prefix leaves no trace at all, which is worth changing if
+  this is ever chased.
+- **A Gemini provider, as its own milestone.** Only `anthropic` and `openai` exist behind
+  `LLMClient`. The smallest route is the OpenAI client pointed at Google's OpenAI-compatible
+  endpoint, but nothing about it is tested and three things are expected to need work: Gemini
+  accepts only a subset of JSON Schema in tool definitions (the connector schemas use
+  `additionalProperties`, `minLength`, `maxLength`); the `plan` meta-tool's free-form
+  `arguments` object; and the `max_completion_tokens` / `finish_reason === "length"` handling
+  the truncation outcome depends on. Tool-choice and plan-writing quality on a third model
+  family is a separate question again, and would need its own eval run — the M19 plan-choice
+  results are about `gpt-5`. Its own milestone, not a config change.
 - **A chain stops AFTER the issue is created when the Slack channel is unknown, orphaning the
   issue.** `sendMessage` refuses an unresolved channel ("the social channel" with no fact for
   it) in its own handler — at step 3, by which time step 2 has already created a real issue
