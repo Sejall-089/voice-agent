@@ -21,8 +21,12 @@ import {
   SEARCH_RESULT_EMPTY,
 } from "./fixtures/linear/captured.ts";
 
-// No connector tool reads `deps` — the connection is captured when the tool is built.
-const deps = {} as unknown as ToolDeps;
+// No connector tool reads anything but `deps.context` — the connection is captured when the
+// tool is built. A real planner always supplies a context; this one has no clipboard and no
+// open email.
+const deps = {
+  context: { selectedText: null, activeApp: null, activeWindowTitle: null },
+} as unknown as ToolDeps;
 
 const ISSUE = {
   id: "ENG-4",

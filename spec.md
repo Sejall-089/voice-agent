@@ -2105,14 +2105,15 @@ Post-v0:
       gating are unchanged; hand-built Gmail, Notion and Calendar are untouched. See §6e, §5b's
       "Chains and connectors", and "M19 — proven vs. live-only" below.
 
-**v0 status: complete.** **1184 tests green** (`npm test`) across 63 files, plus 55 skipped —
+**v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
 993, in five new files: 17 for the connection and failure classification
 (`mcpConnection.test.ts`), 16 for the config loader (`mcpConfig.test.ts`), 50 for the adapter,
 tiers, flattening and formatters (`mcpAdapter.test.ts`), 7 for the loader (`mcpLoad.test.ts`),
 40 for the planner end to end (`planner.mcp.test.ts`), and 2 new registry invariants in
 `risk.test.ts`. The first live finding (the covered confirm dialog, 2026-10-09) added 13 more in
-`WindowsShell.capture.test.ts`, taking 1125 to 1138; findings 2 and 3 (the email hint, the `functions.` prefix, refused-plan logging) added 46 in `contextHints.test.ts` and `planner.mcp.test.ts`, taking it to 1184. The M18 count follows: 993 across 57 files, plus 46 skipped. M18's live pass added 49 to
+`WindowsShell.capture.test.ts`, taking 1125 to 1138; finding 4 (verb wording, the clipboard
+confirm label, the `[main]` line) added 30 more, taking it to 1214; findings 2 and 3 (the email hint, the `functions.` prefix, refused-plan logging) added 46 in `contextHints.test.ts` and `planner.mcp.test.ts`, taking it to 1184. The M18 count follows: 993 across 57 files, plus 46 skipped. M18's live pass added 49 to
 the 944 it shipped with: the input-host protocol layer (`hostChannel.test.ts`), the percent
 conversion and wording, and the not-installed launch failure. As shipped, M18 added 146 over
 M17's 798, in five new files: 28 for the app catalog (`apps.test.ts`), 40 for the launch table
@@ -2542,13 +2543,51 @@ added to close it.
    | prose + stack trace | file this bug in linear and tell the social channel | **2/3** |
 
    Intermittent, then, not constant — and three trials per cell cannot tell a fix from luck at
-   that rate. **Status: open.** What is approved and being built next: the `readEmail`
-   sentence removed and replaced with a rule keyed on the hint, the clipboard relabelled as
-   possibly unrelated when an email is open, the hint moved after the clipboard, the confirm
-   dialog saying so when an argument *is* the clipboard text, and the hint logged on the
-   `[main]` line. Deliberately **not** built: a code rule refusing clipboard plans whenever an
-   email is open — a background Gmail tab is common, and it would block ordinary "send these
-   notes". None of this can make a model's choice certain; the gate is what is relied on.
+   that rate.
+
+   **Shipped: wording, a confirm label and a log line. A live re-run is owed.**
+   - **Wording, keyed on the VERB.** Summarize, rewrite, translate, explain and fix act on
+     the clipboard text; file, log, reply to and forward act on the open email when one is
+     open, even past a clipboard; "this text", "what I copied" and "these notes" always
+     mean the clipboard. In the planner prompt and in `readEmail`'s description, whose old
+     "selected text wins" sentence is gone. With an email open the clipboard is labelled
+     as possibly unrelated and the hint comes *after* it; with none open the prompt is byte
+     for byte what it was.
+   - **The first version keyed on the NOUN and was not shipped.** "This bug / email /
+     message / report means the email" fixed the failing case and broke "summarize this",
+     which began answering with `readEmail` (2 of 6, against 6 of 6 on the old wording —
+     measured, so a regression, not something already there). A "bare 'this' means the
+     clipboard" patch was rejected before it was tried: it would break "log this as an
+     issue".
+   - **The confirm says where the text came from.** When an email is open and an argument
+     IS the clipboard text (whitespace-insensitive, whole or trimmed, at least 20
+     characters), the first line reads "… from your clipboard text?" — the line that is
+     spoken and read before deciding. A label only (`core/contextHints.ts`,
+     `markFromClipboard`).
+   - **The `[main]` line says what the model was told**: `[email hint: sent, check 8ms;
+     clipboard: 1050 chars]`. Counts and a flag, never the clipboard's text — so "was the
+     hint in the prompt?" is answerable next time.
+   - Deliberately **not** built: a code rule refusing clipboard plans whenever an email is
+     open. A background Gmail tab is common, and it would block ordinary "send these notes".
+
+   Measured with the opt-in eval (`M19_PLAN_SET=verbs`, `gpt-5`, email open with the hint):
+
+   | Phrase | Clipboard | Old wording | Noun rule | **Verb rule (shipped)** |
+   |---|---|---|---|---|
+   | file this bug in linear and tell the social channel | prose + stack trace | 2/3 | 10/10 | **10/10** |
+   | file this bug in linear and tell the social channel | a message about code | 3/3 | 3/3 | **3/3** |
+   | summarize this | prose + stack trace | 3/3 | 2/3 | **3/3** |
+   | summarize this | a message about code | 3/3 | 2/3 | **3/3** |
+   | summarize this | short, unrelated | 3/3 | — | **3/3** |
+   | log this as an issue and let #bugs know | prose + stack trace | — | — | **3/3**, reads the email |
+   | reply to this and send it | prose + stack trace | — | — | **3/3**, `draftReply > sendReply` |
+
+   One model, two clipboard texts; only the ten-trial row has enough runs to say much. 30
+   new tests; fifteen rules broken one at a time, all caught.
+
+   **None of this can make a model's choice certain.** Plan choice with a non-empty
+   clipboard is improved and measured, not guaranteed; the confirm dialog — which shows the
+   text in full, and now says when it is the clipboard's — is what is relied on.
 
 **Follow-up list (not M19).** Everything noted during the milestone and deliberately left out
 of it. None of it is started.

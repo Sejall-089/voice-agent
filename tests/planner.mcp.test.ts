@@ -928,3 +928,154 @@ describe("the planner is told when an email is open in Gmail", () => {
     expect(h.gmail.probes).toBe(1);
   });
 });
+
+// THE THIRD LIVE FAILURE. Email open, hint in the prompt, a long block of unrelated text on the
+// clipboard — and the plan was "File a new Linear issue from the selected text": no readEmail,
+// the clipboard as the description. It was caught because a person read the body of the dialog
+// and recognised their own clipboard. Nothing in code can make the model choose the email; what
+// code can do is KNOW when an argument is the clipboard and say so in the question.
+describe("the confirm says when the text is the clipboard's, with an email open", () => {
+  const CLIP =
+    "Both corrections are committed and pushed; the working tree is clean.\n\n" +
+    "Plan-choice result: the checklist now says the phrase was seen working in one live run.";
+
+  // The live plan, exactly: two steps, no read, the clipboard pasted into the description.
+  const CLIPBOARD_PLAN: PlannedStep[] = [
+    step("linear__create_issue", { title: "Bug report", description: CLIP }, "file a new Linear issue from the selected text"),
+    step("sendMessage", { channel: "#social", notes: "New bug filed: {step1}" }, "tell the social channel"),
+  ];
+  const clipboard = (text: string): CapturedContext => ({ ...NO_CONTEXT, selectedText: text });
+
+  it("FIRES: an email is open and the description is the clipboard text", async () => {
+    const h = harness(plan(CLIPBOARD_PLAN), { confirms: [false], context: clipboard(CLIP) });
+    const outcome = await h.planner.run("file this bug in linear and tell the social channel");
+
+    expect(h.llm.lastContext?.emailOpen).toBe(true);
+    const asked = h.shell.confirmMessages[0] ?? "";
+    // In the FIRST LINE — the one that is spoken, and read before anything is decided.
+    expect(asked.split("\n")[0]).toBe(
+      "Step 1 of 2: Create this Linear issue in Engineering from your clipboard text?",
+    );
+    // The rest of the dialog is untouched: still the whole text, in full.
+    expect(asked).toContain(`Title: Bug report\n\n${CLIP}`);
+    // A label, not a refusal: the person decides, and here declined.
+    expect(outcome.status).toBe("cancelled");
+    expect(h.server.created).toEqual([]);
+  });
+
+  it("is only a label — approving still creates the issue the dialog described", async () => {
+    const h = harness(plan(CLIPBOARD_PLAN), { confirms: [true, false], context: clipboard(CLIP) });
+    await h.planner.run("file these notes as an issue");
+    expect(h.server.created[0]?.description).toBe(CLIP);
+  });
+
+  it("DOES NOT FIRE for text that came from the email, with the same clipboard present", async () => {
+    const h = harness(plan(BUG_CHAIN), { confirms: [false], context: clipboard(CLIP) });
+    await h.planner.run("file this bug in linear and tell the social channel");
+
+    const asked = h.shell.confirmMessages[0] ?? "";
+    expect(asked.split("\n")[0]).toBe("Step 2 of 3: Create this Linear issue in Engineering?");
+    expect(asked).not.toContain("clipboard");
+    expect(asked).toContain(formatEmail(BUG_EMAIL));
+  });
+
+  it("DOES NOT FIRE when no email is open — the clipboard is then the only candidate", async () => {
+    const h = harness(plan(CLIPBOARD_PLAN), {
+      confirms: [false],
+      context: clipboard(CLIP),
+      email: null,
+    });
+    await h.planner.run("file these notes as an issue");
+
+    expect(h.llm.lastContext).not.toHaveProperty("emailOpen");
+    const asked = h.shell.confirmMessages[0] ?? "";
+    expect(asked.split("\n")[0]).toBe("Step 1 of 2: Create this Linear issue in Engineering?");
+    expect(asked).toContain(CLIP);
+  });
+
+  it("does not fire when the Gmail check timed out, even with an email really open", async () => {
+    // No hint was sent, so as far as this run knows there was no ambiguity to flag.
+    const h = harness(
+      { kind: "tool", name: "linear__create_issue", input: { title: "T", description: CLIP } },
+      { confirms: [false], context: clipboard(CLIP), probeDelayMs: 1_500 },
+    );
+    await h.planner.run("file these notes");
+    expect(h.shell.confirmMessages[0]?.split("\n")[0]).toBe("Create this Linear issue in Engineering?");
+  });
+
+  it("fires on a lone create too, with no step prefix", async () => {
+    const h = harness(
+      { kind: "tool", name: "linear__create_issue", input: { title: "T", description: CLIP } },
+      { confirms: [false], context: clipboard(CLIP) },
+    );
+    await h.planner.run("file this bug");
+    expect(h.shell.confirmMessages[0]?.split("\n")[0]).toBe(
+      "Create this Linear issue in Engineering from your clipboard text?",
+    );
+  });
+
+  it("fires when the clipboard was reflowed or wrapped in other text on its way into the argument", async () => {
+    const wrapped = `Reported by the user:\n\n${CLIP.replace(/\n\n/g, " ")}`;
+    const h = harness(
+      { kind: "tool", name: "linear__create_issue", input: { title: "T", description: wrapped } },
+      { confirms: [false], context: clipboard(CLIP) },
+    );
+    await h.planner.run("file this bug");
+    expect(h.shell.confirmMessages[0]?.split("\n")[0]).toContain("from your clipboard text?");
+  });
+
+  // Deliberately NOT built: a code rule refusing clipboard plans whenever an email is open. A
+  // Gmail tab sitting in the background is ordinary, and "send these notes" must keep working.
+  it("never refuses a clipboard-based plan just because an email is open", async () => {
+    const h = harness(plan(CLIPBOARD_PLAN), { confirms: [true, true], context: clipboard(CLIP) });
+    const outcome = await h.planner.run("file these notes and tell the social channel");
+    expect(outcome.status).toBe("ok");
+    expect(h.server.created).toHaveLength(1);
+    expect(h.sender.calls).toHaveLength(1);
+  });
+});
+
+describe("the outcome records what the model was told", () => {
+  const search: ToolChoice = { kind: "tool", name: "linear__search_issues", input: { query: "x" } };
+
+  it("says the hint was sent, how long the check took, and how much clipboard went with it", async () => {
+    const h = harness(search, { context: { ...NO_CONTEXT, selectedText: "x".repeat(1050) } });
+    const outcome = await h.planner.run("find x");
+
+    expect(outcome.planning?.emailHint).toBe(true);
+    expect(outcome.planning?.clipboardChars).toBe(1050);
+    expect(outcome.planning?.emailCheckMs).toBeGreaterThanOrEqual(0);
+    expect(outcome.planning?.emailCheckMs).toBeLessThan(500);
+  });
+
+  it("says the hint was NOT sent when nothing is open, with a zero-length clipboard", async () => {
+    const h = harness(search, { email: null });
+    const outcome = await h.planner.run("find x");
+    expect(outcome.planning).toMatchObject({ emailHint: false, clipboardChars: 0 });
+  });
+
+  // What a timed-out check looks like afterwards: not sent, and a check time at the deadline.
+  it("shows a timed-out check as not sent with a check time at the deadline", async () => {
+    const h = harness(search, { probeDelayMs: 1_500 });
+    const outcome = await h.planner.run("find x");
+    expect(outcome.planning?.emailHint).toBe(false);
+    expect(outcome.planning?.emailCheckMs).toBeGreaterThanOrEqual(EMAIL_HINT_TIMEOUT_MS - 50);
+    expect(outcome.planning?.emailCheckMs).toBeLessThan(1_350);
+  });
+
+  it("records it for every outcome — a refusal, a miss and a cancelled chain included", async () => {
+    const refusedPlan = harness(plan([step("nope", {}, "x"), step("readEmail", {}, "y")]));
+    const miss = harness({ kind: "none", text: null });
+    const cancelled = harness(plan(BUG_CHAIN), { confirms: [false] });
+    for (const h of [refusedPlan, miss, cancelled]) {
+      const outcome = await h.planner.run("anything");
+      expect(outcome.planning?.emailHint, outcome.status).toBe(true);
+    }
+  });
+
+  it("never carries the clipboard's text", async () => {
+    const h = harness(search, { context: { ...NO_CONTEXT, selectedText: "CLIPBOARD-MARKER text" } });
+    const outcome = await h.planner.run("find x");
+    expect(JSON.stringify(outcome.planning)).not.toContain("CLIPBOARD-MARKER");
+  });
+});

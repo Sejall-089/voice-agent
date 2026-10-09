@@ -1,4 +1,4 @@
-import { EMAIL_OPEN_LINE } from "../contextHints.ts";
+import { CLIPBOARD_LABEL_WITH_EMAIL, EMAIL_OPEN_LINE } from "../contextHints.ts";
 import type { ActionLogEntry, CapturedContext } from "../types.ts";
 
 // Vendor-neutral prompt shaping shared by every LLMClient implementation, so the
@@ -52,6 +52,26 @@ export const CHOOSE_SYSTEM = [
   "tool in the list can read. When a step needs what the user is looking at or referring to —",
   "an open email, a schedule — plan the tool that reads it as an EARLIER step and pass its",
   "result on with {stepN}.",
+  // M19, after the hint alone proved insufficient. Told an email was open, the model still
+  // filed a thousand characters of unrelated clipboard text as "this bug" — the clipboard was
+  // labelled as the user's selection, came last, and one tool description said selected text
+  // wins. A clipboard ALWAYS holds something; an open email is the rarer, more deliberate state.
+  //
+  // THE RULE IS KEYED ON THE VERB, AND THAT IS ITS SECOND VERSION. The first keyed on the noun
+  // ("this bug / email / message / report means the email"). It fixed the failure it was
+  // written for — 10 of 10 where it had been 2 of 3 — and broke the app's oldest instruction:
+  // "summarize this" with an email open began answering with `readEmail` (2 of 6, against 6 of
+  // 6 on the wording before it). A bare-"this"-means-clipboard patch would have broken "log
+  // this as an issue" in turn. What actually separates the cases is what the user asked to DO:
+  // text tools work on text the user copied; filing and replying are about the thing on screen.
+  // This is the user's decision, written out, not a guess.
+  "What 'this' refers to is decided by the VERB. Summarize, rewrite, translate, explain and fix",
+  "act on the clipboard text — use it, whether or not an email is open. File, log, reply to and",
+  "forward act on the open email when the request says an email is open in Gmail, EVEN IF",
+  "clipboard text is also shown: the clipboard is whatever was last copied and may have nothing",
+  "to do with the request. 'This text', 'what I copied' and 'these notes' always mean the",
+  "clipboard, whatever the verb. When the request does not say an email is open, 'this' means",
+  "the selected text.",
   "If no tool fits: when you have something genuinely useful to tell the user — a clarifying",
   "question needed before you could act, or a specific reason this particular request can't be",
   "done — reply with that, in one or two plain sentences. If the request simply does not match",
@@ -127,15 +147,25 @@ export function renderRequest(
     parts.push(`${renderPreviousTurn(previousTurn)}\n`);
   }
   parts.push(`Instruction: ${instruction}`);
-  // M19. The one fact about the screen the planner is given beyond the clipboard — see
-  // core/contextHints.ts for why it exists and why it is a bare sentence with nothing from the
-  // email in it. Placed directly under the instruction and ABOVE the clipboard: with both
-  // present, "this bug" has two candidates, and the clipboard used to be the only one in view.
+  // M19. Two things change when an email is open, and both came from a live failure AFTER the
+  // hint first shipped (it sat above the clipboard, and the model filed the clipboard anyway):
+  //
+  //   1. THE CLIPBOARD IS RELABELLED. "Selected text" asserts the user chose it for this
+  //      request. That is the v0 workflow and stays true when nothing else is on screen — but
+  //      with an email open it is one of two candidates for "this", and the honest description
+  //      of a clipboard is "whatever was last copied".
+  //   2. THE HINT COMES AFTER THE CLIPBOARD, so it is the last thing read rather than one line
+  //      buried above a thousand characters of something else.
+  //
+  // With no email open nothing here changes: same label, same order, byte for byte.
+  // See core/contextHints.ts for why the hint is a bare sentence with nothing from the email.
+  if (context.selectedText) {
+    const label =
+      context.emailOpen === true ? CLIPBOARD_LABEL_WITH_EMAIL : "Selected text (clipboard):";
+    parts.push(`\n${label}\n${context.selectedText}`);
+  }
   if (context.emailOpen === true) {
     parts.push(`\n${EMAIL_OPEN_LINE}`);
-  }
-  if (context.selectedText) {
-    parts.push(`\nSelected text (clipboard):\n${context.selectedText}`);
   }
   if (context.activeWindowTitle) {
     parts.push(`\nActive window: ${context.activeWindowTitle}`);

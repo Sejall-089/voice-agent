@@ -64,7 +64,9 @@ const connection = new SdkMcpConnection({
     }),
 });
 const tools = buildConnectorTools(readOnly, connection);
-const deps = {} as unknown as ToolDeps;
+const deps = {
+  context: { selectedText: null, activeApp: null, activeWindowTitle: null },
+} as unknown as ToolDeps;
 
 let failures = 0;
 

@@ -27,8 +27,12 @@ export const readEmailTool: Tool = {
     "it to a page. When the user points at what they are looking at — 'this email', 'this " +
     "bug', 'this report', 'this message' — and another tool needs its content, plan readEmail " +
     "as the first step and pass its result on as {step1}; do not ask them to paste it and do " +
-    "not write the content yourself. (If the request shows selected text, 'this' usually means " +
-    "that text instead.) Do NOT use this before draftReply: that tool reads the email itself. " +
+    "not write the content yourself. When the request says an email is open in Gmail and the " +
+    "user asks to FILE, LOG or FORWARD 'this', they mean THAT EMAIL, even if clipboard text is " +
+    "also shown — the clipboard always holds something and is often unrelated. Do NOT use " +
+    "readEmail when the user asks to summarize, rewrite, translate, explain or fix 'this': " +
+    "those act on the clipboard text. 'This text', 'what I copied' and 'these notes' always " +
+    "mean the clipboard. Do NOT use this before draftReply: that tool reads the email itself. " +
     "This only reads; it changes nothing in Gmail.",
   inputSchema: { type: "object", properties: {} },
   risk: "safe",

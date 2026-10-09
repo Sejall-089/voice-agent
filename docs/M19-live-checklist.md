@@ -9,7 +9,7 @@
 > says exactly which ones are covered by tests only. An open box here means *not seen by a
 > person*, not *failing*.
 >
-> M19 is tested headless (1184 tests), and two scripts have exercised real code against the real
+> M19 is tested headless (1214 tests), and two scripts have exercised real code against the real
 > Linear workspace, read-only.
 >
 > Written before the live pass, like M18's: each item names what could actually be wrong. Every
@@ -411,7 +411,7 @@ that reaches an unknown Slack channel stops *after* creating the issue; the appr
 SEJ-6 ("test"), SEJ-7 (the empty issue), SEJ-8 and SEJ-11 (created, Slack step never sent),
 and whichever of SEJ-9, SEJ-10 and SEJ-12 are not wanted — all are copies of the same test bug.
 
-### 5. After the hint shipped, the plan still used the clipboard (2026-10-09) — OPEN
+### 5. After the hint shipped, the plan still used the clipboard (2026-10-09) — fix shipped, live re-run owed
 
 **Said:** "file this bug in linear and tell the social channel". Bug email open in the debug
 Chrome. **On the clipboard:** a long block of unrelated technical text, several paragraphs.
@@ -435,10 +435,35 @@ the code-message clipboard 6/6 across both phrases; the stack-trace clipboard 3/
 bug email…" and **2/3** on the live phrase. The earlier "3/3 with unrelated clipboard text"
 used sixty words about an offsite and should not be read as covering this.
 
-**Status: open.** Plan choice with a non-empty clipboard is unreliable. The confirm dialog
-showed the wrong text in full and a person cancelled it; that gate is what is relied on. A
-wording change, a "from your clipboard text" line in the dialog and a log line are approved
-and not yet built. See `spec.md` §9, finding 4.
+**Shipped: wording, confirm label and log line; live re-run owed.**
+
+- **Wording, keyed on the verb:** summarize / rewrite / translate / explain / fix → the
+  clipboard; file / log / reply to / forward → the open email when one is open; "this
+  text", "what I copied", "these notes" → always the clipboard. (A first version keyed on
+  the noun broke "summarize this" and was not shipped.)
+- **The confirm says so** when an argument is the clipboard text and an email is open:
+  "Create this Linear issue in … from your clipboard text?"
+- **The `[main]` line says what the model was told:** `[email hint: sent, check 8ms;
+  clipboard: 1050 chars]`.
+
+Eval after (email open, hint present): the failing cell 10/10 (was 2/3); the code-message
+cell 3/3; "summarize this" 3/3 with each long clipboard and with a short one; "log this as
+an issue" 3/3 reading the email; "reply to this and send it" 3/3 as `draftReply >
+sendReply`. Full table: `spec.md` §9, finding 4.
+
+**Plan choice cannot be made certain.** It is improved and measured, not guaranteed. The
+confirm dialog shows the text in full — and now says when it is the clipboard's — and that
+gate is what is relied on.
+
+**Still owed — by hand, after a restart:**
+
+- [ ] With a long block of unrelated text copied and the bug email open, say "file this bug
+      in linear and tell the social channel". Three steps, `readEmail` first; step 2's
+      dialog shows the email. The `[main]` line shows `email hint: sent`.
+- [ ] Force the other case once: say "file what I copied in Linear". Step 1's dialog says
+      **"from your clipboard text"** in its first line. Cancel it.
+- [ ] "summarize this" with text copied and the email open: summarizes the **clipboard**.
+- [ ] "reply to this and send it" still drafts a reply to the email (cancel the send).
 
 **Until then, when filing from an email:** say "this email", or read step 2's dialog before
 approving — if the description is not the email, cancel.

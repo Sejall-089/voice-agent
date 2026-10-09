@@ -722,4 +722,10 @@ export interface PlannerOutcome {
   // deliberately NOT written to the action log in full: arguments can hold the user's words,
   // and the last log row is fed into the next planning prompt. The log row gets the tool names.
   proposed?: { tool?: string; plan?: readonly PlannedStep[] };
+  // What the planner told the model about the world on this run (M19), for the `[main]` line.
+  // Whether the "An email is open in Gmail." hint was in the prompt, how long the Gmail check
+  // behind it took, and how much clipboard text was sent. A flag and two numbers — the
+  // clipboard's CONTENT is never put here. `emailHint: false` with a check time at the
+  // deadline (core/contextHints.ts) is what a timed-out check looks like.
+  planning?: { emailHint: boolean; emailCheckMs: number; clipboardChars: number };
 }

@@ -1,4 +1,5 @@
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
+import { markFromClipboard, usesClipboardBesideOpenEmail } from "../contextHints.ts";
 import { connectorError } from "../errors.ts";
 import type { RiskPolicy, ToolRisk } from "../risk.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
@@ -131,9 +132,18 @@ export function buildConnectorTools(
       resolvesReferences: false,
       // EVERYTHING that will be sent, in full. Not a preview and not the model's own account of
       // it: the validated arguments, plus the ones code fixed.
-      confirmSummary: async (args: ToolInput): Promise<string> => {
+      //
+      // And where it came from, when that is in doubt (M19, core/contextHints.ts): if an email
+      // is open and an argument IS the clipboard's text, the question says "from your clipboard
+      // text". A label, never a refusal — the model may have been right to use the clipboard.
+      confirmSummary: async (args: ToolInput, deps: ToolDeps): Promise<string> => {
         const final = await prepare(args);
-        return tool.describe ? tool.describe(args, settings) : listing(def.label, tool, final);
+        const summary = tool.describe
+          ? tool.describe(args, settings)
+          : listing(def.label, tool, final);
+        return usesClipboardBesideOpenEmail(args, deps.context)
+          ? markFromClipboard(summary)
+          : summary;
       },
       narrate: async (args: ToolInput): Promise<string> => {
         const final = await prepare(args);

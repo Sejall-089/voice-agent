@@ -17,7 +17,7 @@ three milestones behind.
   live pass saw the proof chain work, the confirm dialogs fully visible, and the plan-choice fix
   hold in one live run. It found three bugs, all fixed (below). Not run live and covered by tests only:
   the decline/failure cases, the long-email dialog, the injected-instruction email, the
-  `functions.` prefix rule. 1184 tests pass, both typechecks clean, `npm run build` clean.
+  `functions.` prefix rule. 1214 tests pass, both typechecks clean, `npm run build` clean.
 
 ## What M19 is
 
@@ -81,7 +81,7 @@ M19 is closed. Nothing is owed to ship it; these are what is left around it.
    `docs/M19-live-checklist.md`, "Live results 4".
 3. **`npm test` has not been run plainly since the confirm fix.** The app was running and
    held the SQLite binary, so the suite was run against a separate Node build of the same
-   better-sqlite3 version. Quit the app and run `npm test` once to confirm 1184.
+   better-sqlite3 version. Quit the app and run `npm test` once to confirm 1214.
 4. **OpenAI credits were running out** during the pass. The plan-choice results are for
    `gpt-5`; `ANTHROPIC_API_KEY` is not set in `.env`. A Gemini provider is on the follow-up
    list as its own milestone.

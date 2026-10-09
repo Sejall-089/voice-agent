@@ -131,12 +131,26 @@ export class Planner {
     //    because this precedes every planning call and must not be able to slow one down or
     //    fail it; a check that is slow, broken or unconfigured simply contributes nothing, and
     //    the context is then exactly what it was before this existed.
-    const [captured, emailOpen] = await Promise.all([
+    const asked = Date.now();
+    const [captured, hint] = await Promise.all([
       this.shell.getContext(),
-      emailOpenHint(this.gmail),
+      emailOpenHint(this.gmail).then((open) => ({ open, ms: Date.now() - asked })),
     ]);
-    const context: CapturedContext = emailOpen ? { ...captured, emailOpen: true } : captured;
+    const context: CapturedContext = hint.open ? { ...captured, emailOpen: true } : captured;
 
+    // What the model was told, for the console (M19). A live run filed the clipboard as the bug
+    // with an email open, and "was the hint even in the prompt?" could not be answered
+    // afterwards: nothing recorded it. COUNTS AND A FLAG ONLY — never the clipboard's text.
+    const planning: NonNullable<PlannerOutcome["planning"]> = {
+      emailHint: hint.open,
+      emailCheckMs: hint.ms,
+      clipboardChars: captured.selectedText?.length ?? 0,
+    };
+    return { ...(await this.decide(instruction, context)), planning };
+  }
+
+  // Steps 2 onward: ask the model once, then dispose of what it proposed.
+  private async decide(instruction: string, context: CapturedContext): Promise<PlannerOutcome> {
     // 2. LLM picks a tool (or declines). The previous turn — the planner's one turn of
     //    state — goes along too, so a bare correction ("no, I meant...") has something to
     //    resolve against instead of routing on the current instruction alone.

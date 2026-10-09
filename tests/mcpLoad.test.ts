@@ -7,7 +7,9 @@ import type { ToolDeps } from "../src/core/types.ts";
 import { FakeMcpServer } from "./FakeMcpServer.ts";
 
 const SECRET = "lin_api_THIS_MUST_NEVER_APPEAR";
-const deps = {} as unknown as ToolDeps;
+const deps = {
+  context: { selectedText: null, activeApp: null, activeWindowTitle: null },
+} as unknown as ToolDeps;
 
 const ON = JSON.stringify({
   connectors: {

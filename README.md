@@ -694,7 +694,7 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M19 (MCP + Linear) has been run live and is ticked, with named gaps (1184 tests, 63 files).**
+**M19 (MCP + Linear) has been run live and is ticked, with named gaps (1214 tests, 63 files).**
 A person saw the Gmail → Linear → Slack chain work end to end, the confirm dialogs for steps 2
 and 3 fully visible, and "file this bug in linear and tell the social channel" plan three steps
 with the real email — once. (The 3-of-3 figure further down is the eval's, not a person's;
@@ -703,7 +703,14 @@ found three bugs no test caught, as every milestone from M10 on has. The covered
 is fixed. **The plan-choice problem is reduced, not fixed:** with an email open and other text
 on the clipboard, the model still sometimes offers to file *the clipboard* — seen live once after
 the fix below, and in 1 of 12 eval trials with long clipboard text. The confirm dialog shows the
-text in full, which is what caught it; if the description isn't the email, cancel. **Not run live, covered by tests only:** the decline and failure cases, the long-email
+text in full, which is what caught it. **Since then: wording, a confirm label and a log line
+have shipped, and a live re-run is owed.** What "this" means is now decided by the verb —
+summarize, rewrite, translate, explain and fix use the clipboard; file, log, reply to and
+forward use the open email — and when an issue *would* be filed from your clipboard while an
+email is open, the confirm says "from your clipboard text" in its first line. Measured: the
+failing case 10 of 10, "summarize this" unharmed. That improves plan choice; it cannot make it
+certain, and the confirm dialog is what is relied on — if the description isn't what you
+meant, cancel. **Not run live, covered by tests only:** the decline and failure cases, the long-email
 dialog, the injected-instruction email, and the `functions.` prefix rule.
 `docs/M19-live-checklist.md` has the record, including which boxes are still open.
 
