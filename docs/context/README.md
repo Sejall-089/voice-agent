@@ -11,7 +11,7 @@ gaps**: the Gmail -> Linear -> Slack chain, the confirm dialogs and one run of t
 fix were seen by a person; the decline/failure cases, the long-email dialog, the injected-instruction
 email and the `functions.` prefix rule are covered by tests only. 1214 tests pass. Plan choice with a
 non-empty clipboard was improved after the close (verb-keyed wording, a confirm label, a log
-line) and needs a live re-run; it cannot be made certain.
+line) and that fix's live re-run passed on 2026-10-09; it still cannot be made certain.
 `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` both still have open items,
 and say which.
 

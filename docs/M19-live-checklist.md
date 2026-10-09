@@ -2,10 +2,12 @@
 
 > **CLOSED 2026-10-09, with named gaps.** The live pass was run by a person and M19's box in
 > `spec.md` §9 is ticked. The proof chain works and the confirm dialogs are fully visible.
-> **Plan choice with a non-empty clipboard is still unreliable — see Live results 5.** The
+> **Plan choice with a non-empty clipboard failed live once after the first fix; a second fix
+> shipped and its live re-run passed — see Live results 5. Improved and measured, not certain;
+> the confirm dialog is what is relied on.** The
 > pass found three bugs no test caught: the covered confirm dialog is fixed; the plan-choice
 > problem is reduced, not fixed (an earlier version of this header said "all fixed").
-> **49 boxes below are still open** — they were not run live, and "Live results 4" at the bottom
+> **50 boxes below are still open** — they were not run live, and "Live results 4" at the bottom
 > says exactly which ones are covered by tests only. An open box here means *not seen by a
 > person*, not *failing*.
 >
@@ -411,7 +413,7 @@ that reaches an unknown Slack channel stops *after* creating the issue; the appr
 SEJ-6 ("test"), SEJ-7 (the empty issue), SEJ-8 and SEJ-11 (created, Slack step never sent),
 and whichever of SEJ-9, SEJ-10 and SEJ-12 are not wanted — all are copies of the same test bug.
 
-### 5. After the hint shipped, the plan still used the clipboard (2026-10-09) — fix shipped, live re-run owed
+### 5. After the hint shipped, the plan still used the clipboard (2026-10-09) — fix shipped, live re-run PASSED
 
 **Said:** "file this bug in linear and tell the social channel". Bug email open in the debug
 Chrome. **On the clipboard:** a long block of unrelated technical text, several paragraphs.
@@ -435,7 +437,7 @@ the code-message clipboard 6/6 across both phrases; the stack-trace clipboard 3/
 bug email…" and **2/3** on the live phrase. The earlier "3/3 with unrelated clipboard text"
 used sixty words about an offsite and should not be read as covering this.
 
-**Shipped: wording, confirm label and log line; live re-run owed.**
+**Shipped: wording, confirm label and log line. Live re-run passed 2026-10-09 (below).**
 
 - **Wording, keyed on the verb:** summarize / rewrite / translate / explain / fix → the
   clipboard; file / log / reply to / forward → the open email when one is open; "this
@@ -455,15 +457,33 @@ sendReply`. Full table: `spec.md` §9, finding 4.
 confirm dialog shows the text in full — and now says when it is the clipboard's — and that
 gate is what is relied on.
 
-**Still owed — by hand, after a restart:**
+**Live re-run passed — 2026-10-09.** Run by a person, with the bug email open in the debug
+Chrome and **a long, bug-related block of text on the clipboard** — the condition that failed
+before. Exactly three things were run, once each, and all three went right:
 
-- [ ] With a long block of unrelated text copied and the bug email open, say "file this bug
+| Said | Seen |
+|---|---|
+| "file this bug in linear and tell the social channel" | planned **three steps starting with `readEmail`**; the **real email** was in the issue description, not the clipboard |
+| "summarize this" | summarized **the clipboard** |
+| "reply to this and send it" | drafted a reply **to the open email** |
+
+That is one run of each, on one clipboard text. It is the same case that failed live, now
+passing live, and it agrees with the eval (10/10 on that cell). It is not a guarantee.
+
+**Not run in this re-run, and still open:** the "from your clipboard text" confirm line has
+never been seen by a person — the case that triggers it was not run. Whether the `[main]`
+line showed `email hint: sent` was not reported. Everything listed as not run live in Live
+results 4 is unchanged.
+
+**The boxes** (three ticked from the re-run above, one still owed):
+
+- [x] With a long block of unrelated text copied and the bug email open, say "file this bug
       in linear and tell the social channel". Three steps, `readEmail` first; step 2's
       dialog shows the email. The `[main]` line shows `email hint: sent`.
 - [ ] Force the other case once: say "file what I copied in Linear". Step 1's dialog says
       **"from your clipboard text"** in its first line. Cancel it.
-- [ ] "summarize this" with text copied and the email open: summarizes the **clipboard**.
-- [ ] "reply to this and send it" still drafts a reply to the email (cancel the send).
+- [x] "summarize this" with text copied and the email open: summarizes the **clipboard**.
+- [x] "reply to this and send it" still drafts a reply to the email (cancel the send).
 
 **Until then, when filing from an email:** say "this email", or read step 2's dialog before
 approving — if the description is not the email, cancel.

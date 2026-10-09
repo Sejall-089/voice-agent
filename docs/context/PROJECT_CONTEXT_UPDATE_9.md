@@ -75,7 +75,7 @@ M19 is closed. Nothing is owed to ship it; these are what is left around it.
 1. **Clean up Linear by hand** (its MCP server has no delete tool): SEJ-5 (recon), SEJ-6
    ("test"), SEJ-7 (the empty issue), SEJ-8 and SEJ-11 (created, Slack step never sent), and
    whichever of SEJ-9, SEJ-10, SEJ-12 are unwanted copies of the test bug.
-2. **49 checklist boxes are open on purpose** — not run live, covered by tests only. If a
+2. **50 checklist boxes are open on purpose** — not run live, covered by tests only. If a
    future session has an hour at the keyboard, the ones worth the time are the decline and
    failure cases, a genuinely long email, and the injected-instruction email (section 5).
    `docs/M19-live-checklist.md`, "Live results 4".

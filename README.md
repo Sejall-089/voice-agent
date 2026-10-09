@@ -704,11 +704,14 @@ is fixed. **The plan-choice problem is reduced, not fixed:** with an email open 
 on the clipboard, the model still sometimes offers to file *the clipboard* — seen live once after
 the fix below, and in 1 of 12 eval trials with long clipboard text. The confirm dialog shows the
 text in full, which is what caught it. **Since then: wording, a confirm label and a log line
-have shipped, and a live re-run is owed.** What "this" means is now decided by the verb —
+have shipped, and the live re-run passed (2026-10-09).** What "this" means is now decided by the verb —
 summarize, rewrite, translate, explain and fix use the clipboard; file, log, reply to and
 forward use the open email — and when an issue *would* be filed from your clipboard while an
 email is open, the confirm says "from your clipboard text" in its first line. Measured: the
-failing case 10 of 10, "summarize this" unharmed. That improves plan choice; it cannot make it
+failing case 10 of 10, "summarize this" unharmed — and, live, with a long bug-related
+clipboard and the email open: the bug was filed from the email, "summarize this" summarized the
+clipboard, and "reply to this and send it" drafted a reply to the email. That improves plan
+choice; it cannot make it
 certain, and the confirm dialog is what is relied on — if the description isn't what you
 meant, cancel. **Not run live, covered by tests only:** the decline and failure cases, the long-email
 dialog, the injected-instruction email, and the `functions.` prefix rule.

@@ -2086,7 +2086,11 @@ Post-v0:
       that overstated it. With an email open and other text on the clipboard, the model still
       sometimes files the clipboard: seen live once *after* the "An email is open in Gmail."
       hint shipped, and in 1 of 12 eval trials with long, realistic clipboard text. The confirm
-      dialog shows the text in full and is what caught it — the gate held, the plan did not. **Seen live by a person:** the Gmail → Linear →
+      dialog shows the text in full and is what caught it — the gate held, the plan did not.
+      **A second fix then shipped (verb-keyed wording, a confirm label, a log line) and its
+      live re-run passed** — the same case, same kind of clipboard, three steps from the
+      email (finding 4). That is improved and measured, still not certain, and the confirm
+      dialog remains what is relied on. **Seen live by a person:** the Gmail → Linear →
       Slack chain working end to end; the step 2 and step 3 confirm dialogs fully visible; and,
       after the plan-choice fixes, the short instruction planning three steps with the real
       email in the description — in **one** live run. (An earlier version of this entry said
@@ -2095,7 +2099,7 @@ Post-v0:
       figure for it is the eval's, not a person's.)
       **NOT run live, and resting on tests alone:** every decline and failure case, the
       long-email dialog, the injected-instruction email, and the `functions.` prefix rule
-      (seen live only as the refusal that prompted it). 49 checklist boxes remain open and say
+      (seen live only as the refusal that prompted it). 50 checklist boxes remain open and say
       so; see `docs/M19-live-checklist.md`, "Live results 4". Adds `core/mcp/` — a generic adapter that turns a pinned
       connector tool into an ordinary registry `Tool`, a closed-world loader driven by
       `connectors.json`, tiers that a server's hints can raise but never lower, and Linear's
@@ -2545,7 +2549,13 @@ added to close it.
    Intermittent, then, not constant — and three trials per cell cannot tell a fix from luck at
    that rate.
 
-   **Shipped: wording, a confirm label and a log line. A live re-run is owed.**
+   **Shipped: wording, a confirm label and a log line. The live re-run PASSED (2026-10-09).**
+   With the bug email open and a long, bug-related block of text on the clipboard — the
+   condition that had failed — a person ran three things, once each: "file this bug in
+   linear and tell the social channel" planned three steps from `readEmail` with the real
+   email in the description; "summarize this" summarized the clipboard; "reply to this and
+   send it" drafted a reply to the open email. Not seen live: the "from your clipboard
+   text" confirm line, whose triggering case was not run.
    - **Wording, keyed on the VERB.** Summarize, rewrite, translate, explain and fix act on
      the clipboard text; file, log, reply to and forward act on the open email when one is
      open, even past a clipboard; "this text", "what I copied" and "these notes" always
