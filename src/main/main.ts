@@ -329,7 +329,10 @@ app.whenReady().then(() => {
     // Both halves, or neither: something to READ the window with and something to ASK.
     pointing: elements !== null && chooser !== null && screenSurfaceOrNull !== null,
     // M19. Decided by connectors.json and .env alone - building these opens no connection.
-    connectors: createConnectorTools(),
+    // The shell's existing status line (`narrate`, the one `caution` narrations use) is where
+    // "Connecting to GitHub…" goes while a connection is being opened. A first connection is
+    // the one wait in a connector call that can be long, and it happens before any dialog.
+    connectors: createConnectorTools((line) => shell.narrate(line)),
   });
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
@@ -621,7 +624,7 @@ function createCalendar(): CalendarSurface | null {
 // neither the key nor the Authorization header is ever logged (spec section 10). Everything
 // that decides anything is in core/mcp/ and tested there - since M20 that includes the
 // transport itself (core/mcp/transport.ts). What is left here is the file read (CLAUDE.md).
-function createConnectorTools(): Tool[] {
+function createConnectorTools(onConnecting: (line: string) => void): Tool[] {
   let configText: string | null = null;
   try {
     configText = readFileSync(join(app.getAppPath(), "connectors.json"), "utf8");
@@ -640,6 +643,8 @@ function createConnectorTools(): Tool[] {
         app: def.label,
         keyName: def.keyName,
         transport: bearerHttpTransport(def, key),
+        // The wording, and when it is said, are SdkMcpConnection's and are tested there.
+        onConnecting,
       }),
   });
   for (const note of loaded.notes) console.log(`[main] ${note}`);

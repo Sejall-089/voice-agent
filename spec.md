@@ -2119,14 +2119,55 @@ same connection — fail-closed twice. `linear__create_issue` is `dangerous` as 
 |---|---|---|
 | `not-configured` | no connection was built | I'm not connected to Linear. |
 | `denied` | the key was rejected (401/403) | names `LINEAR_API_KEY`; repeats nothing the server said |
-| `unreachable` | network, DNS, closed link | I couldn't reach Linear: … |
-| `timeout` | no answer in 20 s | says the change **may or may not** have gone through |
+| `unreachable` | network, DNS, closed link — *during a tool call* | I couldn't reach Linear: … |
+| `connect-failed` (M21) | anything that went wrong **while connecting** — opening the link or reading the tool list — other than a rejected key | Linear didn't answer while I was connecting, so nothing was sent. It is safe to try again. (With a cause other than a timeout: "I couldn't reach Linear while I was connecting (…), so nothing was sent. It is safe to try again.") |
+| `timeout` | a **tool call** that was sent got no answer in 20 s | says the change **may or may not** have gone through |
 | `invalid-arguments` | failed our schema | nothing was sent |
 | `drift` | the server changed under the pin | nothing was sent; the connector needs updating |
 | `tool-failed` | the server said no | Linear said no: *its words* |
 | `bad-result` | "success" we cannot read | check Linear before trying again |
 
 No message can contain the key: only the *name* of its variable is ever passed in.
+
+#### The phase of a failure, and two budgets (added 2026-10-10, live fix)
+
+**Found live.** The session's first GitHub use timed out and the chain said the create "may or
+may not have gone through" (action-log row 413). It had never been sent: a `dangerous` connector
+tool's connection is opened by its **confirm summary** (`prepare` → `listTools`), before the
+dialog. Nothing was created — the retry got the next issue number.
+
+**The same error means two things**, and only the caller knows which. A connect timeout and a
+call timeout are the identical `McpError(-32001)`. So `classifyMcpFailure` takes a required
+`phase` argument, passed from the `catch` that caught the error (`SdkConnection.ts`), never
+inferred from the error's type or text:
+
+| Phase | Where it is caught | A timeout or failure there means |
+|-------|--------------------|----------------------------------|
+| `connecting` | `open()` (the `initialize` exchange) and `listTools()` | `connect-failed` — nothing was sent, safe to try again |
+| `calling` | `callTool()` only | `timeout` / `unreachable` / `tool-failed`, as before — the call **was** sent |
+
+A rejected key is `denied` in either phase (trying again would not help). `callTool` awaits the
+connection *outside* its `try`, so a link that cannot be opened reaches the caller as the
+connecting failure it is. The chain accounting is unchanged and still follows the reason.
+**A failed call is still never retried, in either phase**; the next call opens a new connection.
+
+**Two budgets** (`SdkConnectionOptions.connectTimeoutMs`, `timeoutMs`):
+
+| Request | Budget | Constant |
+|---------|--------|----------|
+| `initialize` (opening the connection) | **45 s** | `DEFAULT_CONNECT_TIMEOUT_MS` |
+| `tools/list`, and every tool call | 20 s | `DEFAULT_REQUEST_TIMEOUT_MS` |
+
+Measured cold the same day, four connects each (initialize + tools/list): GitHub 1.4–3.6 s,
+Linear 2.9–7.1 s. So 20 s was not tight for a typical connect and the live one was an outlier;
+45 s is room for an outlier, not a measured need. **Worst case before a dialog appears: 65 s**
+(45 + 20) on top of the planning call — long, and the reason for the next line.
+
+**"Connecting to GitHub…"** is shown on the shell's existing status line (`narrate`, the one
+`caution` narrations use) each time a connection is about to be opened: once per attempt,
+before anything is sent, not again while it stays open, and not spoken. `SdkMcpConnection`
+owns the wording and the timing (`onConnecting`); `main.ts` only hands it `shell.narrate`.
+That three-line wiring is the one part with no test.
 
 ### The second connector (M20): GitHub
 
@@ -3188,6 +3229,15 @@ of it. None of it is started.
   placeholder (unknowable until that step runs); a LITERAL channel that does not exist
   (`#typo` — there is no list of real channels, and a webhook may ignore `channel` anyway);
   and any tool that does not declare `referenceArgs`.
+- **Warm connectors at startup. NOT DONE.** A connection opens lazily, on the first instruction
+  that uses it, so the first connector call of a session pays the whole cold connect — measured
+  at 1.4–7.1 s, and once, live, over 20 s (M21) — before its dialog can appear. Opening each
+  configured connection in the background at launch, the way the pointing reader is pre-warmed
+  (M16.11), would move that wait to where nobody is waiting. Not designed: it means network
+  use at startup with no instruction given, a failure there must stay silent and must not
+  poison the first real use, and a connection opened at launch can have dropped by the time it
+  is needed. Until then the wait is labelled ("Connecting to GitHub…") and a failure in it
+  says nothing was sent (§6e, "The phase of a failure").
 - **The confirm dialog's approve button says "Send" on every confirm, including a create.**
   `WindowsShell.confirm()` hard-codes `buttons: ["Send", "Cancel"]`, which was accurate while
   the only `dangerous` tools sent something (Slack, Gmail). It now also fronts

@@ -99,6 +99,7 @@ function harness(choice: ToolChoice, options: HarnessOptions = {}) {
         keyName: def.keyName,
         transport: def.id === "github" ? github.transport : linear.transport,
         timeoutMs: 300,
+        connectTimeoutMs: 300,
       }),
   }).tools;
 
@@ -180,6 +181,35 @@ describe("the bug-report chain: Gmail → GitHub → Slack", () => {
     expect(h.sender.calls).toEqual([]);
     expect(h.shell.results.at(-1)).toContain('"the bugs channel"');
     expect(h.shell.results.at(-1)).toContain("Step 3");
+  });
+
+  // The live case itself (action-log row 413, 2026-10-10): the session's first GitHub use never
+  // got an answer to `initialize`. No dialog had appeared and no create had been sent.
+  it("says nothing was sent when GitHub never answers the connection, and creates nothing", async () => {
+    const h = harness(plan(BUG_CHAIN), { confirms: [true, true], github: { hangOnConnect: true } });
+    const outcome = await h.planner.run("file this bug on GitHub and tell #bugs");
+
+    expect(outcome.status).toBe("refused");
+    expect(outcome.chain).toEqual({ completed: 1, total: 3 });
+    expect(h.shell.results.at(-1)).toBe(
+      "GitHub didn't answer while I was connecting, so nothing was sent. It is safe to try again. " +
+        "I'd already done step 1 of 3, but steps 2 and 3 didn't run.",
+    );
+    expect(h.github.calls).toEqual([]);
+    expect(h.github.created).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(h.sender.calls).toEqual([]);
+  });
+
+  it("keeps the 'may or may not' warning when it is the CREATE that never answers", async () => {
+    const h = harness(plan(BUG_CHAIN), { confirms: [true, true], github: { hangOn: "issue_write" } });
+    const outcome = await h.planner.run("file this bug on GitHub and tell #bugs");
+
+    expect(outcome.chain).toEqual({ completed: 1, total: 3 });
+    expect(h.shell.results.at(-1)).toContain("it may or may not have gone through");
+    expect(h.shell.results.at(-1)).not.toContain("nothing was sent");
+    expect(h.github.calls.map((call) => call.name)).toEqual(["issue_write"]); // sent once, never twice
+    expect(h.shell.confirmMessages).toHaveLength(1); // this time the dialog WAS answered
   });
 
   it("reaches GitHub and ONLY GitHub — Linear, on the same menu, is never touched", async () => {

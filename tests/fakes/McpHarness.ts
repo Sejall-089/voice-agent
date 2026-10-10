@@ -61,6 +61,20 @@ export interface McpHarnessOptions {
   garble?: { tool: string; text: string };
   // connect() is refused the way a bad key is: the REAL error type, code and message.
   rejectKey?: boolean;
+  // THE THREE WAYS A CONNECTION CAN FAIL BEFORE ANY TOOL IS CALLED (M21). Each produces its
+  // failure the way the real thing does — the SDK's own client timing out, or the transport's
+  // own send rejecting — never a hand-thrown stand-in (CLAUDE.md, M16.7).
+  //
+  // `initialize` is never answered: the far end of the link exists and says nothing. The
+  // client's own connect timeout is what ends it (→ McpError -32001, as live).
+  hangOnConnect?: boolean;
+  // `initialize` is answered only after this long. For proving WHICH timeout governs connect.
+  connectDelayMs?: number;
+  // The connection opens, and `tools/list` is never answered.
+  hangOnList?: boolean;
+  // Nothing can be sent at all, the way no network looks: the transport's send rejects with the
+  // TypeError `fetch` throws.
+  unreachable?: boolean;
   timeline?: string[];
 }
 
@@ -91,8 +105,19 @@ export abstract class McpHarness {
       client.start = () => Promise.reject(new StreamableHTTPError(status, message));
       return client;
     }
+    if (this.harness.unreachable === true) {
+      const [client] = InMemoryTransport.createLinkedPair();
+      client.send = () => Promise.reject(new TypeError("fetch failed"));
+      return client;
+    }
     this.connections += 1;
     const [client, server] = InMemoryTransport.createLinkedPair();
+    // Nobody is ever put on the far end: `initialize` goes out and is never answered.
+    if (this.harness.hangOnConnect === true) return client;
+    if (this.harness.connectDelayMs !== undefined) {
+      setTimeout(() => void this.serve(server), this.harness.connectDelayMs);
+      return client;
+    }
     void this.serve(server);
     return client;
   };
@@ -109,6 +134,7 @@ export abstract class McpHarness {
     );
     server.setRequestHandler(ListToolsRequestSchema, () => {
       this.listCalls += 1;
+      if (this.harness.hangOnList === true) return new Promise<never>(() => undefined);
       return Promise.resolve({ tools: this.harness.tools ?? this.capturedTools() });
     });
     server.setRequestHandler(CallToolRequestSchema, async (request) => {

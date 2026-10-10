@@ -112,6 +112,7 @@ function harness(choice: ToolChoice, options: HarnessOptions = {}) {
         keyName: def.keyName,
         transport: server.transport,
         timeoutMs: 300,
+        connectTimeoutMs: 300,
       }),
   }).tools;
 
@@ -434,6 +435,62 @@ describe("a failed middle step means later steps never run", () => {
     expect(h.server.calls.filter((call) => call.name === "save_issue")).toHaveLength(1);
     expect(h.sender.calls).toEqual([]);
     expect(h.shell.results.at(-1)).toContain("it may or may not have gone through");
+  });
+
+  // LIVE FINDING (M21): the first GitHub use of a session timed out while CONNECTING, and the
+  // chain told the user the create "may or may not have gone through". It had never been sent —
+  // the connection is opened by the confirm summary, before the dialog. A failure there says so,
+  // and keeps the accounting of what did and did not run.
+  it.each([
+    { label: "the connection never answers", server: { hangOnConnect: true } },
+    { label: "the tool list never answers", server: { hangOnList: true } },
+  ])("says nothing was sent when $label, before any dialog", async ({ server }) => {
+    // Both confirms queued as YES: an empty dialog list can only mean none was reached.
+    const h = harness(plan(BUG_CHAIN), { confirms: [true, true], server });
+    const outcome = await h.planner.run("file this bug");
+
+    expect(outcome.status).toBe("refused");
+    expect(outcome.chain).toEqual({ completed: 1, total: 3 });
+    // The whole message: the reason, then the accounting, in one paragraph.
+    expect(h.shell.results.at(-1)).toBe(
+      "Linear didn't answer while I was connecting, so nothing was sent. It is safe to try again. " +
+        "I'd already done step 1 of 3, but steps 2 and 3 didn't run.",
+    );
+    expect(h.shell.results.at(-1)).not.toContain("may or may not");
+    // ZERO calls on the far side — no create, and no tool call of any kind.
+    expect(h.server.calls).toEqual([]);
+    expect(h.server.created).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(h.sender.calls).toEqual([]);
+    expect(h.log.entries.at(-1)).toMatchObject({ tool: "linear__create_issue", status: "refused" });
+  });
+
+  it("says nothing was sent when the network is down, and why", async () => {
+    const h = harness(plan(BUG_CHAIN), { confirms: [true, true], server: { unreachable: true } });
+    const outcome = await h.planner.run("file this bug");
+
+    expect(outcome.chain).toEqual({ completed: 1, total: 3 });
+    expect(h.shell.results.at(-1)).toBe(
+      "I couldn't reach Linear while I was connecting (fetch failed), so nothing was sent. It is safe to try again. " +
+        "I'd already done step 1 of 3, but steps 2 and 3 didn't run.",
+    );
+    expect(h.server.calls).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]);
+  });
+
+  it("says the same for a LONE connector call that cannot connect", async () => {
+    const h = harness(
+      { kind: "tool", name: "linear__create_issue", input: { title: TITLE } },
+      { confirms: [true], server: { hangOnConnect: true } },
+    );
+    const outcome = await h.planner.run("file an issue");
+
+    expect(outcome.status).toBe("refused");
+    expect(h.shell.results).toEqual([
+      "Linear didn't answer while I was connecting, so nothing was sent. It is safe to try again.",
+    ]);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(h.server.calls).toEqual([]);
   });
 
   it("never starts step 2 when there is no email open", async () => {

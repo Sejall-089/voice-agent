@@ -320,7 +320,11 @@ export type ConnectorReason =
   | "not-configured" // no connection was ever built for it
   | "denied" // the key was rejected
   | "unreachable" // network, DNS, a dropped connection
-  | "timeout"
+  // M21. It failed while CONNECTING — opening the link or reading the tool list — so no tool
+  // call had been sent. Its own reason, not a flavour of `timeout`, because the one thing a
+  // person needs to know differs: nothing happened on the far side, and trying again is safe.
+  | "connect-failed"
+  | "timeout" // a tool call that WAS sent and never answered
   | "invalid-arguments" // refused HERE, against our own pinned schema, before any call
   | "drift" // the server no longer offers or accepts what this build pinned
   | "tool-failed" // the server ran the tool and said no
@@ -357,9 +361,23 @@ export function connectorError(
       );
     case "unreachable":
       return new ConnectorError(reason, `I couldn't reach ${app}${said ? `: ${said}` : "."}`);
+    case "connect-failed":
+      // Found live (M21): the first GitHub use of a session timed out while connecting, and the
+      // user was told the create "may or may not have gone through". It had never been sent.
+      // "Nothing was sent" and "safe to try again" are the two facts that message got wrong.
+      // With no detail it is a timeout — the server said nothing; with one, something answered
+      // or broke, and the detail is our own description of it, bounded where it was read.
+      return new ConnectorError(
+        reason,
+        said.length === 0
+          ? `${app} didn't answer while I was connecting, so nothing was sent. It is safe to try again.`
+          : `I couldn't reach ${app} while I was connecting (${said}), so nothing was sent. ` +
+            `It is safe to try again.`,
+      );
     case "timeout":
       // "May or may not" is the honest part. A request that timed out was SENT; whether the
       // far side acted on it is unknown, and for a create that matters more than the delay.
+      // ONLY for a tool call: a timeout before one is `connect-failed`, above.
       return new ConnectorError(
         reason,
         `${app} didn't answer in time, so I stopped waiting. If I was changing something, ` +
