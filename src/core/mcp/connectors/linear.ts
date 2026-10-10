@@ -53,6 +53,7 @@ export const linearConnector: ConnectorDef = {
         "issue is about something the user is looking at, a step that reads it comes first; if " +
         "there is genuinely nothing to put there, leave `description` out. This cannot edit or " +
         "close an existing issue. The result is the new issue's identifier and its link.",
+      confirmLabel: "Create issue",
       inputSchema: {
         type: "object",
         properties: {

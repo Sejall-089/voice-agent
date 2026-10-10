@@ -88,6 +88,8 @@ export const createEventTool: Tool = {
     tiers: ["caution", "dangerous"],
     resolve: (input: ToolInput): Risk => tierFor(input),
   },
+  // Shown only when the call resolves to `dangerous` (an event with guests, who are emailed).
+  confirmLabel: "Create event",
   // The `caution` path: nobody else is affected, so it announces rather than asks.
   narrate: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const zone = await deps.calendar.calendarTimeZone();

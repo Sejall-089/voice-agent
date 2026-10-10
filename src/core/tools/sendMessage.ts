@@ -209,6 +209,7 @@ export const sendMessageTool: Tool = {
     required: ["channel"],
   },
   risk: "dangerous",
+  confirmLabel: "Send",
   // Only `channel` is a reference. `notes` is the user's message, to be sent as written — left
   // undeclared, a body that read "the team" was swapped for the fact it named.
   referenceArgs: ["channel"],

@@ -672,6 +672,16 @@ export interface Tool extends ToolSchema {
   // ("the team" is the subject to write, not a reference to look up), so resolving them would
   // silently replace the subject with the fact's current value.
   resolvesReferences?: boolean;
+  // The word on the confirm dialog's APPROVE button for this tool: "Create issue", "Send reply".
+  // Omitted → the shell's default, "Send" — what every confirm said before M21, when the button
+  // that approved creating an issue still read "Send".
+  //
+  // A PLAIN STRING, NOT A FUNCTION, ON PURPOSE. `confirmSummary` is a function because it
+  // describes this particular call and has to read the arguments and the world. The label is
+  // the opposite: it is the one piece of the dialog that reads as a command, so it is fixed in
+  // the tool's code and has no way to see an argument, a model's words, an email or a server's
+  // description. The planner passes it through untouched and passes nothing else.
+  confirmLabel?: string;
   // Settle what this call will ACTUALLY do, once, before anyone is asked about it.
   //
   // The planner runs it after memory resolution and validation and BEFORE the risk tier and

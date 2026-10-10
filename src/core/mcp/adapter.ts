@@ -156,6 +156,11 @@ export function buildConnectorTools(
       description: tool.description,
       inputSchema: tool.inputSchema,
       risk,
+      // From the PINNED definition and nowhere else. The server's own account of the tool —
+      // `remoteTool()`'s description, title, annotations — is never consulted for it; a
+      // conditional spread, so a tool that pins none has no property at all and gets the
+      // shell's default.
+      ...(tool.confirmLabel === undefined ? {} : { confirmLabel: tool.confirmLabel }),
       // Arguments are literals to SEND. Memory resolution rewrites any string that starts with
       // "the" or "my" — and this install's fact for "the team" is a Slack channel, which would
       // otherwise arrive at Linear as a team name. Same reasoning as `remember` and `openApp`.

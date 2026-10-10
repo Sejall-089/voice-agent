@@ -50,6 +50,20 @@ export type LocalAction =
   // reading of the word. See core/media.ts.
   | { kind: "mediaKey"; payload: MediaKey; count?: number };
 
+// How a confirm is presented, beyond what it asks.
+export interface ConfirmOptions {
+  // The word on the APPROVE button: "Create issue", "Send reply". Omitted → "Send", which is
+  // what every confirm said before a tool could say otherwise (shell/confirmLabel.ts).
+  //
+  // It changes the word and nothing else. Whatever it says, the approve button is the first
+  // one, and Cancel remains the second, the default, and what Escape means.
+  //
+  // A FIXED STRING FROM A TOOL'S OWN CODE, by contract. It is the one part of the dialog that
+  // reads as a command rather than a description, so the planner passes `tool.confirmLabel`
+  // and never anything a model, an argument, an email or a server wrote.
+  approveLabel?: string;
+}
+
 export interface OSShell {
   // Returns false when the OS refused the combo — another app already owns it. The caller
   // decides what to do about it; silently doing nothing is not an option, because a dead
@@ -59,7 +73,8 @@ export interface OSShell {
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }>;
   showInput(): Promise<string>; // opens command bar, resolves with typed text
   showResult(text: string): void; // result popup
-  confirm(message: string): Promise<boolean>; // yes/no dialog for `dangerous` actions (core/risk.ts)
+  // yes/no dialog for `dangerous` actions (core/risk.ts)
+  confirm(message: string, options?: ConfirmOptions): Promise<boolean>;
   // Put one question to the user and wait for one typed line.
   //
   // THE TWO "NOTHING"S ARE DIFFERENT, and the return type is what keeps them apart: `""` is an

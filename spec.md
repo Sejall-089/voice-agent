@@ -347,7 +347,8 @@ export interface OSShell {
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }>;
   showInput(): Promise<string>;                 // opens command bar, resolves with typed text
   showResult(text: string): void;               // result popup
-  confirm(message: string): Promise<boolean>;   // yes/no dialog for irreversible actions
+  // yes/no dialog for irreversible actions; the approve button's word is the tool's (M21)
+  confirm(message: string, options?: { approveLabel?: string }): Promise<boolean>;
   askUser(question: string): Promise<string | null>; // one typed line; see below
 }
 ```
@@ -1335,6 +1336,36 @@ Three things make this safe rather than a loophole:
   change the world it is classifying — the same rule `confirmSummary` got in M10 and
   `narrate` got in M11, widened for the same reason: `moveEvent` has to look up whether the
   event it would move has guests, and that fact lives in the calendar, not in the arguments.
+
+### `confirmLabel` (added 2026-10-10, M21)
+
+The confirm dialog's approve button said "Send" on every confirm — true while every `dangerous`
+tool sent something, and wrong once one of them created an issue. A tool may now declare
+`confirmLabel`, and `OSShell.confirm` takes it as `{ approveLabel }`.
+
+| Tool | Button |
+|------|--------|
+| `sendMessage` | Send |
+| `sendReply` | Send reply |
+| `createEvent` (when it has guests) | Create event |
+| `moveEvent` (when the event has guests) | Move event |
+| `linear__create_issue`, `github__create_issue` | Create issue |
+| anything else | Send (the default) |
+
+**It is a plain string, not a function, on purpose.** `confirmSummary` is a function because
+it describes one particular call and must read the arguments and the world. The label is the
+opposite: the one part of the dialog that reads as a command. So it is fixed in the tool's
+code and cannot see an argument, a model's words, an email or a server's description — and the
+planner puts `tool.confirmLabel`, and nothing else, into `confirm`'s options. For a connector
+tool it is pinned in the definition beside the pinned description (`ConnectorToolDef`), and
+the adapter never consults the server's own description, title or annotations for it.
+
+**What a label cannot change.** `WindowsShell.confirm` builds `buttons: [label, "Cancel"]`
+with `defaultId: 1` and `cancelId: 1` as before: the approve button is first, and Cancel is
+still the second button, the default (a stray Enter) and what Escape means. A blank label
+falls back to "Send" (`shell/confirmLabel.ts`, the one function both shells use, so
+`MockShell.confirmLabels` records exactly what Windows would show). The message keeps its
+`Step N of M:` prefix; the prefix is never on the button.
 
 ### `confirmSummary` (added in M5, widened in M10)
 
@@ -2661,6 +2692,7 @@ Post-v0:
       chain step; tests assert its absence from each of those.
       **The confirm button says "Send" on a create** — cosmetic, a follow-up, not fixed (the
       M19 follow-up list has the detail; a GitHub create is one more dialog it mislabels).
+      **Fixed in code by M21 (2026-10-10), not live-tested:** it now says "Create issue".
       **Links in the result bar are plain text, not clickable** — **resolved in code by M21
       (2026-10-10), not yet live-tested**: GitHub and Linear issue links in the result bar are
       now clickable (§4, "Result links"); nobody has yet clicked one in the running app. As
@@ -3247,6 +3279,9 @@ of it. None of it is started.
   it was the button pressed to approve SEJ-7. Name it after the action ("Create issue", "Send
   message"). Not designed: the label has to come from the tool, so it needs a way to reach
   `shell.confirm()` (today it takes one string), with "Cancel" staying the default button.
+  **Done 2026-10-10 (M21), not live-tested.** `confirm(message, { approveLabel })`; a tool
+  declares `confirmLabel`, a fixed string in its code, and the planner passes that and nothing
+  else (§6, "`confirmLabel`").
 - **Esc to stop speaking cancels a pending confirm.** Escape is this app's "be quiet" key, and
   it is also the native dialog's Cancel. The app speaks the confirm question, so someone
   silencing it with Esc cancels the confirm — fail-safe (nothing is sent), but it stops a chain.

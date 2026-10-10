@@ -64,6 +64,7 @@ export const githubConnector: ConnectorDef = {
         "there is genuinely nothing to put there, leave `body` out. The repository is already " +
         "chosen; you cannot name one. This cannot edit, comment on or close an existing issue. " +
         "The result is the new issue's number and its link.",
+      confirmLabel: "Create issue",
       inputSchema: {
         type: "object",
         properties: {

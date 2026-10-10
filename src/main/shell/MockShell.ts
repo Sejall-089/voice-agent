@@ -2,7 +2,8 @@ import type { AudioClip } from "../../core/types.ts";
 import { BUILT_IN_CATALOG, createAppLauncher, type AppLauncher } from "./appLaunch.ts";
 import { pressesFor } from "../../core/media.ts";
 import { virtualKeyFor } from "./mediaKeys.ts";
-import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
+import { approveLabel } from "./confirmLabel.ts";
+import type { CapturedContext, ConfirmOptions, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
 
@@ -48,6 +49,9 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   public readonly results: string[] = [];
   public readonly actions: LocalAction[] = [];
   public readonly confirmMessages: string[] = [];
+  // What the approve button said for each of those dialogs, in the same order — one entry per
+  // entry in `confirmMessages`.
+  public readonly confirmLabels: string[] = [];
   // Every question that was actually PUT, in order. One refused because the shell was busy is
   // not here: it was never shown to anyone.
   public readonly questions: string[] = [];
@@ -182,8 +186,11 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     this.thinking.push(on);
   }
 
-  confirm(message: string): Promise<boolean> {
+  confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
     this.confirmMessages.push(message);
+    // Through the SAME function the real shell uses, so what is recorded is the label Windows
+    // would show — default and blank-label fallback included — and never a more lenient one.
+    this.confirmLabels.push(approveLabel(options));
     // Set BEFORE anything awaits, and cleared on every path out — the same discipline
     // WindowsShell.confirm() follows, because "the dialog is up" and "the guard knows" must
     // never be observable in different states.

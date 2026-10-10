@@ -1683,3 +1683,57 @@ describe("WindowsShell — the bar cannot be navigated", () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 });
+
+// The approve button's label (M21). It used to be "Send" for everything — including a create.
+// What must NOT change with it is everything that makes the dialog safe: Cancel is still the
+// second button, still the default (a stray Enter), and still what Escape means.
+describe("WindowsShell.confirm — the approve button's label", () => {
+  type Options = { buttons: string[]; defaultId: number; cancelId: number; message: string };
+  const optionsOf = (call: number): Options =>
+    (dialogShowMessageBox.mock.calls[call] as unknown as [unknown, Options])[1];
+
+  it.each(["Create issue", "Create event", "Move event", "Send reply", "Send"])(
+    "shows %j on the approve button, with Cancel still second, default and Escape",
+    async (label) => {
+      await shell.confirm("Do it?", { approveLabel: label });
+
+      expect(optionsOf(0)).toMatchObject({
+        buttons: [label, "Cancel"],
+        defaultId: 1, // Cancel — a stray Enter approves nothing
+        cancelId: 1, // Escape, or closing the dialog, is Cancel
+        message: "Do it?",
+      });
+    },
+  );
+
+  it("says 'Send' when it is given no label", async () => {
+    await shell.confirm("Do it?");
+    await shell.confirm("Do it?", {});
+    expect(optionsOf(0).buttons).toEqual(["Send", "Cancel"]);
+    expect(optionsOf(1).buttons).toEqual(["Send", "Cancel"]);
+  });
+
+  it.each(["", "   "])("never shows an empty button: a blank label (%j) falls back to 'Send'", async (blank) => {
+    await shell.confirm("Do it?", { approveLabel: blank });
+    expect(optionsOf(0).buttons).toEqual(["Send", "Cancel"]);
+  });
+
+  it("is still cancelled by Escape and by the default button, whatever the label says", async () => {
+    // Index 1 is what Electron reports for the Cancel button, for Escape (cancelId) and for
+    // Enter on the default (defaultId). A label is a word; it changes none of that.
+    dialogShowMessageBox.mockImplementation(() => Promise.resolve({ response: 1 }));
+    await expect(shell.confirm("Create this issue?", { approveLabel: "Create issue" })).resolves.toBe(false);
+  });
+
+  it("is approved only by the first button, whatever the label says", async () => {
+    dialogShowMessageBox.mockImplementation(() => Promise.resolve({ response: 0 }));
+    await expect(shell.confirm("Create this issue?", { approveLabel: "Create issue" })).resolves.toBe(true);
+  });
+
+  it("keeps the message exactly as given — the label is not added to it or taken from it", async () => {
+    const message = "Step 2 of 3: Create this GitHub issue in o/r?\n\nTitle: Cancel\n\nSend";
+    await shell.confirm(message, { approveLabel: "Create issue" });
+    expect(optionsOf(0).message).toBe(message);
+    expect(optionsOf(0).buttons).toEqual(["Create issue", "Cancel"]);
+  });
+});

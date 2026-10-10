@@ -377,7 +377,14 @@ export class Planner {
       // question. Only the first paragraph is spoken — never the draft body (core/speech.ts).
       await this.say(toSpokenConfirm(asked));
 
-      const approved = await this.shell.confirm(asked);
+      // The approve button's word is the TOOL's — `confirmLabel`, a fixed string in its code —
+      // and that property is the only thing ever placed in these options. Not `args`, not the
+      // summary just built from them, not the step's `describe`: all of those can carry words
+      // the model, an email or a server wrote, and a button is read as a command.
+      const approved = await this.shell.confirm(
+        asked,
+        tool.confirmLabel === undefined ? undefined : { approveLabel: tool.confirmLabel },
+      );
       if (!approved) {
         this.log.logAction({
           ts: new Date().toISOString(),

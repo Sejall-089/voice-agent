@@ -58,6 +58,8 @@ export const moveEventTool: Tool = {
       return event.attendees.length > 0 ? "dangerous" : "caution";
     },
   },
+  // Shown only when the call resolves to `dangerous` (the event has guests, who are notified).
+  confirmLabel: "Move event",
   narrate: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const event = await resolveTargetEvent(input, deps);
     const zone = await deps.calendar.calendarTimeZone();

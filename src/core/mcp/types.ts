@@ -72,6 +72,11 @@ export interface ConnectorToolDef {
   remote: string;
   // Written here, for the planner model. Never the server's text.
   description: string;
+  // The word on the confirm dialog's approve button for this tool ("Create issue"). PINNED
+  // HERE, beside the description and for the same reason: it is ours, written in this build,
+  // and never anything the server says about its tool — not its description, its title or its
+  // annotations. Omitted → the shell's default ("Send"). See `Tool.confirmLabel`.
+  confirmLabel?: string;
   // What the model may propose, and what its proposal is validated against BEFORE anything is
   // sent. Must set `additionalProperties: false`: an argument that is not listed here cannot
   // reach the server, which is the whole of how `save_issue` is narrowed to "create".

@@ -21,6 +21,7 @@ export const sendReplyTool: Tool = {
     "before anything is sent.",
   inputSchema: { type: "object", properties: {}, required: [] },
   risk: "dangerous",
+  confirmLabel: "Send reply",
   // Reads the live compose box (SAFE) so the user approves the words that will actually go out.
   // Throwing here means the planner never opens a dialog and nothing is sent.
   confirmSummary: async (_args: ToolInput, deps: ToolDeps): Promise<string> => {

@@ -17,7 +17,8 @@ import { pressesFor } from "../../core/media.ts";
 import { isAllowedResultLink } from "../../core/resultLinks.ts";
 import type { InputInjector } from "./InputInjector.ts";
 import { virtualKeyFor } from "./mediaKeys.ts";
-import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
+import { approveLabel } from "./confirmLabel.ts";
+import type { CapturedContext, ConfirmOptions, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
 
@@ -788,7 +789,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     return this.confirmPending;
   }
 
-  async confirm(message: string): Promise<boolean> {
+  async confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
     // Set before anything awaits, so "the dialog is up" and "the guard knows" can never be
     // observed in different states.
     this.confirmPending = true;
@@ -825,7 +826,10 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     try {
       const { response } = await dialog.showMessageBox(this.window, {
         type: "question",
-        buttons: ["Send", "Cancel"],
+        // The first button's WORD is the tool's ("Create issue", "Send reply"), or "Send" when
+        // it named none. Its POSITION, and everything about Cancel, is fixed here and is not
+        // something a label can move.
+        buttons: [approveLabel(options), "Cancel"],
         defaultId: 1, // Cancel — a stray Enter must never fire a destructive action
         cancelId: 1, // Esc / closing the dialog means "no"
         noLink: true,

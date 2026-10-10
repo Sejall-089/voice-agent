@@ -228,6 +228,15 @@ describe("the bug-report chain: Gmail → GitHub → Slack", () => {
     expect(h.llm.completeCalls).toBe(0);
   });
 
+  it("labels the create step's button 'Create issue' and the send step's 'Send'", async () => {
+    const h = harness(plan(BUG_CHAIN), { confirms: [true, true] });
+    await h.planner.run("file this bug on GitHub");
+
+    expect(h.shell.confirmLabels).toEqual(["Create issue", "Send"]);
+    expect(h.shell.confirmMessages[0]?.startsWith("Step 2 of 3: ")).toBe(true);
+    expect(h.shell.confirmMessages[1]?.startsWith("Step 3 of 3: ")).toBe(true);
+  });
+
   it("shows the whole issue and the repository before creating it — never a placeholder", async () => {
     const h = harness(plan(BUG_CHAIN), { confirms: [true, true] });
     await h.planner.run("file this bug on GitHub");
