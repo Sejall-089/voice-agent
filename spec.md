@@ -1080,6 +1080,19 @@ Measured with the refusal deliberately shown to the model
 | "move my meeting" → still a clarifying question | 5/5 | 5/5 |
 | "schedule a meeting" → still a clarifying question | 5/5 | 5/5 |
 
+**Seen on a real screen** with `scripts/ask-recon/` (run through `run.mjs`; **the scripts send
+real keystrokes and flash a window** — read the header first):
+
+- `dismissed-then-again` runs the real planner, registry, hotkey handler, shell and renderer in
+  a real window against the real model: ask, dismiss with Escape, give the instruction again.
+  Before either fix the second attempt came back as prose (`no_tool`); after both it is a real
+  question (`isAskPending()` true and the question rendered). It executes no tool, uses a
+  throwaway memory database, and holds the context fixed and empty — its first run picked up
+  1,737 characters of clipboard, which changed the model's answer and made the bug vanish.
+- `hotkey-during-question` (typed and dictated) presses the hotkey through the OS while a
+  question is open: the question stays pending and rendered, the half-typed answer stays in
+  the box, no capture opens. This is what cleared the hotkey guard.
+
 The second row is the case the row filter above does **not** cover (a tool's own refusal is
 still shown), so the two fixes overlap on the first row only. One run of five per cell shows the
 direction, not a guarantee. **Not eliminated:** a prose reply is still displayed as a result,
