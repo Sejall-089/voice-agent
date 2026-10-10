@@ -692,6 +692,12 @@ Given the user's instruction and captured context, run exactly this sequence:
    (§7) to replace it with a concrete value. If a required reference can't be
    resolved, ask the user (via showInput) or refuse gracefully.
 5. **Validate** — all required args present and concrete?
+5a. **Prepare** (M21) — a tool may declare `prepare(args, deps)`. The planner runs it once,
+   here, and **uses the arguments it returns for everything after**: the tier, the narration,
+   the confirm dialog, the handler and the log row. It exists so a dialog shows what will
+   actually happen rather than a preview of the model's input (§6, "What is approved is what is
+   sent"). Safe work only — nothing has been approved yet. A throw ends the call before any
+   gate: a `UserFixableError` as a refusal in the tool's words, anything else as an error.
 5b. **Resolve the tier** — what does *this* call cost (§6)? Usually the constant the tool
    declares; for a tool with a `RiskPolicy` it is worked out from the resolved arguments,
    and may read the world to do it. Resolved **once** and reused by both gates below —
@@ -1018,6 +1024,62 @@ tool refuses in its own words. The pre-flight is deliberately one-sided: it neve
 the steps would have run (`tests/preflight.test.ts` runs each case alone and chained and
 compares), but it can pass a plan a step later refuses — `openTarget` with a plain word that is
 neither a reference nor a URL is the pinned example.
+
+#### What is approved is what is sent (added 2026-10-10, live fix)
+
+**The bug.** A lone "send these notes to the bugs channel" with nothing useful to send. Action
+log rows 417 and 418: in one the model had copied the instruction itself into `notes` (so the
+dialog previewed it), in the other there was no `notes` and the text came from the clipboard
+(so the dialog showed no body at all). Both times the formatter — which ran in the handler,
+*after* Send was pressed — replied "Please paste the rough notes you want formatted for the
+#bugs channel.", and that was posted. Nothing checked the formatter's output. ("#bugs" was the
+formatter paraphrasing the notes; it is never given the channel.)
+
+**The fix.** `sendMessage` declares `prepare` (planner step 5a). For a lone send it:
+
+1. checks the channel can be named (as the confirm and the handler also do);
+2. refuses if there is nothing to send — no `notes` and an empty or blank clipboard — with
+   "There's nothing to send. Copy the notes first (select them and press Ctrl+C), or put them
+   in the instruction — for example: send "standup moved to 3pm" to the team.";
+3. runs the formatter, and refuses if its reply is not a message (`isMessage`, below);
+4. returns the arguments with `notes` **replaced by the exact text to post**.
+
+The dialog then shows that whole text (no 140-character preview, no truncation) under the
+destination lines, and the handler sends `notes` as it finds them. **The handler never calls
+the model.** The cost, accepted: the dialog appears one model call later than before, and a
+cancelled send has still paid for that call. In a **chain** `prepare` does nothing — `notes` is
+already the exact text, shown in full and sent verbatim, as since M19.
+
+**How `isMessage` decides.** A reply is *not* a message when it is empty, when it is the word
+the formatter is told to use for "nothing to format" (`NO_NOTES`), or when one sentence talks
+about the notes *themselves* as wanted or missing: a word for the material (notes, text,
+content, message, details) together with a request for it ("paste/provide/share/send/give …
+you want / you'd like / to format", "what notes would you like…") or a statement there is none
+("no notes were provided", "any notes to format", "don't see … notes"). **Being a question, or
+saying "please", is deliberately not the rule** — "Can everyone review the PR by Friday?" is a
+message. It errs one way on purpose: a real message such as "Please share the notes you want
+reviewed" would be refused (a rephrase, nothing sent), which is cheaper than posting the app's
+confusion to a channel. The refusal does not repeat the formatter's words.
+
+**Measured against the real formatter** (`tests/eval/sendFormatter.eval.test.ts`,
+`M21_FORMATTER_EVAL=1`):
+
+| Input | Should be | First wording | Current wording |
+|-------|-----------|---------------|-----------------|
+| "send these notes to the bugs channel" | refused | 5/5 | 5/5 |
+| "post this to the team" | refused | 3/3 | 3/3 |
+| ordinary rough notes | sent | 2/2 | 2/2 |
+| "remind everyone the deploy is at 5pm today" | sent | **0/2** | 2/2 |
+| "can someone review PR 212 before friday?" | sent | 2/2 | 2/2 |
+
+The first wording of the `NO_NOTES` instruction ("only an instruction to send something")
+refused a genuine one-line note; it now says "nothing to tell anyone … without giving them".
+Every refusal in both runs was the literal `NO_NOTES`.
+
+**Still true:** "selected text" is the clipboard, so a send with no `notes` formats whatever
+was last copied. It is now *shown* before it is sent, which is the protection; it is not
+checked for relevance. The action log's `notes` is now the text that was sent, not the model's
+argument.
 
 #### Where a message really goes (added 2026-10-10)
 
@@ -3086,6 +3148,9 @@ of it. None of it is started.
 - **Standalone `sendMessage` reformats after the confirm.** The dialog shows a 140-character
   preview of the notes; the handler then rewrites them through a model and sends that. What is
   sent is not what was approved. Fixed for chains in M19; unchanged for a lone send.
+  **Fixed 2026-10-10 (M21)**, after it was hit live — Slack received the formatter's own
+  "Please paste the rough notes you want formatted for the #bugs channel." twice. See §6, "What
+  is approved is what is sent". Tests and two evals; not re-run live.
 - The previous turn's result (300 characters) reaches the next planning prompt; after a chain it
   can be external text. Left as is, by decision.
 - Gmail's "no email open" is a bare `Error`, so as step 1 of a chain it reads "Something went

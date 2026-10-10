@@ -121,11 +121,17 @@ describe("Voice → planner (dictation is just another way to produce the string
       clips: [CLIP],
       confirms: [false], // the user declines
     });
-    const llm = new FakeLLM({
-      kind: "tool",
-      name: "sendMessage",
-      input: { channel: "#design-team", text: "notes" },
-    });
+    // A completion, because a lone send now formats BEFORE the dialog and refuses when the
+    // formatter returns nothing — with the old empty default there would be no dialog to
+    // decline, and this test is about the dialog being reached.
+    const llm = new FakeLLM(
+      {
+        kind: "tool",
+        name: "sendMessage",
+        input: { channel: "#design-team", text: "notes" },
+      },
+      "• meeting notes",
+    );
     const log = new InMemoryActionLog();
     const planner = new Planner(llm, shell, registry, new NoopMemoryResolver(), log);
     const session = new VoiceSession(

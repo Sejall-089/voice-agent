@@ -230,7 +230,7 @@ export class Planner {
     //    like the risk gates below: the planner reads a property, it never knows the tool.
     //    A tool that declares `referenceArgs` has only those resolved: resolution inspects
     //    values, and cannot otherwise tell a destination from the message being sent to it.
-    const args: ToolInput =
+    const resolved: ToolInput =
       tool.resolvesReferences === false
         ? proposed
         : tool.referenceArgs === undefined
@@ -238,12 +238,12 @@ export class Planner {
           : { ...proposed, ...(await this.memory.resolveArgs(pick(proposed, tool.referenceArgs))) };
 
     // 5. Validate — required args present and concrete (generic; no tool-specific logic).
-    const missing = missingRequired(tool, args);
+    const missing = missingRequired(tool, resolved);
     if (missing.length > 0) {
       return await this.fail(
         instruction,
         tool.name,
-        args,
+        resolved,
         `Missing required information: ${missing.join(", ")}.`,
         step.report,
       );
@@ -274,6 +274,28 @@ export class Planner {
       tier: null,
       chained: step.chained,
     };
+
+    // 5a. Let the tool settle what this call will actually do (M21, `Tool.prepare`).
+    //
+    //     BEFORE the tier and both gates, and its answer REPLACES the arguments for everything
+    //     after it. That is the point: the tier, the narration, the confirm dialog, the handler
+    //     and the log row all see the same, final arguments — so a dialog cannot describe one
+    //     thing and a handler do another. Found live: `sendMessage`'s dialog previewed the rough
+    //     notes, and the formatter ran after Send was pressed and posted its own question.
+    //
+    //     Generic, like every other step here: the planner calls a property and never knows
+    //     which tool it belongs to. It gets the pre-tier deps for the reason the risk resolver
+    //     does — nothing has been decided yet. A throw ends the call before any gate: a
+    //     `UserFixableError` as a refusal in the tool's own words, anything else as an error.
+    //     Nothing has been approved at this point, so a tool may only do SAFE work here.
+    let args: ToolInput = resolved;
+    if (tool.prepare) {
+      try {
+        args = await tool.prepare(resolved, classifying);
+      } catch (error) {
+        return await this.failOrRefuse(instruction, tool.name, resolved, error, step.report);
+      }
+    }
 
     // 6. What does THIS call cost? Through M12 the answer was a constant the tool carried, and
     //    the two gates below each read it straight off `tool.risk`. M13 made the tier able to

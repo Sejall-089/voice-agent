@@ -654,6 +654,23 @@ export interface Tool extends ToolSchema {
   // ("the team" is the subject to write, not a reference to look up), so resolving them would
   // silently replace the subject with the fact's current value.
   resolvesReferences?: boolean;
+  // Settle what this call will ACTUALLY do, once, before anyone is asked about it.
+  //
+  // The planner runs it after memory resolution and validation and BEFORE the risk tier and
+  // both gates, and from then on uses the arguments it returns: the tier is decided from them,
+  // the narration and the confirm dialog describe them, the handler receives them, and the log
+  // records them. So a tool whose real action is not in the model's arguments — `sendMessage`
+  // posts a formatted message, not the rough notes it was handed — can make the dialog show the
+  // thing that will happen rather than a preview of its input.
+  //
+  // It may do SAFE work only (read, compute, call the model): nothing here has been approved.
+  // Throwing means the call cannot be done: a `UserFixableError` is a refusal in the tool's own
+  // words, anything else an error, and either way no gate fires and no handler runs.
+  //
+  // Before this, nothing connected a tool's confirm summary to its handler — each was handed
+  // the model's arguments separately, which is exactly how a dialog and a send came to
+  // disagree.
+  prepare?: (args: ToolInput, deps: ToolDeps) => ToolInput | Promise<ToolInput>;
   // WHICH arguments are references. When declared, the planner resolves these and no others;
   // when absent, every top-level string is a candidate, as it always was. Resolution inspects
   // values, so without this it cannot tell a tool's destination from its message — a body that

@@ -34,7 +34,9 @@ function session(options: {
   const db: Database = createDatabase(":memory:");
   const memory = new SqliteMemory(db);
   const shell = new MockShell({
-    context: contextWith(options.selectedText ?? NOTES),
+    // `undefined` means "the usual notes"; an explicit null means an EMPTY clipboard, which `??`
+    // would have quietly turned back into the notes.
+    context: contextWith(options.selectedText === undefined ? NOTES : options.selectedText),
     confirms: options.confirms,
   });
   const sender = options.sender ?? new FakeSender();
@@ -348,7 +350,10 @@ describe("sendMessage — the handler refuses on its own, with no gate in front 
 
     await d.call({ channel: "the team", notes: "hello" });
 
-    expect(d.sender.calls).toEqual([{ channel: "#design-team", text: "FORMATTED" }]);
+    // And it sends `notes` AS IT FINDS THEM: the handler never calls the formatter (that
+    // happens in `prepare`, before the dialog), so nothing can change after an approval.
+    expect(d.sender.calls).toEqual([{ channel: "#design-team", text: "hello" }]);
+    expect(d.llm.completeCalls).toBe(0);
   });
 });
 
@@ -362,7 +367,7 @@ describe("sendMessage — a known channel behaves as it always has", () => {
     // "Known" is about the channel being ACCEPTED. What the question says about where the
     // message goes is a separate matter, pinned in "honest about where a webhook posts" below.
     expect(s.shell.confirmMessages).toEqual([
-      "Send via your Slack webhook?\n(You asked for #design-team. A webhook posts to its own channel and ignores this.)",
+      "Send via your Slack webhook?\n(You asked for #design-team. A webhook posts to its own channel and ignores this.)\n\nFORMATTED",
     ]);
     expect((s.sender as FakeSender).calls).toEqual([{ channel: "#design-team", text: "FORMATTED" }]);
   });
@@ -416,7 +421,7 @@ describe("referenceArgs — the planner resolves only the arguments a tool decla
     expect(p.seen).toEqual([{ where: "the team", what: "the team", count: 3 }]);
   });
 
-  it("records the RESOLVED channel in the action log, the body as written", async () => {
+  it("records the RESOLVED channel in the action log, and never resolves the body", async () => {
     const s = session({ confirms: [true] });
     s.memory.write("team", "#design-team");
 
@@ -425,7 +430,10 @@ describe("referenceArgs — the planner resolves only the arguments a tool decla
       "send 'the team' to the team",
     );
 
-    expect(s.loggedArgs()).toEqual([{ channel: "#design-team", notes: "the team" }]);
+    // The body reached the formatter exactly as written — "the team", not the fact it names…
+    expect(s.lastLlm()?.lastUserPrompt).toBe("the team");
+    // …and what the log holds is the channel as resolved and the message as SENT.
+    expect(s.loggedArgs()).toEqual([{ channel: "#design-team", notes: "FORMATTED" }]);
   });
 });
 
@@ -434,7 +442,7 @@ describe("referenceArgs — the planner resolves only the arguments a tool decla
 describe("sendMessage — the message body is never a reference", () => {
   const BODY = "the team";
 
-  it("formats and previews the body as written when it matches a stored fact", async () => {
+  it("formats the body as written when it matches a stored fact", async () => {
     const s = session({ confirms: [true] });
     s.memory.write("team", "#design-team");
     // The precondition: this body IS something memory would rewrite, given the chance.
@@ -445,10 +453,12 @@ describe("sendMessage — the message body is never a reference", () => {
       "send 'the team' to #general",
     );
 
-    expect(s.shell.confirmMessages).toEqual([
-      `Send via your Slack webhook?\n(You asked for #general. A webhook posts to its own channel and ignores this.)\n\n${BODY}`,
-    ]);
+    // What the FORMATTER was handed is the body as written — that is where a rewrite by memory
+    // would have shown. (The dialog shows the formatter's output, which is what gets sent.)
     expect(s.lastLlm()?.lastUserPrompt).toBe(BODY);
+    expect(s.shell.confirmMessages).toEqual([
+      "Send via your Slack webhook?\n(You asked for #general. A webhook posts to its own channel and ignores this.)\n\nFORMATTED",
+    ]);
     expect((s.sender as FakeSender).calls[0]?.channel).toBe("#general");
   });
 
@@ -505,30 +515,36 @@ describe("sendMessage — honest about where a webhook posts", () => {
     session({ confirms: [true], sender: new FakeSender(result, false, postsTo) });
 
   describe("the confirm question", () => {
+    // Every lone send's dialog ends with the message itself, after a blank line. These tests are
+    // about the lines ABOVE it; "what is approved is what is sent" below is about the message.
+    const MESSAGE = "\n\nFORMATTED";
+
     it("names the webhook's channel, and nothing else, when that is the channel asked for", async () => {
       const s = through("#social");
       await s.turn(send("#social"), "send these to #social");
-      expect(s.shell.confirmMessages).toEqual(["Send to #social via your Slack webhook?"]);
+      expect(s.shell.confirmMessages).toEqual([`Send to #social via your Slack webhook?${MESSAGE}`]);
     });
 
     it("treats '#Social', 'social' and '#social' as the same channel", async () => {
       for (const asked of ["#Social", "social", " #social "]) {
         const s = through("#social");
         await s.turn(send(asked), "send these");
-        expect(s.shell.confirmMessages, asked).toEqual(["Send to #social via your Slack webhook?"]);
+        expect(s.shell.confirmMessages, asked).toEqual([`Send to #social via your Slack webhook?${MESSAGE}`]);
       }
     });
 
     it("says so on a second line when a DIFFERENT channel was asked for", async () => {
       const s = through("#social");
       await s.turn(send("#help"), "send these to #help");
-      expect(s.shell.confirmMessages).toEqual([`Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}`]);
+      expect(s.shell.confirmMessages).toEqual([
+        `Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}${MESSAGE}`,
+      ]);
     });
 
     it("names no destination at all when the webhook's channel is not configured", async () => {
       const s = through(null);
       await s.turn(send("#help"), "send these to #help");
-      expect(s.shell.confirmMessages).toEqual([`Send via your Slack webhook?\n${ASKED_NOTE_UNKNOWN}`]);
+      expect(s.shell.confirmMessages).toEqual([`Send via your Slack webhook?\n${ASKED_NOTE_UNKNOWN}${MESSAGE}`]);
     });
 
     it("reports the RESOLVED channel as what was asked for, not the phrase", async () => {
@@ -536,15 +552,15 @@ describe("sendMessage — honest about where a webhook posts", () => {
       s.memory.write("team", "#design-team");
       await s.turn(send("the team"), "send these to the team");
       expect(s.shell.confirmMessages[0]).toBe(
-        "Send to #social via your Slack webhook?\n(You asked for #design-team; the webhook posts to its own channel.)",
+        `Send to #social via your Slack webhook?\n(You asked for #design-team; the webhook posts to its own channel.)${MESSAGE}`,
       );
     });
 
-    it("keeps the message preview after a blank line, on a lone send", async () => {
+    it("keeps the message after a blank line, on a lone send", async () => {
       const s = through("#social");
-      await s.turn(send("#help", "ship it friday"), "send this");
+      await s.turn(send("#help", "ship it friday"), "send this", "• ship it Friday");
       expect(s.shell.confirmMessages).toEqual([
-        `Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}\n\nship it friday`,
+        `Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}\n\n• ship it Friday`,
       ]);
     });
 
@@ -636,6 +652,263 @@ describe("sendMessage — honest about where a webhook posts", () => {
         expect(withoutTheNote, text).not.toContain("#help");
       }
     });
+  });
+});
+
+// LIVE BUG (M21). "send these notes to the bugs channel", with nothing useful to send. The
+// dialog showed a 140-character preview of the raw `notes` argument — or nothing at all, when
+// the text came from the clipboard — and the formatter ran AFTER Send was pressed. Twice it
+// answered with a question of its own, and Slack received it:
+//
+//     Please paste the rough notes you want formatted for the #bugs channel.
+//
+// What was approved was not what was sent. Now the text is settled BEFORE the dialog
+// (`Tool.prepare`), the dialog shows all of it, and the handler sends that string and nothing else.
+describe("sendMessage — what is approved is what is sent", () => {
+  const QUESTION =
+    "Send via your Slack webhook?\n(You asked for #team. A webhook posts to its own channel and ignores this.)";
+  const lone = (notes?: string): ToolChoice => ({
+    kind: "tool",
+    name: "sendMessage",
+    input: notes === undefined ? { channel: "#team" } : { channel: "#team", notes },
+  });
+
+  it("shows, in the dialog, exactly the text it then sends — for text from the clipboard", async () => {
+    const s = session({ confirms: [true] });
+
+    const outcome = await s.turn(lone(), "send these notes to #team", "• shipped the memory engine\n• slack next");
+
+    const sent = (s.sender as FakeSender).calls[0]?.text;
+    expect(sent).toBe("• shipped the memory engine\n• slack next");
+    // The whole dialog, to the character: the question, a blank line, the message.
+    expect(s.shell.confirmMessages).toEqual([`${QUESTION}\n\n${sent ?? ""}`]);
+    expect(outcome.status).toBe("ok");
+  });
+
+  it("shows the WHOLE message, however long — never a preview of something else", async () => {
+    const long = `${"a long line of formatted notes. ".repeat(40)}THE END`;
+    const s = session({ confirms: [true] });
+
+    await s.turn(lone("rough notes"), "send these", long);
+
+    expect(s.shell.confirmMessages[0]).toBe(`${QUESTION}\n\n${long}`);
+    expect(s.shell.confirmMessages[0]).not.toContain("…");
+    expect((s.sender as FakeSender).calls[0]?.text).toBe(long);
+  });
+
+  it("formats ONCE, before the dialog, and never again after Send", async () => {
+    // Held open: "before the dialog" can only be seen while the dialog is still unanswered.
+    const db = createDatabase(":memory:");
+    const memory = new SqliteMemory(db);
+    const shell = new MockShell({ context: contextWith(NOTES), holdConfirm: true });
+    const sender = new FakeSender();
+    const llm = new FakeLLM(lone(), "FORMATTED");
+    const running = new Planner(llm, shell, registry, memory, memory, sender).run("send these to #team");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(shell.isConfirmPending()).toBe(true);
+    expect(llm.completeCalls).toBe(1); // already formatted
+    expect(llm.lastUserPrompt).toBe(NOTES);
+    expect(shell.confirmMessages[0]?.endsWith("\n\nFORMATTED")).toBe(true);
+    expect(sender.calls).toEqual([]); // and nothing has gone anywhere
+
+    shell.answerConfirm(true);
+    await running;
+
+    expect(llm.completeCalls).toBe(1); // the handler did not ask the formatter again
+    expect(sender.calls).toEqual([{ channel: "#team", text: "FORMATTED" }]);
+  });
+
+  it("sends nothing when the dialog is cancelled, though it had already formatted", async () => {
+    const s = session({ confirms: [false] });
+
+    const outcome = await s.turn(lone(), "send these to #team");
+
+    expect(outcome.status).toBe("cancelled");
+    expect((s.sender as FakeSender).calls).toEqual([]);
+    expect(s.lastLlm()?.completeCalls).toBe(1);
+  });
+
+  it("records what was actually sent as the logged message", async () => {
+    const s = session({ confirms: [true] });
+    await s.turn(lone("rough notes"), "send these", "THE FORMATTED TEXT");
+    expect(s.loggedArgs()).toEqual([{ channel: "#team", notes: "THE FORMATTED TEXT" }]);
+  });
+
+  // A formatter that answers with a request for the notes has not produced a message. It is
+  // refused before any dialog — an approval must never be asked for something that is not one.
+  describe("a formatter reply that asks for the notes is never sent", () => {
+    it.each([
+      "Please paste the rough notes you want formatted for the #bugs channel.", // row 417, live
+      "Please paste the rough notes you want formatted for the bugs channel.", // row 418, live
+      "NO_NOTES", // what the formatter is now told to say
+      "  no_notes\n",
+      "I don't see any notes to format — could you share them?",
+      "Could you provide the notes you'd like me to send?",
+      "What notes would you like me to format?",
+      "No notes were provided.",
+      "", // and a formatter that returned nothing at all
+      "   \n ",
+    ])("%j", async (reply) => {
+      const s = session({ confirms: [true] });
+
+      const outcome = await s.turn(lone("send these notes to the bugs channel"), "send these notes to the bugs channel", reply);
+
+      expect(s.shell.confirmMessages).toEqual([]); // never asked
+      expect((s.sender as FakeSender).calls).toEqual([]); // never sent
+      expect(outcome.status).toBe("refused");
+      expect(s.shell.results).toHaveLength(1);
+      expect(s.shell.results[0]).toMatch(/didn't send anything/i);
+      expect(s.shell.results[0]).not.toMatch(/something went wrong/i);
+      // What the formatter said is not shown as though it were the app's own words.
+      if (reply.trim().length > 0) expect(s.shell.results[0]).not.toContain(reply.trim());
+      expect(s.logRows()).toContainEqual({ tool: "sendMessage", status: "refused" });
+    });
+
+    // THE OTHER DIRECTION. A message may itself ask its readers something, or ask them for
+    // something — that is a message, not a request to the user for notes.
+    it.each([
+      "Can everyone review the PR by Friday?",
+      "Standup moved to 3pm. Please bring your updates.",
+      "Reminder: please send your timesheets to Dana by 5.",
+      "• Decision: ship Friday\n• Open question: who owns the rollback?",
+      "Notes from today's sync:\n- shipped the memory engine",
+    ])("but %j is a message, and is sent", async (reply) => {
+      const s = session({ confirms: [true] });
+
+      const outcome = await s.turn(lone(), "send these to #team", reply);
+
+      expect(outcome.status).toBe("ok");
+      expect((s.sender as FakeSender).calls[0]?.text).toBe(reply);
+    });
+  });
+
+  describe("with nothing to send", () => {
+    it.each([
+      { label: "an empty clipboard and no notes", selectedText: null, notes: undefined },
+      { label: "a blank clipboard and no notes", selectedText: "  \n ", notes: undefined },
+      { label: "blank notes and an empty clipboard", selectedText: null, notes: "   " },
+    ])("$label: refuses before any dialog, and says what to do", async ({ selectedText, notes }) => {
+      const s = session({ confirms: [true], selectedText });
+
+      const outcome = await s.turn(lone(notes), "send these notes to #team");
+
+      expect(s.shell.confirmMessages).toEqual([]);
+      expect((s.sender as FakeSender).calls).toEqual([]);
+      expect(outcome.status).toBe("refused");
+      expect(s.shell.results).toEqual([
+        "There's nothing to send. Copy the notes first (select them and press Ctrl+C), or put " +
+          'them in the instruction — for example: send "standup moved to 3pm" to the team.',
+      ]);
+      // Nothing was formatted for a message that did not exist.
+      expect(s.lastLlm()?.completeCalls).toBe(0);
+    });
+  });
+
+  it("leaves a chain exactly as it was: verbatim, shown in full, no formatter", async () => {
+    const s = session({ confirms: [true] });
+
+    const outcome = await s.turn(
+      {
+        kind: "plan",
+        steps: [
+          { tool: "summarize", arguments: {}, describe: "summarize it" },
+          { tool: "sendMessage", arguments: { channel: "#team", notes: "Summary: {step1}" }, describe: "send it" },
+        ],
+      },
+      "summarize this and send it to #team",
+      // The one completion in this run is the SUMMARY. It reads like a request on purpose: in a
+      // chain the text is another step's output and is not judged, only shown and sent.
+      "Please paste the notes you want formatted.",
+    );
+
+    expect(outcome.status).toBe("ok");
+    expect(s.lastLlm()?.completeCalls).toBe(1); // summarize only — the send formatted nothing
+    const sent = "Summary: Please paste the notes you want formatted.";
+    expect(s.shell.confirmMessages).toEqual([`Step 2 of 2: ${QUESTION}\n\n${sent}`]);
+    expect((s.sender as FakeSender).calls).toEqual([{ channel: "#team", text: sent }]);
+  });
+});
+
+// `Tool.prepare`: the planner's one generic step for "settle what this call will actually do
+// before anyone is asked about it". Pinned on a probe tool, so it is a property of the planner.
+describe("Tool.prepare — arguments are settled once, before the gates", () => {
+  function probe(prepare: Tool["prepare"]) {
+    const events: string[] = [];
+    const tool: Tool = {
+      name: "probe",
+      description: "",
+      inputSchema: { type: "object", properties: {}, required: ["text"] },
+      risk: {
+        tiers: ["dangerous"],
+        resolve: (args) => {
+          events.push(`tier:${String(args["text"])}`);
+          return Promise.resolve("dangerous" as const);
+        },
+      },
+      prepare,
+      confirmSummary: (args) => {
+        events.push(`confirm:${String(args["text"])}`);
+        return `Do ${String(args["text"])}?`;
+      },
+      handler: (args) => {
+        events.push(`handler:${String(args["text"])}`);
+        return Promise.resolve("done");
+      },
+    };
+    const db = createDatabase(":memory:");
+    const memory = new SqliteMemory(db);
+    const shell = new MockShell({ context: contextWith(null), confirms: [true] });
+    const choice: ToolChoice = { kind: "tool", name: "probe", input: { text: "raw" } };
+    const run = () => new Planner(new FakeLLM(choice), shell, [tool], memory, memory).run("probe");
+    const logged = () =>
+      db.prepare<[], { arguments: string | null; status: string }>("SELECT arguments, status FROM action_log").all();
+    return { run, events, shell, logged };
+  }
+
+  it("hands the prepared arguments to the tier, the dialog, the handler and the log", async () => {
+    let calls = 0;
+    const p = probe(async (args) => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5)); // really asynchronous
+      return { ...args, text: "PREPARED" };
+    });
+
+    await p.run();
+
+    expect(calls).toBe(1);
+    expect(p.events).toEqual(["tier:PREPARED", "confirm:PREPARED", "handler:PREPARED"]);
+    expect(p.shell.confirmMessages).toEqual(["Do PREPARED?"]);
+    expect(p.logged()).toEqual([{ arguments: JSON.stringify({ text: "PREPARED" }), status: "ok" }]);
+  });
+
+  it("refuses with the tool's own words, before any gate, when prepare says it cannot be done", async () => {
+    const p = probe(() => {
+      throw new UnresolvedReferenceError("Nothing to do that with.");
+    });
+
+    const outcome = await p.run();
+
+    expect(outcome.status).toBe("refused");
+    expect(p.events).toEqual([]); // no tier, no dialog, no handler
+    expect(p.shell.confirmMessages).toEqual([]);
+    expect(p.shell.results).toEqual(["Nothing to do that with."]);
+  });
+
+  it("reports a prepare that breaks as an error, and still runs nothing", async () => {
+    const p = probe(() => Promise.reject(new Error("formatter exploded")));
+
+    const outcome = await p.run();
+
+    expect(outcome.status).toBe("error");
+    expect(p.events).toEqual([]);
+    expect(p.shell.confirmMessages).toEqual([]);
+  });
+
+  it("changes nothing for a tool without one", async () => {
+    const p = probe(undefined);
+    await p.run();
+    expect(p.events).toEqual(["tier:raw", "confirm:raw", "handler:raw"]);
   });
 });
 

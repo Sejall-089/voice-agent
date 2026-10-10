@@ -1,12 +1,72 @@
-import { UnresolvedReferenceError } from "../errors.ts";
+import { UnresolvedReferenceError, UserFixableError } from "../errors.ts";
 import { checkReference } from "../memory/checkReference.ts";
 import type { Memory, Tool, ToolDeps, ToolInput } from "../types.ts";
 
-const FORMAT_SYSTEM = [
+// What the formatter says when it was handed nothing to format. A fixed word rather than a
+// sentence, so it can be recognised exactly instead of guessed at.
+const NO_NOTES = "NO_NOTES";
+
+// Exported for tests/eval/sendFormatter.eval.test.ts, which puts it to the real model.
+export const FORMAT_SYSTEM = [
   "You format rough notes into a clean message to post in a team chat channel.",
   "Keep every concrete detail (names, dates, numbers, decisions, owners). Add nothing new.",
   "Use short lines or bullets. No preamble, no sign-off, no commentary — output only the message.",
+  // M21 live finding. Handed the user's own instruction instead of notes ("send these notes to
+  // the bugs channel"), the formatter replied "Please paste the rough notes you want formatted
+  // for the #bugs channel." — and that reply was posted to Slack. It has no one to ask: its
+  // output IS the message.
+  //
+  // WORDED AROUND "NOTHING TO TELL ANYONE", after the first wording ("only an instruction to
+  // send something") was measured refusing a real note: "remind everyone the deploy is at 5pm
+  // today" came back NO_NOTES 2 of 2. That text is phrased as an order and still carries the
+  // whole message. What makes the live input empty is that it names notes and does not GIVE
+  // them (tests/eval/sendFormatter.eval.test.ts).
+  "You cannot ask the user anything: whatever you output is posted as the message. Text phrased",
+  "as a request — 'remind everyone the deploy is at 5', 'tell them standup moved' — still",
+  "carries information: turn it into the message. Only when the text contains nothing to tell",
+  "anyone — it is empty, or it merely says to send or post some notes without giving them, like",
+  `'send these notes to the team' — output exactly ${NO_NOTES} and nothing else.`,
 ].join(" ");
+
+// --- Is this a message, or the formatter asking for one? ---
+//
+// HOW IT DECIDES, in order. The reply is NOT a message when:
+//
+//   1. it is empty, or is the word the formatter is told to use (NO_NOTES, any case); or
+//   2. it talks about the notes THEMSELVES as something missing or wanted. One sentence must
+//      contain BOTH a word for the material — notes, text, content, message, details — and
+//      either a request for it addressed to the reader (paste / provide / share / send / give /
+//      supply … "you want", "you'd like", "to format", "to send"; or "what/which notes … would
+//      you like / do you want / should I"), or a statement that there is none ("no notes
+//      provided", "any notes to format", "don't see … notes").
+//
+// Deliberately NOT a rule: "it is a question" or "it says please". Real messages do both —
+// "Can everyone review the PR by Friday?", "Please send your timesheets to Dana by 5." — and
+// refusing those would make the tool useless for exactly what it is for. The rule is about the
+// notes being asked FOR, which a message to a team is essentially never about.
+//
+// IT CAN BE WRONG IN ONE DIRECTION ON PURPOSE. A genuine message such as "Please share the
+// notes you want reviewed" would be refused. That costs a rephrase and sends nothing; the other
+// mistake posts the app's own confusion to a channel of people.
+const MATERIAL = "(?:notes?|text|content|message|details)";
+const ASKS_FOR_NOTES = [
+  new RegExp(
+    `\\b(?:paste|provide|share|send|give|supply)\\b[^.?!\\n]*\\b${MATERIAL}\\b[^.?!\\n]*\\b(?:you want|you'd like|you would like|to format|to send|to post|formatted)\\b`,
+    "i",
+  ),
+  new RegExp(
+    `\\b(?:what|which)\\b[^.?!\\n]*\\b${MATERIAL}\\b[^.?!\\n]*\\b(?:would you like|do you want|you want|you'd like|should I)\\b`,
+    "i",
+  ),
+  new RegExp(`\\b(?:no|any)\\b(?: rough)? ${MATERIAL}\\b[^.?!\\n]*\\b(?:provided|included|given|found|to format|to send)\\b`, "i"),
+  new RegExp(`\\b(?:don't|do not|didn't|did not|can't|cannot) see\\b[^.?!\\n]*\\b${MATERIAL}\\b`, "i"),
+];
+
+export function isMessage(reply: string): boolean {
+  const text = reply.trim();
+  if (text.length === 0 || text.toUpperCase() === NO_NOTES) return false;
+  return !ASKS_FOR_NOTES.some((pattern) => pattern.test(text));
+}
 
 export type ChannelCheck = { ok: true; channel: string } | { ok: false; reason: string };
 
@@ -92,18 +152,25 @@ function postsTo(deps: ToolDeps): string | null {
   return deps.sender.postsTo ?? null;
 }
 
-function preview(text: string, max = 140): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
-}
-
-// The text this call is about: `notes` when the instruction carried them, otherwise what the user
-// selected. ONE function, used by both the confirm summary and the handler, so in a chain the
-// two cannot disagree about what is being sent.
+// The text this call is about: `notes` when there are any, otherwise what the user "selected" —
+// which in this app means the CLIPBOARD (spec §4), so it is rarely empty and not always
+// relevant. ONE function, used by `prepare`, the confirm summary and the handler, so they cannot
+// disagree about what is being sent.
 function sourceText(input: ToolInput, deps: ToolDeps): string | null {
   const notes = input["notes"];
   return typeof notes === "string" && notes.trim().length > 0 ? notes : deps.context.selectedText;
 }
+
+const NOTHING_TO_SEND =
+  "There's nothing to send. Copy the notes first (select them and press Ctrl+C), or put them in " +
+  'the instruction — for example: send "standup moved to 3pm" to the team.';
+
+// Said when the formatter did not produce a message. Its own words are NOT repeated: they are a
+// model's, addressed to nobody, and showing them as the app's would be the bug in a new place.
+const NOT_A_MESSAGE =
+  "I didn't send anything: what I was given to send wasn't notes, so there was no message to " +
+  "make from it. Copy the notes you want sent (select them and press Ctrl+C), or put them in " +
+  "the instruction, then ask again.";
 
 // Task 5 (spec.md §6): format notes and send them to Slack. THE FIRST `dangerous` TOOL (§risk) —
 // it cannot be undone, so the planner forces it through shell.confirm() before the handler runs.
@@ -155,18 +222,49 @@ export const sendMessageTool: Tool = {
       },
     },
   },
+  // THE MESSAGE IS SETTLED HERE, BEFORE ANYONE IS ASKED (M21, `Tool.prepare`).
+  //
+  // A lone send formats rough notes with a model. Through M20 that happened in the handler —
+  // AFTER the dialog — so the dialog could only show a 140-character preview of the input (or
+  // nothing, when the text came from the clipboard), and whatever the model produced was posted
+  // unseen. Found live: with nothing useful to send, it produced "Please paste the rough notes
+  // you want formatted for the #bugs channel." and Slack received that, twice.
+  //
+  // So for a lone send this does, in order, and refuses at the first that fails:
+  //   1. the channel is one we can name (the same check the confirm and the handler make)
+  //   2. there IS something to send
+  //   3. the formatter's reply is a message, not a request for one (`isMessage`)
+  // and returns the arguments with `notes` REPLACED by the exact text to post. The planner
+  // hands those to the dialog and the handler, which show and send `notes` as they find it.
+  //
+  // The cost, accepted on purpose: the dialog appears one model call later than it used to,
+  // and a send that is then cancelled has still paid for that call.
+  //
+  // IN A CHAIN it does nothing at all. There `notes` is written by the plan and filled from
+  // earlier steps ("New bug filed: {step2}"); it is already the exact text, and is shown in
+  // full and sent verbatim exactly as it has been since M19.
+  prepare: async (args: ToolInput, deps: ToolDeps): Promise<ToolInput> => {
+    if (deps.chained) return args;
+
+    knownChannel(args, deps);
+
+    const raw = sourceText(args, deps);
+    if (raw === null || raw.trim().length === 0) throw new UserFixableError(NOTHING_TO_SEND);
+
+    const formatted = (await deps.llm.complete(FORMAT_SYSTEM, raw)).trim();
+    if (!isMessage(formatted)) throw new UserFixableError(NOT_A_MESSAGE);
+
+    return { ...args, notes: formatted };
+  },
   // The planner has resolved `channel` by now, so the user approves the real destination — and
   // one it could NOT resolve is refused here, BEFORE the dialog (`checkChannel` asks memory
   // again and gets the same answer). Throwing from a confirm summary means nothing runs
   // and nothing is asked: the user is never shown "Send to the bugs channel?" and then told,
   // after pressing Send, that there is no such place.
   //
-  // IN A CHAIN (M19) IT SHOWS THE WHOLE MESSAGE, AND THE HANDLER SENDS EXACTLY THAT. Standalone,
-  // this is a 140-character preview of notes that are then reformatted by a model AFTER the
-  // user has said yes — a gap that predates chains and is on the follow-up list rather than
-  // fixed here. A chain must not inherit it: the text is another step's output (a ticket link,
-  // someone's email), the user has not seen it anywhere else, and it must not pass through a
-  // model between the dialog and the send.
+  // IT SHOWS THE WHOLE MESSAGE, AND THE HANDLER SENDS EXACTLY THAT — lone or chained. By the
+  // time this runs, `notes` is the exact text to post (see `prepare`); nothing is previewed,
+  // truncated or reformatted between this dialog and the send.
   //
   // WHAT THE QUESTION NAMES is where the message is really going — the webhook's channel, or
   // just "your Slack webhook" — and the channel that was asked for only as a note beneath it
@@ -176,30 +274,21 @@ export const sendMessageTool: Tool = {
     const channel = knownChannel(args, deps);
     const where = postsTo(deps);
     const question = withNote(`Send ${destination(where)}?`, channel, where);
-    if (deps.chained) {
-      const text = sourceText(args, deps);
-      return text ? `${question}\n\n${text}` : question;
-    }
-    const notes = typeof args["notes"] === "string" ? args["notes"] : "";
-    const body = notes ? `\n\n${preview(notes)}` : "";
-    return `${question}${body}`;
+    const text = sourceText(args, deps);
+    return text ? `${question}\n\n${text}` : question;
   },
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     // Asked again rather than trusted: the confirm summary's answer does not travel here, and a
     // handler must not depend on a gate having run to know where it is sending.
     const channel = knownChannel(input, deps);
 
-    const rawNotes = sourceText(input, deps);
+    // SENT AS IT IS FOUND. No model is called here, ever: the text the dialog showed is the
+    // text that is posted. Formatting, when there is any, already happened in `prepare`.
+    const formatted = sourceText(input, deps);
 
-    if (!rawNotes || rawNotes.trim().length === 0) {
-      throw new Error("There's nothing to send — select and copy the notes first.");
+    if (!formatted || formatted.trim().length === 0) {
+      throw new UserFixableError(NOTHING_TO_SEND);
     }
-
-    // VERBATIM in a chain: the text the confirm dialog showed is the text that is sent, with no
-    // model in between. See `confirmSummary` above.
-    const formatted = deps.chained
-      ? rawNotes
-      : await deps.llm.complete(FORMAT_SYSTEM, rawNotes);
 
     const where = postsTo(deps);
     const result = await deps.sender.send(channel, formatted);

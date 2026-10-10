@@ -661,7 +661,7 @@ describe("a lone connector call", () => {
 });
 
 describe("sendMessage: verbatim inside a chain, unchanged outside one", () => {
-  it("still reformats and previews a LONE send, exactly as before M19", async () => {
+  it("still reformats a LONE send — and now shows the reformatted text it will send", async () => {
     const notes = "x".repeat(400);
     const h = harness(
       { kind: "tool", name: "sendMessage", input: { channel: "#bugs", notes } },
@@ -671,8 +671,10 @@ describe("sendMessage: verbatim inside a chain, unchanged outside one", () => {
 
     expect(h.llm.completeCalls).toBe(1);
     expect(h.sender.calls[0]?.text).toBe("REWRITTEN BY A MODEL");
-    // The 140-character preview — the standalone gap that is on the follow-up list.
-    expect(h.shell.confirmMessages[0]).toBe(`${SEND_BUGS}\n\n${"x".repeat(140)}…`);
+    // Through M20 this was a 140-character preview of the RAW notes, with the model's rewrite
+    // sent unseen — the standalone gap on the follow-up list. Closed at M21: the dialog shows
+    // exactly what is posted (tests/sendMessage.test.ts, "what is approved is what is sent").
+    expect(h.shell.confirmMessages[0]).toBe(`${SEND_BUGS}\n\nREWRITTEN BY A MODEL`);
   });
 
   it("sends selected text verbatim too, when a chained step gives no notes", async () => {
