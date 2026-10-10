@@ -2,6 +2,7 @@
 //
 //   node scripts/ask-recon/run.mjs hotkey-during-question [typed|dictated]
 //   node scripts/ask-recon/run.mjs dismissed-then-again
+//   node scripts/ask-recon/run.mjs result-links          (flashes a window; sends no OS keys)
 //
 // !! THESE SEND REAL KEYSTROKES TO YOUR DESKTOP AND FLASH WINDOWS. !!
 //
@@ -36,7 +37,7 @@ const [name, ...args] = process.argv.slice(2);
 
 const entry = join(here, `${name}.ts`);
 if (!name || !existsSync(entry)) {
-  console.error("usage: node scripts/ask-recon/run.mjs <hotkey-during-question|dismissed-then-again> [args]");
+  console.error("usage: node scripts/ask-recon/run.mjs <hotkey-during-question|dismissed-then-again|result-links> [args]");
   process.exit(2);
 }
 for (const built of ["out/preload/preload.js", "out/renderer/index.html"]) {

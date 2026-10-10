@@ -129,6 +129,26 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* A link in a result (M21): an issue URL this app handed back. Underlined so it reads as a link
+   in a block of otherwise plain text, and with a visible focus ring — it can be reached with
+   Tab and opened with Enter. */
+.result-link {
+  color: #c9e6ff;
+  text-decoration: underline;
+  cursor: pointer;
+  border-radius: 3px;
+  -webkit-app-region: no-drag;
+}
+
+.result-link:hover {
+  color: #ffffff;
+}
+
+.result-link:focus-visible {
+  outline: 2px solid #9ad0ff;
+  outline-offset: 2px;
+}
+
 .command-echo::-webkit-scrollbar {
   width: 8px;
 }

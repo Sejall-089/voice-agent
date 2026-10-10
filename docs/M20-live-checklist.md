@@ -169,7 +169,23 @@ checklist stood at 11 ticked, 16 open; with "Live results 3" it stands at **15 t
 
 ### Finding 1 — links in the result bar are plain text, not clickable
 
-**Not an M20 bug; a UI follow-up for the result bar. Not fixed.** The link in a result
+> **RESOLVED IN CODE BY M21 (2026-10-10) — NOT YET LIVE-TESTED.** GitHub and Linear issue
+> links in the result bar are now clickable and open in the default browser; everything else
+> stays plain text. Only `https` URLs whose host is exactly `github.com` or `linear.app` are
+> links, and main checks the URL again before opening it (`spec.md` §4, "Result links").
+> Verified by unit tests, a jsdom test of the rendered bar, and
+> `node scripts/ask-recon/run.mjs result-links` on a real Electron window — which records what
+> would be opened rather than opening a browser. **What nobody has done yet is click a real
+> link in the running app and watch the browser open.** To check: file or read an issue, then
+> click the link (and try Tab + Enter). Tick this when you have:
+>
+> - [ ] clicked a `Created #N` link in the live app and the right issue opened in the browser
+> - [ ] the Linear link, the same way
+>
+> The original finding is kept below as it was written.
+
+**Not an M20 bug; a UI follow-up for the result bar. Not fixed** (at the time of writing — see
+the note above). The link in a result
 (`Created #3: …`, and each line of a list) is shown as text: it cannot be clicked. It had to be
 copied and pasted into a browser. **The links themselves are correct** — the pasted one opened
 the right issue.
@@ -184,7 +200,7 @@ the fix.**
 
 | Where the link appears | Clickable? | Anything to do? |
 |---|---|---|
-| The result bar | No | **Yes — this is the follow-up.** |
+| The result bar | No (at M20). **Yes since M21, in code — not live-tested** | Done in M21; see the note at the top of this finding. |
 | The step 3 confirm dialog (`Send to #social?` with the link in the message) | No | No. It is a native Windows message box and cannot be made clickable. |
 | The message in Slack | Yes | No. Slack linkifies it itself. |
 

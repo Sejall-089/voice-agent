@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // vi.mock factories are hoisted and run during WindowsShell's own import, before this
 // file's body executes, so the doubles have to be built inside vi.hoisted().
-const { ipcMain, makeWindow, globalShortcut, dialogShowMessageBox } = await vi.hoisted(async () => {
+const { ipcMain, makeWindow, globalShortcut, dialogShowMessageBox, openExternal } = await vi.hoisted(async () => {
   const { EventEmitter } = await import("node:events");
 
   // A real EventEmitter, so listenerCount() means exactly what it means in production.
@@ -76,12 +76,27 @@ const { ipcMain, makeWindow, globalShortcut, dialogShowMessageBox } = await vi.h
         send(channel: string, ...args: unknown[]): void {
           win.sent.push({ channel, args });
         },
+        // What the real webContents offers for refusing navigation (M21, result links). Recorded
+        // rather than acted on, so a test can call the handlers exactly as Electron would.
+        url: "http://localhost:5173/index.html", // test-only: what getURL() answers
+        windowOpenHandler: null as ((details: { url: string }) => { action: string }) | null,
+        navigationListeners: [] as ((event: { preventDefault(): void }, url: string) => void)[],
+        getURL: (): string => win.webContents.url,
+        setWindowOpenHandler(handler: (details: { url: string }) => { action: string }): void {
+          win.webContents.windowOpenHandler = handler;
+        },
+        on(event: string, listener: (event: { preventDefault(): void }, url: string) => void): void {
+          if (event === "will-navigate") win.webContents.navigationListeners.push(listener);
+        },
       },
     });
     return win;
   };
 
-  return { ipcMain: emitter, makeWindow, globalShortcut, dialogShowMessageBox };
+  // A spy, so the result-link tests can see exactly what — if anything — reached the OS.
+  const openExternal = vi.fn((_url: string) => Promise.resolve());
+
+  return { ipcMain: emitter, makeWindow, globalShortcut, dialogShowMessageBox, openExternal };
 });
 
 vi.mock("electron", () => ({
@@ -90,7 +105,7 @@ vi.mock("electron", () => ({
   globalShortcut,
   clipboard: { readText: () => "", writeText: () => undefined },
   dialog: { showMessageBox: dialogShowMessageBox },
-  shell: { openExternal: () => Promise.resolve() },
+  shell: { openExternal },
 }));
 
 const { WindowsShell } = await import("../src/main/shell/WindowsShell.ts");
@@ -151,6 +166,7 @@ beforeEach(() => {
   globalShortcut._handlers.clear();
   dialogShowMessageBox.mockReset();
   dialogShowMessageBox.mockImplementation(() => Promise.resolve({ response: 1 }));
+  openExternal.mockClear();
   window = makeWindow();
   shell = new WindowsShell(window as unknown as Electron.BrowserWindow);
 });
@@ -1539,5 +1555,131 @@ describe("WindowsShell.askUser", () => {
     answer("#bugs");
     await asking;
     expect(busy.getState()).toBe("idle");
+  });
+});
+
+// Result links (M21). The renderer draws certain URLs as links and, on a click, asks main to
+// open one. Main does not take the renderer's word for it: the renderer is the process showing
+// text other people wrote, so whatever arrives on this channel is checked again from scratch,
+// and anything that fails is dropped with NO side effect — nothing opened, nothing shown.
+describe("WindowsShell — opening a result link", () => {
+  const GITHUB = "https://github.com/Sejall-089/throwaway_repo/issues/3";
+  const LINEAR = "https://linear.app/sejal/issue/SEJ-7/login-button-does-nothing";
+  const fromRenderer = (payload: unknown): void => {
+    ipcMain.emit("commandbar:open-link", {}, payload);
+  };
+
+  it.each([GITHUB, LINEAR])("opens %s in the default browser, exactly once, exactly as sent", async (url) => {
+    fromRenderer(url);
+    await flush();
+
+    expect(openExternal).toHaveBeenCalledTimes(1);
+    expect(openExternal).toHaveBeenCalledWith(url);
+  });
+
+  it.each([
+    ["an allowed host as a subdomain label of another", "https://github.com.evil.com/Sejall-089/x/issues/3"],
+    ["an allowed host in another host's path", "https://evil.com/github.com/x"],
+    ["no scheme at all", "evil.com/github.com"],
+    ["http", "http://github.com/Sejall-089/x/issues/3"],
+    ["javascript:", "javascript:alert(document.cookie)"],
+    ["file:", "file:///C:/Windows/System32/calc.exe"],
+    ["data:", "data:text/html,<script>alert(1)</script>"],
+    ["a username", "https://user@github.com/Sejall-089/x"],
+    ["a username and password", "https://user:secret@github.com/x"],
+    ["the real host used as a username", "https://github.com@evil.com/x"],
+    ["a subdomain of an allowed host", "https://gist.github.com/x"],
+    ["an explicit port", "https://github.com:8443/x"],
+    ["an app protocol", "spotify:track:123"],
+    ["a good URL with a second one after a newline", `${GITHUB}\nhttps://evil.com`],
+    ["a good URL with leading whitespace", ` ${GITHUB}`],
+    ["an empty string", ""],
+  ])("REJECTS %s sent straight to main, and does nothing at all", async (_label, url) => {
+    const sentBefore = window.sent.length;
+
+    fromRenderer(url);
+    await flush();
+
+    expect(openExternal).not.toHaveBeenCalled();
+    // No side effect of any kind: nothing sent back to the renderer, the bar not shown.
+    expect(window.sent.length).toBe(sentBefore);
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it.each([[undefined], [null], [42], [{ url: GITHUB }], [[GITHUB]]])(
+    "rejects a payload that is not a string (%j) without throwing",
+    async (payload) => {
+      expect(() => fromRenderer(payload)).not.toThrow();
+      await flush();
+      expect(openExternal).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports whether it opened anything, to a direct caller", async () => {
+    await expect(shell.openResultLink(GITHUB)).resolves.toBe(true);
+    await expect(shell.openResultLink("https://github.com.evil.com/x")).resolves.toBe(false);
+    expect(openExternal.mock.calls).toEqual([[GITHUB]]);
+  });
+
+  it("goes through the existing openUrl action — one path to the OS, not a second one", async () => {
+    const seen: unknown[] = [];
+    const real = shell.executeAction.bind(shell);
+    shell.executeAction = (action) => {
+      seen.push(action);
+      return real(action);
+    };
+
+    fromRenderer(GITHUB);
+    await flush();
+
+    expect(seen).toEqual([{ kind: "openUrl", payload: GITHUB }]);
+  });
+
+  it("holds the listener count flat: one handler for the app's lifetime", () => {
+    expect(ipcMain.listenerCount("commandbar:open-link")).toBe(1);
+  });
+});
+
+// The bar's own window must never navigate. It is the app's UI with the preload bridge attached;
+// a web page loaded INTO it would have that bridge in reach. A click on a result link asks main
+// to open the default browser (above) — and these two refusals are the backstop for the day a
+// click is ever handled by the browser instead of by our handler.
+describe("WindowsShell — the bar cannot be navigated", () => {
+  it("denies every new window, whatever the URL", () => {
+    const handler = window.webContents.windowOpenHandler;
+    expect(handler).not.toBeNull();
+
+    for (const url of [
+      "https://github.com/Sejall-089/throwaway_repo/issues/3", // even an allowed one
+      "https://evil.com/",
+      "about:blank",
+      "file:///C:/x",
+    ]) {
+      expect(handler?.({ url }), url).toEqual({ action: "deny" });
+    }
+    expect(openExternal).not.toHaveBeenCalled(); // denying is all it does
+  });
+
+  it.each([
+    "https://github.com/Sejall-089/throwaway_repo/issues/3",
+    "https://evil.com/",
+    "file:///C:/Windows/System32/calc.exe",
+    "http://localhost:5173/other.html",
+  ])("prevents the window navigating to %s", (url) => {
+    expect(window.webContents.navigationListeners).toHaveLength(1);
+    const event = { preventDefault: vi.fn() };
+
+    window.webContents.navigationListeners[0]?.(event, url);
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the page reload itself, so the dev server's hot reload keeps working", () => {
+    // The one navigation that is not a navigation AWAY: the same URL the window is already on.
+    const event = { preventDefault: vi.fn() };
+
+    window.webContents.navigationListeners[0]?.(event, window.webContents.getURL());
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
   });
 });

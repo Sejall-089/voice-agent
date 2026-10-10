@@ -47,6 +47,13 @@ const api = {
   submit(text: string): void {
     ipcRenderer.send("commandbar:submit", text);
   },
+  // renderer → main: the user clicked a link in the result. The ONLY way this window can cause
+  // a URL to be opened — it is handed a string and nothing else, and main decides, checking the
+  // URL again itself, whether it is one this app opens (core/resultLinks.ts). It returns
+  // nothing: the renderer is not told whether it worked.
+  openResultLink(url: string): void {
+    ipcRenderer.send("commandbar:open-link", url);
+  },
   // renderer → main: user dismissed the bar (Escape).
   close(): void {
     ipcRenderer.send("commandbar:close");

@@ -396,6 +396,50 @@ same refusal while a confirm or another question is pending.
 answer, the placeholder) has no test and has not been seen running. It is now reachable — a
 chain naming an unknown channel — so it can be looked at live.
 
+### Result links (added 2026-10-10, M21 — resolves M20's Finding 1)
+
+A result is text, and not all of it is this app's: an issue title or an email body is written
+by someone else and reaches the result bar unchanged. So "clickable links" does not mean every
+URL. It means the issue links this app itself hands back.
+
+**The rule — one function, one list** (`core/resultLinks.ts`, `RESULT_LINK_HOSTS`:
+`github.com`, `linear.app`). A URL is a link only when all of these hold:
+
+- the string is the URL and nothing else — lowercase `https://`, no whitespace, control
+  character or backslash;
+- the scheme is `https` (not `http`, `javascript:`, `file:`, `data:` or an app protocol);
+- the hostname is **exactly** one in the list — `github.com.evil.com` and `gist.github.com` are
+  other hosts, and `evil.com/github.com` is a path;
+- no username or password (`https://github.com@evil.com` goes to evil.com);
+- no explicit port.
+
+**Used twice, on purpose.**
+
+| Where | What it does |
+|-------|--------------|
+| Renderer — `ResultText.tsx`, used by `CommandBar.tsx` | `splitResultLinks` cuts the result into text and link parts, rendered as React text nodes and `<a>` elements — never `dangerouslySetInnerHTML`, so markup in a result is shown as characters. The link's text is the URL. A click, or Enter on a focused link, is **prevented** and calls `window.api.openResultLink(url)`. Anything that is not an allowed link stays plain text, unchanged. |
+| Preload | one function, `openResultLink(url)` → `commandbar:open-link`. It returns nothing. |
+| Main — `WindowsShell.openResultLink` | **re-validates** with the same function (the argument is `unknown`: the renderer is the process displaying other people's text and is not trusted to have checked), then opens through the existing `openUrl` action. A URL that fails is dropped with no side effect — nothing opened, shown or logged. |
+
+**The bar's own window never navigates.** `setWindowOpenHandler` denies every new window and
+`will-navigate` is prevented for every URL except the page reloading itself (the dev server's
+hot reload). This is the backstop for any click the renderer's handler does not catch — a
+middle click, for one.
+
+**Verified:** `tests/resultLinks.test.ts` (the rule and the splitter, including every
+look-alike above), `src/renderer/ResultText.test.tsx` (jsdom: what is drawn, what a click and
+Enter do — it sits beside the component because it needs the renderer's JSX/DOM compiler
+settings), `tests/WindowsShell.capture.test.ts` (main rejects each bad URL sent to it directly;
+navigation refused), and `node scripts/ask-recon/run.mjs result-links` on a real Electron
+window (a real click and a real Enter reach main as the right URL; `window.open`,
+`location.href` and a middle click go nowhere). `scripts/vite-fs-probe.mjs` confirms the dev
+server serves the renderer's import from `src/core`. **Not live-tested:** nobody has yet
+clicked a link in the running app and watched the browser open.
+
+**Not covered:** links in the confirm dialog (a native message box; cannot be made clickable)
+and any host not on the list — adding a connector means adding its host to
+`RESULT_LINK_HOSTS`.
+
 **Build a `MockShell` first.** It returns canned context, logs actions instead of
 running them, and lets the entire core + memory + tests run headless with no
 Electron. Wire the real `WindowsShell` last.
@@ -2574,7 +2618,10 @@ Post-v0:
       chain step; tests assert its absence from each of those.
       **The confirm button says "Send" on a create** — cosmetic, a follow-up, not fixed (the
       M19 follow-up list has the detail; a GitHub create is one more dialog it mislabels).
-      **Links in the result bar are plain text, not clickable** — found in the live pass; a UI
+      **Links in the result bar are plain text, not clickable** — **resolved in code by M21
+      (2026-10-10), not yet live-tested**: GitHub and Linear issue links in the result bar are
+      now clickable (§4, "Result links"); nobody has yet clicked one in the running app. As
+      found: a UI
       follow-up for the result bar, not an M20 bug, not fixed. The links are correct, but one
       had to be copied into a browser. Seen on GitHub results only; it likely applies to
       Linear's too, not checked (`docs/M20-live-checklist.md`, Finding 1). **Only the result

@@ -14,6 +14,7 @@ import {
   type AppLauncher,
 } from "./appLaunch.ts";
 import { pressesFor } from "../../core/media.ts";
+import { isAllowedResultLink } from "../../core/resultLinks.ts";
 import type { InputInjector } from "./InputInjector.ts";
 import { virtualKeyFor } from "./mediaKeys.ts";
 import type { CapturedContext, LocalAction, OSShell } from "./OSShell.ts";
@@ -115,6 +116,27 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       // refused while a capture is pending, and the instruction hotkey is blocked by a question.
       if (this.pendingAsk !== null) this.endAsk(typed);
       else this.resolveInput(typed);
+    });
+
+    // A click on a link in the result bar (M21). Registered once, like the two above.
+    ipcMain.on("commandbar:open-link", (_event, url: unknown) => {
+      void this.openResultLink(url);
+    });
+
+    // THE BAR'S OWN WINDOW NEVER NAVIGATES AND NEVER OPENS ANOTHER (M21).
+    //
+    // This window is the app's UI, with the preload bridge attached. A web page loaded INTO it
+    // would have that bridge within reach, and a result is partly text other people wrote. The
+    // renderer's link handler prevents the browser's own navigation and asks main instead — and
+    // these two refusals are what holds if that handler is ever not the thing that runs: a
+    // middle click, a drag, a link someone adds later without one.
+    //
+    // The one navigation let through is the page reloading ITSELF: same URL, nothing new
+    // loaded. That is what the dev server's hot reload does, and blocking it would break
+    // development while protecting nothing.
+    this.window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    this.window.webContents.on("will-navigate", (event, url) => {
+      if (url !== this.window.webContents.getURL()) event.preventDefault();
     });
 
     // The capture is tied to the WINDOW being hidden, not to our own hide() having been the
@@ -408,6 +430,23 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     if (!this.window.isFocused()) {
       this.scheduleAutoHide();
     }
+  }
+
+  // Open a link the user clicked in the result bar — if, checked again HERE, it is one this app
+  // is willing to open (core/resultLinks.ts: https, an exact host from the allowlist, no
+  // username or password, nothing else). Resolves true only when something was opened.
+  //
+  // The argument is `unknown` because it arrives over IPC from the renderer, which is the
+  // process displaying text other people wrote. It is not trusted to have checked anything.
+  // A URL that fails is DROPPED: nothing is opened, nothing is shown, nothing is logged — a
+  // rejection that announced itself would be a way to make the app say things.
+  //
+  // What passes goes through the SAME `openUrl` action a tool uses, so there is one path from
+  // this app to the OS's URL handler and its own http(s) check still applies.
+  async openResultLink(url: unknown): Promise<boolean> {
+    if (!isAllowedResultLink(url)) return false;
+    const result = await this.executeAction({ kind: "openUrl", payload: url });
+    return result.ok;
   }
 
   // Says what is about to happen (or just happened) BEFORE/without stealing focus. Original

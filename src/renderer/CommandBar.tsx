@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MicRecorder } from "./audio/recorder.ts";
 import { SpeechPlayer } from "./audio/player.ts";
+import { ResultText } from "./ResultText.tsx";
 
 type VoiceState = "idle" | "recording" | "stopped" | "transcribing";
 
@@ -226,7 +227,13 @@ export function CommandBar(): JSX.Element {
       )}
 
       {heard !== null && <div className="voice-heard">Heard: “{heard}”</div>}
-      {echo !== null && <div className="command-echo">{echo}</div>}
+      {/* The result. Plain text, except that the issue links this app itself hands back are
+          drawn as links — see ResultText for which, and for what a click does. */}
+      {echo !== null && (
+        <div className="command-echo">
+          <ResultText text={echo} />
+        </div>
+      )}
     </div>
   );
 }
