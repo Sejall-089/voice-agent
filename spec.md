@@ -959,6 +959,21 @@ still switches resolution off entirely and wins over a declaration.
 | `sendMessage` | `["channel"]` — `notes` is sent as written |
 | `openTarget` | `["target", "url"]` — its only arguments, so what is resolved is unchanged |
 
+**Declaring `referenceArgs` also opts a tool into the chain pre-flight.** `runChain` calls
+`preflightReferences(steps, registry, memory)` (`core/chain.ts`) after `validatePlan` and before
+step 1. For each step whose tool declares `referenceArgs` (and has not set
+`resolvesReferences: false`): an argument containing `{stepN}` is skipped; every other declared
+argument is put to `checkReference`; and the step is refused only when **none** of them is
+usable or pending. The list is read as alternatives because `openTarget`'s are — "the Spotify
+web player" with a real `url` beside it must not be refused — and for a one-argument tool
+"none" and "each" coincide. A refusal goes through `refusePlan`: nothing has run, the message
+names the reference and its step ("Step 3 of my plan needs "the bugs channel", and I don't know
+what that refers to yet…"). A one-step plan is not pre-flighted; it runs as a lone call and the
+tool refuses in its own words. The pre-flight is deliberately one-sided: it never refuses a plan
+the steps would have run (`tests/preflight.test.ts` runs each case alone and chained and
+compares), but it can pass a plan a step later refuses — `openTarget` with a plain word that is
+neither a reference nor a URL is the pinned example.
+
 "Does this value name something we know?" is one function, `checkReference(value, memory)` in
 `core/memory/checkReference.ts`: a literal is taken as given; a "my/the" reference must resolve
 through `memory.resolve` (one lookup, never chased); empty, or a reference that does not
@@ -2880,10 +2895,16 @@ of it. None of it is started.
   (`docs/M20-live-checklist.md`, Finding 3). One detail from reading the code then, not from
   a run: the refusal was in `sendMessage`'s handler, which runs AFTER that step's confirm gate
   — so the step 3 dialog would ask "Send to the bugs channel?" before the step is refused.
-  **That detail is fixed (2026-10-10):** the check is now `checkChannel`, asked from the
-  confirm summary, so step 3 is refused with no dialog (§ `referenceArgs`). **The
-  orphaned issue is NOT fixed** — the refusal still happens at step 3, after step 2 has
-  created the issue. Tests only; not re-run live.
+  **Fixed in code 2026-10-10, not yet re-run live.** Two changes (§ `referenceArgs`):
+  the step's own check is now `checkChannel`, asked from the confirm summary, so a step is
+  refused with no dialog; and `runChain` runs a pre-flight (`preflightReferences`) after
+  `validatePlan` and before step 1, which refuses the WHOLE plan — nothing read, created,
+  announced or asked — when a step names a reference memory does not know. Against the fake
+  Linear and GitHub servers the unknown-channel chain now makes zero calls. What it does not
+  cover, each of which still stops at the step as before: a channel that is a `{stepN}`
+  placeholder (unknowable until that step runs); a LITERAL channel that does not exist
+  (`#typo` — there is no list of real channels, and a webhook may ignore `channel` anyway);
+  and any tool that does not declare `referenceArgs`.
 - **The confirm dialog's approve button says "Send" on every confirm, including a create.**
   `WindowsShell.confirm()` hard-codes `buttons: ["Send", "Cancel"]`, which was accurate while
   the only `dangerous` tools sent something (Slack, Gmail). It now also fronts

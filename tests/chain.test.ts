@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MAX_STEPS,
   MIN_PREVIEW_HOLD_MS,
+  preflightReferences,
   previewHoldRemaining,
   previewPlan,
   resolveStepArgs,
@@ -10,7 +11,9 @@ import {
   validatePlan,
 } from "../src/core/chain.ts";
 import { buildRegistry, toToolSchemas } from "../src/core/registry.ts";
-import type { PlannedStep } from "../src/core/types.ts";
+import { createDatabase } from "../src/core/memory/db.ts";
+import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
+import type { PlannedStep, Tool } from "../src/core/types.ts";
 
 // The REAL schemas, not hand-written stand-ins. Everything this file asserts about argument
 // positions ("start isn't text", "notes is") is only meaningful if it is measured against the
@@ -351,5 +354,153 @@ describe("previewHoldRemaining", () => {
     // Defensive: `now` should never be before `shownAt` in the real app (Date.now() is
     // monotonic in practice here), but a clock oddity must not ask for MORE than the full hold.
     expect(previewHoldRemaining(1000, 900)).toBe(MIN_PREVIEW_HOLD_MS);
+  });
+});
+
+// The pre-flight: is every reference a step NAMES something we know — asked once, before step 1,
+// so a plan is never started that was always going to stop at its last step.
+//
+// Real tools and a real memory: the rule being pinned is "this agrees with what the planner and
+// the tools will do", and a hand-written stand-in for either would agree only with itself.
+describe("preflightReferences", () => {
+  const REGISTRY = buildRegistry({ gmail: true, notion: true, calendar: true });
+
+  function memoryWith(facts: Record<string, string>): SqliteMemory {
+    const memory = new SqliteMemory(createDatabase(":memory:"));
+    for (const [subject, value] of Object.entries(facts)) memory.write(subject, value);
+    return memory;
+  }
+
+  const NOTHING_KNOWN = memoryWith({});
+  const KNOWN = memoryWith({
+    "bugs channel": "#bugs",
+    "target:dashboard": "https://dash.example.com",
+  });
+
+  const send = (channel: unknown, notes = "{step1}") =>
+    step("sendMessage", channel === undefined ? { notes } : { channel, notes });
+
+  it("refuses an unknown channel, naming the reference and the step it is in", () => {
+    const plan = [step("readEmail"), step("summarize"), send("the bugs channel")];
+
+    const check = preflightReferences(plan, REGISTRY, NOTHING_KNOWN);
+
+    expect(check.ok).toBe(false);
+    if (check.ok) return;
+    expect(check.reason).toContain("Step 3");
+    expect(check.reason).toContain('"the bugs channel"');
+    expect(check.reason).toMatch(/didn't start/);
+  });
+
+  it("passes the same plan once the channel is known", () => {
+    const plan = [step("readEmail"), step("summarize"), send("the bugs channel")];
+    expect(preflightReferences(plan, REGISTRY, KNOWN)).toEqual({ ok: true });
+  });
+
+  it("passes a literal channel with nothing stored at all", () => {
+    expect(preflightReferences([step("summarize"), send("#bugs")], REGISTRY, NOTHING_KNOWN)).toEqual({
+      ok: true,
+    });
+  });
+
+  // An argument that depends on an earlier step cannot be judged before that step has run. It is
+  // SKIPPED here and checked where it always was — by the step itself, on the real value.
+  it.each(["{step1}", "the {step1}", "{ step 1 }", "my {STEP1} channel"])(
+    "skips a channel that contains a placeholder (%j)",
+    (channel) => {
+      const plan = [step("summarize"), send(channel)];
+      expect(preflightReferences(plan, REGISTRY, NOTHING_KNOWN)).toEqual({ ok: true });
+    },
+  );
+
+  it("does NOT skip a channel merely because the message has a placeholder", () => {
+    // The precondition for the skip test above meaning anything: `notes` is "{step1}" here too.
+    const check = preflightReferences([step("summarize"), send("the bugs channel")], REGISTRY, NOTHING_KNOWN);
+    expect(check.ok).toBe(false);
+  });
+
+  it.each([
+    { label: "empty", channel: "" },
+    { label: "blank", channel: "  " },
+    { label: "missing", channel: undefined },
+  ])("refuses a $label channel, naming the step and the argument", ({ channel }) => {
+    const check = preflightReferences([step("summarize"), send(channel)], REGISTRY, KNOWN);
+    expect(check.ok).toBe(false);
+    if (check.ok) return;
+    expect(check.reason).toContain("Step 2");
+    expect(check.reason).toContain('"channel"');
+  });
+
+  it("reports the FIRST step that cannot run", () => {
+    const plan = [
+      step("openTarget", { target: "my dashboard" }),
+      step("summarize"),
+      send("the bugs channel"),
+    ];
+    const check = preflightReferences(plan, REGISTRY, NOTHING_KNOWN);
+    expect(check.ok).toBe(false);
+    if (check.ok) return;
+    expect(check.reason).toContain("Step 1");
+    expect(check.reason).toContain('"my dashboard"');
+  });
+
+  it("never judges an argument a tool did not declare, however reference-like it reads", () => {
+    const plan = [
+      step("addToPage", { instruction: "the launch moved to Friday" }),
+      step("rewrite", { tone: "my usual tone" }),
+      send("#bugs", "the team"),
+    ];
+    expect(preflightReferences(plan, REGISTRY, NOTHING_KNOWN)).toEqual({ ok: true });
+  });
+
+  it("leaves a tool that opts out of resolution alone, whatever it declares", () => {
+    const tool = (extra: Pick<Tool, "resolvesReferences">): Tool => ({
+      name: "probe",
+      description: "",
+      inputSchema: { type: "object", properties: {}, required: [] },
+      risk: "safe",
+      referenceArgs: ["where"],
+      ...extra,
+      handler: () => Promise.resolve(""),
+    });
+    const plan = [step("probe", { where: "the bugs channel" }), step("probe", { where: "#x" })];
+
+    expect(preflightReferences(plan, [tool({ resolvesReferences: false })], NOTHING_KNOWN)).toEqual({
+      ok: true,
+    });
+    // ...and the same tool WITHOUT the opt-out is refused, so the line above is the flag's doing.
+    expect(preflightReferences(plan, [tool({})], NOTHING_KNOWN).ok).toBe(false);
+  });
+
+  // `openTarget` declares two arguments and needs EITHER. The list is read as alternatives, or a
+  // plan that would have run is refused: "the Spotify web player" is phrased like a reference,
+  // is in nobody's memory, and opens perfectly well from the URL beside it.
+  describe("a tool that declares alternatives (openTarget)", () => {
+    const open = (args: Record<string, unknown>) => [step("openTarget", args), step("summarize")];
+
+    it("passes when one alternative is real, though the other is an unknown reference", () => {
+      const plan = open({ target: "the Spotify web player", url: "https://open.spotify.com" });
+      expect(preflightReferences(plan, REGISTRY, NOTHING_KNOWN)).toEqual({ ok: true });
+    });
+
+    it("refuses when the only thing given is an unknown reference", () => {
+      for (const args of [{ target: "my dashboard" }, { target: "my dashboard", url: "" }]) {
+        const check = preflightReferences(open(args), REGISTRY, NOTHING_KNOWN);
+        expect(check.ok, JSON.stringify(args)).toBe(false);
+        if (check.ok) return;
+        expect(check.reason).toContain('"my dashboard"');
+      }
+    });
+
+    it("passes a known reference with the URL left empty, as the tool's own description asks", () => {
+      expect(preflightReferences(open({ target: "my dashboard", url: "" }), REGISTRY, KNOWN)).toEqual({
+        ok: true,
+      });
+    });
+
+    it("passes when an alternative waits on an earlier step", () => {
+      const plan = [step("summarize"), step("openTarget", { target: "{step1}", url: "" })];
+      expect(preflightReferences(plan, REGISTRY, NOTHING_KNOWN)).toEqual({ ok: true });
+    });
   });
 });

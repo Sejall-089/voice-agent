@@ -440,6 +440,68 @@ describe("a failed middle step means later steps never run", () => {
   });
 });
 
+// Live testing orphaned SEJ-7 and SEJ-8 exactly this way: the issue was created at step 2, the
+// channel turned out to be unknown at step 3, and nobody was told about the issue. Whether a
+// reference resolves is knowable before step 1 — so it is asked then.
+describe("an unknown channel stops the plan before it starts", () => {
+  const UNKNOWN_CHANNEL: PlannedStep[] = [
+    BUG_CHAIN[0]!,
+    BUG_CHAIN[1]!,
+    step("sendMessage", { channel: "the bugs channel", notes: "New bug filed: {step2}" }, "tell the bugs channel"),
+  ];
+
+  it("creates nothing in Linear, reads nothing, asks nothing, and says which reference and step", async () => {
+    // Both confirms queued as YES: if either dialog were reached it would be approved, so the
+    // empty lists below can only mean nothing got that far.
+    const h = harness(plan(UNKNOWN_CHANNEL), { confirms: [true, true] });
+    const outcome = await h.planner.run("file this bug in Linear and tell the bugs channel");
+
+    expect(outcome.status).toBe("refused");
+    expect(outcome.chain).toEqual({ completed: 0, total: 3 });
+    // Zero calls on the far side — not merely "no issue": no connection was even opened.
+    expect(h.server.calls).toEqual([]);
+    expect(h.server.created).toEqual([]);
+    expect(h.server.connections).toBe(0);
+    // The reference is in step 3 and it stopped step 1.
+    expect(h.gmail.calls).toEqual([]);
+    expect(h.timeline).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(h.sender.calls).toEqual([]);
+    // Never announced: a plan that was not going to run is not previewed.
+    expect(h.shell.actions.filter((action) => action.kind === "notify")).toEqual([]);
+
+    expect(h.shell.results).toHaveLength(1);
+    expect(h.shell.results[0]).toContain("Step 3");
+    expect(h.shell.results[0]).toContain('"the bugs channel"');
+    expect(h.log.entries).toHaveLength(1);
+    expect(h.log.entries[0]).toMatchObject({ status: "refused", tool: null });
+  });
+
+  it("runs the same plan unchanged once the channel is known", async () => {
+    const memory = new SqliteMemory(createDatabase(":memory:"));
+    memory.write("bugs channel", "#bugs");
+    const h = harness(plan(UNKNOWN_CHANNEL), { confirms: [true, true], memory });
+    const outcome = await h.planner.run("file this bug in Linear and tell the bugs channel");
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.chain).toEqual({ completed: 3, total: 3 });
+    expect(h.server.created).toHaveLength(1);
+    expect(h.sender.calls).toHaveLength(1);
+    expect(h.sender.calls[0]?.channel).toBe("#bugs");
+    expect(h.shell.confirmMessages[1]).toMatch(/^Step 3 of 3: Send to #bugs\?/);
+  });
+
+  it("leaves the literal-channel chain exactly as it was", async () => {
+    // BUG_CHAIN's channel is "#bugs" and this harness's memory knows nothing: the pre-flight
+    // must not start demanding that literals be known.
+    const h = harness(plan(BUG_CHAIN), { confirms: [true, true] });
+    const outcome = await h.planner.run("file this bug in Linear and tell #bugs");
+
+    expect(outcome.chain).toEqual({ completed: 3, total: 3 });
+    expect(h.timeline).toEqual(["gmail:readOpenEmail", "mcp:save_issue"]);
+  });
+});
+
 describe("the registry stays closed", () => {
   // Real tools on Linear's server, and the remote name of the one we do use. None is on the menu.
   for (const name of ["linear__save_issue", "linear__delete_comment", "save_issue", "linear__update_issue"]) {

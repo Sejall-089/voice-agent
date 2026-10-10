@@ -1,5 +1,6 @@
 import { toSpokenLine } from "./speech.ts";
-import type { PlannedStep, ToolInput, ToolSchema } from "./types.ts";
+import { checkReference } from "./memory/checkReference.ts";
+import type { Memory, PlannedStep, Tool, ToolInput, ToolSchema } from "./types.ts";
 
 // The pure half of a chained run (M17): is this plan runnable, what does a step's arguments
 // actually resolve to, and what does the user get told about it.
@@ -63,6 +64,9 @@ export function canonicalToolName(proposed: string, menu: readonly string[]): st
 }
 
 export type PlanCheck = { ok: true } | { ok: false; reason: string };
+
+// What the pre-flight needs to know about a tool — and nothing about what it does.
+export type ReferenceDeclaration = Pick<Tool, "name" | "referenceArgs" | "resolvesReferences">;
 
 export type ArgCheck =
   | { ok: true; args: ToolInput }
@@ -153,6 +157,73 @@ export function validatePlan(
         };
       }
     }
+  }
+
+  return { ok: true };
+}
+
+// Does every reference this plan NAMES mean something? Asked ONCE, after `validatePlan` and
+// before step 1 — before anything is narrated, run or confirmed.
+//
+// `validatePlan` settles what is knowable from the plan's shape. This settles the one further
+// thing that is knowable in advance but needs memory to know: live testing twice created a real
+// issue at step 2 and then stopped at step 3 because "the bugs channel" meant nothing, leaving
+// an issue nobody was told about — and re-running after teaching the channel filed it again.
+//
+// THE RULE, per step, for a tool that declares `referenceArgs`:
+//
+//   - An argument containing `{stepN}` cannot be judged yet. It is SKIPPED, and checked where it
+//     always was: by the step, on the real value, when execution gets there.
+//   - Every other declared argument is put to `checkReference` — the same rule, over the same
+//     `memory.resolve`, that the planner's own resolution and `checkChannel` use.
+//   - The step is refused only when NONE of its declared arguments is usable or still pending.
+//     The list is read as ALTERNATIVES because that is what `openTarget`'s are: "the Spotify web
+//     player" is phrased like a reference, is in nobody's memory, and opens perfectly well from
+//     the URL beside it. For a tool declaring one argument, "none" and "each" are the same thing.
+//
+// What it must never do is refuse a plan the steps would have run. It can still let through a
+// plan a step later refuses — a literal channel that does not exist, a target that is neither a
+// reference nor a URL — and that step then stops the chain exactly as before.
+//
+// NOT A SECOND GATE. It reads arguments and memory, and nothing else: no tool is called, nothing
+// is shown, and a tool that declares nothing — or opts out of resolution — is never looked at.
+export function preflightReferences(
+  steps: readonly PlannedStep[],
+  tools: readonly ReferenceDeclaration[],
+  memory: Pick<Memory, "resolve">,
+): PlanCheck {
+  for (const [index, step] of steps.entries()) {
+    const tool = tools.find((candidate) => candidate.name === step.tool);
+    const declared = tool?.resolvesReferences === false ? [] : (tool?.referenceArgs ?? []);
+    const [first] = declared;
+    if (first === undefined) continue;
+
+    let usable = false;
+    let unknown: string | null = null;
+    for (const key of declared) {
+      const value = step.arguments[key];
+      if (typeof value === "string" && hasPlaceholder(value)) {
+        usable = true;
+        break;
+      }
+      const check = checkReference(value, memory);
+      if (check.ok) {
+        usable = true;
+        break;
+      }
+      if (check.why === "unresolved") unknown ??= check.said;
+    }
+    if (usable) continue;
+
+    const where = `Step ${index + 1} of my plan`;
+    return {
+      ok: false,
+      reason:
+        unknown !== null
+          ? `${where} needs "${unknown}", and I don't know what that refers to yet, so I ` +
+            `didn't start it — teach me with: remember ${unknown} is <what it is>.`
+          : `${where} left "${first}" empty, so I didn't start it.`,
+    };
   }
 
   return { ok: true };
@@ -290,6 +361,12 @@ interface Reference {
   // The TOP-LEVEL argument this reference was found under, for the type check and for naming it
   // in a refusal. A nested reference reports the top-level key it lives beneath.
   key: string;
+}
+
+// `search`, not `test`: PLACEHOLDER is a global regex, and `test` on one of those remembers
+// where it stopped and answers the NEXT question from there.
+function hasPlaceholder(text: string): boolean {
+  return text.search(PLACEHOLDER) !== -1;
 }
 
 function placeholdersIn(args: ToolInput): Reference[] {

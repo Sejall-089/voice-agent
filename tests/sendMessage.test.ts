@@ -264,29 +264,33 @@ describe("sendMessage — an unknown channel is refused BEFORE the confirm dialo
     expect(outcome.status).toBe("refused");
   });
 
-  it("stops a chain at the send step without showing that step's dialog", async () => {
+  // A channel WRITTEN in the plan is settled before step 1 (the pre-flight, tests/preflight.test.ts
+  // and tests/chain.test.ts). The one that can still reach a step unknown is a channel that only
+  // exists once an earlier step has run — and the step must refuse it the same way, with no dialog.
+  it("stops a chain at the send step, with no dialog, when the channel came from an earlier step", async () => {
     const s = session({ confirms: [true] });
 
     const outcome = await s.turn(
       {
         kind: "plan",
         steps: [
-          { tool: "summarize", arguments: {}, describe: "summarize it" },
+          { tool: "summarize", arguments: {}, describe: "work out who to tell" },
           {
             tool: "sendMessage",
-            arguments: { channel: "the bugs channel", notes: "{step1}" },
-            describe: "tell the bugs channel",
+            arguments: { channel: "{step1}" },
+            describe: "tell them",
           },
         ],
       },
-      "summarize this and tell the bugs channel",
-      "SUMMARY",
+      "work out who to tell and tell them",
+      "the bugs channel", // step 1's result — a reference nothing is stored under
     );
 
+    // Step 1 RAN: this was not the pre-flight, which would have completed nothing.
+    expect(outcome.chain).toEqual({ completed: 1, total: 2 });
     expect(s.shell.confirmMessages).toHaveLength(0);
     expect((s.sender as FakeSender).calls).toHaveLength(0);
     expect(outcome.status).toBe("refused");
-    expect(outcome.chain).toEqual({ completed: 1, total: 2 });
     expect(outcome.result).toContain('"the bugs channel"');
   });
 });

@@ -15,6 +15,7 @@ import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts"
 import { emailOpenHint } from "./contextHints.ts";
 import {
   canonicalToolName,
+  preflightReferences,
   previewHoldRemaining,
   previewPlan,
   resolveStepArgs,
@@ -419,6 +420,17 @@ export class Planner {
       return await this.runStep(instruction, tool, only.arguments, context, SINGLE);
     }
 
+    // The other thing knowable before step 1: does every reference the plan names mean
+    // something? A chain that creates an issue at step 2 and only then discovers, at step 3,
+    // that it does not know "the bugs channel" has done something real and told nobody. Refused
+    // here instead, as a whole — nothing narrated, nothing run, no dialog (core/chain.ts).
+    // After the one-step case above on purpose: a lone call has no earlier step to protect, and
+    // the tool refuses it in its own words.
+    const preflight = preflightReferences(steps, this.registry, this.memory);
+    if (!preflight.ok) {
+      return await this.refusePlan(instruction, proposed, preflight.reason);
+    }
+
     // Set before the first await, so "a chain is running" and "the hotkey guards know" can
     // never be observed in different states — WindowsShell.confirm()'s own rule for
     // `confirmPending`, applied to the flag that has to hold for very much longer.
@@ -510,7 +522,7 @@ export class Planner {
   }
 
   // The plan itself could not run — too many steps, a tool that isn't on the menu, a reference
-  // pointing forwards. Nothing has happened and nothing was announced.
+  // pointing forwards, a name nothing is known by. Nothing has happened and nothing was announced.
   //
   // Logged as `refused` with no tool, and deliberately NOT through `logMiss`: spec §8 defines
   // the miss list as a ranked backlog of tools worth building, and "that was four steps" is not

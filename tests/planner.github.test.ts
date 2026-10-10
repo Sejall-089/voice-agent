@@ -157,6 +157,31 @@ describe("the bug-report chain: Gmail → GitHub → Slack", () => {
     ]);
   });
 
+  // M20's live run: "the bugs channel" was unknown, issue #4 was created anyway, and teaching
+  // the channel and re-running filed the same email again as #5.
+  it("creates nothing on GitHub when the channel at step 3 is unknown", async () => {
+    const h = harness(
+      plan([
+        BUG_CHAIN[0]!,
+        BUG_CHAIN[1]!,
+        step("sendMessage", { channel: "the bugs channel", notes: "New bug filed: {step2}" }, "tell them"),
+      ]),
+      { confirms: [true, true] },
+    );
+    const outcome = await h.planner.run("file this bug on GitHub and tell the bugs channel");
+
+    expect(outcome.status).toBe("refused");
+    expect(outcome.chain).toEqual({ completed: 0, total: 3 });
+    expect(h.github.calls).toEqual([]);
+    expect(h.github.created).toEqual([]);
+    expect(h.linear.calls).toEqual([]);
+    expect(h.timeline).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(h.sender.calls).toEqual([]);
+    expect(h.shell.results.at(-1)).toContain('"the bugs channel"');
+    expect(h.shell.results.at(-1)).toContain("Step 3");
+  });
+
   it("reaches GitHub and ONLY GitHub — Linear, on the same menu, is never touched", async () => {
     const h = harness(plan(BUG_CHAIN), { confirms: [true, true] });
     await h.planner.run("file this bug on GitHub");
