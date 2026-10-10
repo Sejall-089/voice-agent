@@ -196,8 +196,9 @@ model never gets to invent a capability or fire a dangerous action unchecked.
   do — `sendMessage` formats its rough notes here — and the arguments it returns are the ones
   the tier, the dialog, the handler and the log all use. This is what makes a confirm dialog
   show the exact text that will be sent instead of a preview of the model's input. It runs
-  before anything is approved, so it is handed only what it may touch: the context, the model, a
-  read-only memory. There is no sender or shell in that object.
+  before anything is approved, so it is handed only what it may touch: the context, the user's
+  instruction as text, the model, a read-only memory. There is no sender or shell in that
+  object.
 - **Which arguments are references.** Memory resolution looks at *values*, so it could not tell a
   destination from a message. A tool now declares `referenceArgs`, and only those are resolved.
 
@@ -272,10 +273,12 @@ sequenceDiagram
 **What that trace leaves out (M21).** Two things happen between "resolve" and "confirm", and
 two are true of the confirm itself:
 
-- **The message is formatted before the dialog**, in the tool's `prepare`, and the dialog shows
-  all of it. The handler sends that string and never calls the model. With nothing to send, or
-  a formatter that answers with a request for the notes instead of a message, the call is
-  refused and no dialog opens.
+- **The message is settled before the dialog**, in the tool's `prepare`, and the dialog shows
+  all of it. The handler sends that string and never calls the model. Where the text came from
+  decides what "settled" means: a message the user gave in the instruction (`send "hello" to
+  the team`) is sent **as written**, with no model call; text from the clipboard is
+  **formatted** first. With nothing to send, or a formatter that answers with a request for
+  the notes instead of a message, the call is refused and no dialog opens.
 - **The channel is checked before the dialog**, and before the formatter: a name memory does not
   know is refused without costing a model call.
 - **The dialog does not claim the asked channel as the destination.** A Slack *app* webhook

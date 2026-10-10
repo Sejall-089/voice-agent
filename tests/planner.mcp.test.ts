@@ -765,11 +765,13 @@ describe("a lone connector call", () => {
 });
 
 describe("sendMessage: verbatim inside a chain, unchanged outside one", () => {
-  it("still reformats a LONE send — and now shows the reformatted text it will send", async () => {
-    const notes = "x".repeat(400);
+  it("still reformats a LONE send of clipboard text — and shows the reformatted text it will send", async () => {
+    // The text comes from the CLIPBOARD (no `notes`), which is the one source that is still
+    // formatted. Until 2026-10-11 this test passed the text as `notes` and expected it
+    // reformatted; a message given in the instruction is now sent as written (the next test).
     const h = harness(
-      { kind: "tool", name: "sendMessage", input: { channel: "#bugs", notes } },
-      { confirms: [true] },
+      { kind: "tool", name: "sendMessage", input: { channel: "#bugs" } },
+      { confirms: [true], context: { ...NO_CONTEXT, selectedText: "x".repeat(400) } },
     );
     await h.planner.run("send these to bugs");
 
@@ -779,6 +781,19 @@ describe("sendMessage: verbatim inside a chain, unchanged outside one", () => {
     // sent unseen — the standalone gap on the follow-up list. Closed at M21: the dialog shows
     // exactly what is posted (tests/sendMessage.test.ts, "what is approved is what is sent").
     expect(h.shell.confirmMessages[0]).toBe(`${SEND_BUGS}\n\nREWRITTEN BY A MODEL`);
+  });
+
+  it("sends a LONE message given in the instruction as written — no model touches it", async () => {
+    const notes = "x".repeat(400);
+    const h = harness(
+      { kind: "tool", name: "sendMessage", input: { channel: "#bugs", notes } },
+      { confirms: [true] },
+    );
+    await h.planner.run(`send "${notes}" to bugs`);
+
+    expect(h.llm.completeCalls).toBe(0);
+    expect(h.sender.calls[0]?.text).toBe(notes);
+    expect(h.shell.confirmMessages[0]).toBe(`${SEND_BUGS}\n\n${notes}`); // all 400, no preview
   });
 
   it("sends selected text verbatim too, when a chained step gives no notes", async () => {

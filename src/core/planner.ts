@@ -296,6 +296,7 @@ export class Planner {
     if (tool.prepare) {
       const preparing: PrepareDeps = {
         context,
+        instruction,
         llm: this.llm,
         memory: { resolve: (reference) => this.memory.resolve(reference) },
         chained: step.chained,

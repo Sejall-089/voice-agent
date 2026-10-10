@@ -16,6 +16,7 @@ import type {
   ToolDeps,
   ToolInput,
 } from "../src/core/types.ts";
+import { FakeGmail } from "./FakeGmail.ts";
 import { FakeLLM } from "./FakeLLM.ts";
 import { FakeSender } from "./FakeSender.ts";
 import type { Database } from "better-sqlite3";
@@ -431,10 +432,11 @@ describe("referenceArgs — the planner resolves only the arguments a tool decla
       "send 'the team' to the team",
     );
 
-    // The body reached the formatter exactly as written — "the team", not the fact it names…
-    expect(s.lastLlm()?.lastUserPrompt).toBe("the team");
-    // …and what the log holds is the channel as resolved and the message as SENT.
-    expect(s.loggedArgs()).toEqual([{ channel: "#design-team", notes: "FORMATTED" }]);
+    // The log holds the channel as resolved and the message as SENT — which, for a message
+    // given in the instruction, is the words as written: "the team", not the fact it names,
+    // and not a formatter's version of it.
+    expect(s.loggedArgs()).toEqual([{ channel: "#design-team", notes: "the team" }]);
+    expect(s.lastLlm()?.completeCalls).toBe(0);
   });
 });
 
@@ -443,7 +445,7 @@ describe("referenceArgs — the planner resolves only the arguments a tool decla
 describe("sendMessage — the message body is never a reference", () => {
   const BODY = "the team";
 
-  it("formats the body as written when it matches a stored fact", async () => {
+  it("sends the body as written when it matches a stored fact", async () => {
     const s = session({ confirms: [true] });
     s.memory.write("team", "#design-team");
     // The precondition: this body IS something memory would rewrite, given the chance.
@@ -454,12 +456,13 @@ describe("sendMessage — the message body is never a reference", () => {
       "send 'the team' to #general",
     );
 
-    // What the FORMATTER was handed is the body as written — that is where a rewrite by memory
-    // would have shown. (The dialog shows the formatter's output, which is what gets sent.)
-    expect(s.lastLlm()?.lastUserPrompt).toBe(BODY);
+    // The dialog shows the body as written, and that is what is sent: memory did not rewrite
+    // it, and — being a message given in the instruction — no formatter touched it either.
     expect(s.shell.confirmMessages).toEqual([
-      "Send via your Slack webhook?\n(You asked for #general. A webhook posts to its own channel and ignores this.)\n\nFORMATTED",
+      `Send via your Slack webhook?\n(You asked for #general. A webhook posts to its own channel and ignores this.)\n\n${BODY}`,
     ]);
+    expect((s.sender as FakeSender).calls[0]?.text).toBe(BODY);
+    expect(s.lastLlm()?.completeCalls).toBe(0);
     expect((s.sender as FakeSender).calls[0]?.channel).toBe("#general");
   });
 
@@ -560,8 +563,9 @@ describe("sendMessage — honest about where a webhook posts", () => {
     it("keeps the message after a blank line, on a lone send", async () => {
       const s = through("#social");
       await s.turn(send("#help", "ship it friday"), "send this", "• ship it Friday");
+      // The message was given in the instruction, so it is shown as written (not formatted).
       expect(s.shell.confirmMessages).toEqual([
-        `Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}\n\n• ship it Friday`,
+        `Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}\n\nship it friday`,
       ]);
     });
 
@@ -690,7 +694,8 @@ describe("sendMessage — what is approved is what is sent", () => {
     const long = `${"a long line of formatted notes. ".repeat(40)}THE END`;
     const s = session({ confirms: [true] });
 
-    await s.turn(lone("rough notes"), "send these", long);
+    // From the clipboard, so it IS formatted — and the formatter's long reply is what is shown.
+    await s.turn(lone(), "send these", long);
 
     expect(s.shell.confirmMessages[0]).toBe(`${QUESTION}\n\n${long}`);
     expect(s.shell.confirmMessages[0]).not.toContain("…");
@@ -790,7 +795,10 @@ describe("sendMessage — what is approved is what is sent", () => {
 
       expect(seen).not.toBeNull();
       // Exactly these, and no more: no shell, no sender, no surfaces, no draft store.
-      expect(Object.keys(seen ?? {}).sort()).toEqual(["chained", "context", "llm", "memory"]);
+      // (`instruction` joined at the 2026-10-11 fix: the user's own words, read-only text, so a
+      // tool can tell a message the user dictated from the instruction itself.)
+      expect(Object.keys(seen ?? {}).sort()).toEqual(["chained", "context", "instruction", "llm", "memory"]);
+      expect((seen as unknown as { instruction: string }).instruction).toBe("probe");
       // And the memory it gets can look things up but has no way to write.
       expect(Object.keys((seen as unknown as { memory: object }).memory)).toEqual(["resolve"]);
     });
@@ -836,7 +844,8 @@ describe("sendMessage — what is approved is what is sent", () => {
 
   it("records what was actually sent as the logged message", async () => {
     const s = session({ confirms: [true] });
-    await s.turn(lone("rough notes"), "send these", "THE FORMATTED TEXT");
+    // Clipboard text, formatted: the log's `notes` is the formatter's output, which is what went.
+    await s.turn(lone(), "send these", "THE FORMATTED TEXT");
     expect(s.loggedArgs()).toEqual([{ channel: "#team", notes: "THE FORMATTED TEXT" }]);
   });
 
@@ -857,7 +866,9 @@ describe("sendMessage — what is approved is what is sent", () => {
     ])("%j", async (reply) => {
       const s = session({ confirms: [true] });
 
-      const outcome = await s.turn(lone("send these notes to the bugs channel"), "send these notes to the bugs channel", reply);
+      // No `notes`: the text is the clipboard's, which is the one source that is formatted —
+      // and so the one source whose formatter reply is judged.
+      const outcome = await s.turn(lone(), "send these notes to the bugs channel", reply);
 
       expect(s.shell.confirmMessages).toEqual([]); // never asked
       expect((s.sender as FakeSender).calls).toEqual([]); // never sent
@@ -932,6 +943,152 @@ describe("sendMessage — what is approved is what is sent", () => {
     const sent = "Summary: Please paste the notes you want formatted.";
     expect(s.shell.confirmMessages).toEqual([`Step 2 of 2: ${QUESTION}\n\n${sent}`]);
     expect((s.sender as FakeSender).calls).toEqual([{ channel: "#team", text: sent }]);
+  });
+});
+
+// LIVE REGRESSION (M21, 2026-10-11). `send "helluuu" to social channel` was refused: "what I was
+// given to send wasn't notes". The planner had done its job — `notes: "helluuu"` — and then the
+// tool ran the user's own quoted words through the FORMATTER, which called a short greeting
+// "nothing to tell anyone" (NO_NOTES, 3 of 3 against the real model).
+//
+// A message the user gave in the instruction is not rough notes. It is sent as written: no
+// formatter, no judgement of what it says. Formatting is for text that came from the clipboard.
+describe("sendMessage — a message given in the instruction is sent as written", () => {
+  const QUESTION =
+    "Send via your Slack webhook?\n(You asked for #team. A webhook posts to its own channel and ignores this.)";
+  const said = (notes: string): ToolChoice => ({
+    kind: "tool",
+    name: "sendMessage",
+    input: { channel: "#team", notes },
+  });
+
+  it("sends the quoted words exactly: no formatter call, and the dialog shows what is sent", async () => {
+    // The clipboard is NOT empty (the default NOTES) and the formatter would refuse if asked:
+    // neither may matter, because the message is in the instruction.
+    const s = session({ confirms: [true] });
+
+    const outcome = await s.turn(said("helluuu"), 'send "helluuu" to #team', "NO_NOTES");
+
+    expect(outcome.status).toBe("ok");
+    expect(s.lastLlm()?.completeCalls).toBe(0);
+    expect(s.shell.confirmMessages).toEqual([`${QUESTION}\n\nhelluuu`]);
+    expect((s.sender as FakeSender).calls).toEqual([{ channel: "#team", text: "helluuu" }]);
+    // Dialog body and sent text, compared to each other rather than each to a literal.
+    expect(s.shell.confirmMessages[0]?.split("\n\n").slice(1).join("\n\n")).toBe(
+      (s.sender as FakeSender).calls[0]?.text,
+    );
+  });
+
+  it("keeps spacing, case and punctuation as they were said", async () => {
+    const message = "  Heads up —  deploy at 5PM!!\nDon't merge.  ";
+    const s = session({ confirms: [true] });
+
+    await s.turn(said(message), `tell #team saying ${message}`);
+
+    expect((s.sender as FakeSender).calls[0]?.text).toBe(message);
+    expect(s.lastLlm()?.completeCalls).toBe(0);
+  });
+
+  // WHAT THE MESSAGE SAYS IS NOT THE APP'S BUSINESS. Each of these would have been refused,
+  // rewritten or looked up by something: the formatter's NO_NOTES rule, the "asks for the notes"
+  // check, or memory. None of them may touch words the user asked to have sent.
+  it.each([
+    ["a single word", "ok"],
+    ["text that reads like an instruction to the app", "send these notes to the bugs channel"],
+    ["text that asks for notes", "Please paste the rough notes you want formatted."],
+    ["the formatter's own sentinel", "NO_NOTES"],
+    ["a question", "what notes would you like me to format?"],
+    ["a phrase memory knows", "the team"],
+    ["a placeholder-looking string", "{step1}"],
+  ])("sends %s as written: %j", async (_label, message) => {
+    const s = session({ confirms: [true] });
+    s.memory.write("team", "#design-team");
+
+    const outcome = await s.turn(said(message), `send "${message}" to #team`);
+
+    expect(outcome.status).toBe("ok");
+    expect(s.lastLlm()?.completeCalls).toBe(0);
+    expect(s.shell.confirmMessages).toEqual([`${QUESTION}\n\n${message}`]);
+    expect((s.sender as FakeSender).calls).toEqual([{ channel: "#team", text: message }]);
+  });
+
+  it("does the same with an email open — the message is what the user said, not what is on screen", async () => {
+    const db = createDatabase(":memory:");
+    const memory = new SqliteMemory(db);
+    const shell = new MockShell({
+      context: { selectedText: "unrelated clipboard text", activeApp: null, activeWindowTitle: null },
+      confirms: [true],
+    });
+    const sender = new FakeSender();
+    const llm = new FakeLLM(said("hello guys"), "NO_NOTES");
+    // A Gmail that says an email is open. Nothing may read it.
+    const gmail = new FakeGmail({
+      openEmail: { subject: "s", from: "a@b.c", fromName: "A", to: null, body: "email body" },
+    });
+
+    const outcome = await new Planner(llm, shell, registry, memory, memory, sender, gmail).run(
+      'send "hello guys" to #team',
+    );
+
+    expect(llm.lastContext?.emailOpen).toBe(true); // the planner WAS told an email is open
+    expect(outcome.status).toBe("ok");
+    expect(sender.calls).toEqual([{ channel: "#team", text: "hello guys" }]);
+    expect(llm.completeCalls).toBe(0);
+    expect(gmail.calls).toEqual([]);
+  });
+
+  it("still FORMATS text that comes from the clipboard", async () => {
+    const s = session({ confirms: [true] });
+
+    await s.turn({ kind: "tool", name: "sendMessage", input: { channel: "#team" } }, "send these notes to #team", "• tidy notes");
+
+    expect(s.lastLlm()?.completeCalls).toBe(1);
+    expect(s.lastLlm()?.lastUserPrompt).toBe(NOTES);
+    expect((s.sender as FakeSender).calls).toEqual([{ channel: "#team", text: "• tidy notes" }]);
+  });
+
+  // THE ONE CASE `notes` IS NOT A MESSAGE: the model copied the whole instruction into it
+  // (action-log rows 417 and 419). That is the instruction, not something to send — so it is
+  // treated as no notes at all, by comparing it with the instruction. No model is asked.
+  describe("when `notes` is only the instruction repeated", () => {
+    const INSTRUCTION = "send these notes to the bugs channel";
+
+    it.each([
+      ["exactly", INSTRUCTION],
+      ["with different case and a full stop", "Send these notes to the bugs channel."],
+      ["in quotes, with extra spaces", `  "send  these notes to the  bugs channel" `],
+    ])("refuses before any dialog when the clipboard is empty (%s)", async (_label, notes) => {
+      const s = session({ confirms: [true], selectedText: null });
+
+      const outcome = await s.turn(said(notes), INSTRUCTION);
+
+      expect(outcome.status).toBe("refused");
+      expect(s.shell.confirmMessages).toEqual([]);
+      expect((s.sender as FakeSender).calls).toEqual([]);
+      expect(s.shell.results[0]).toMatch(/^There's nothing to send\./);
+      expect(s.lastLlm()?.completeCalls).toBe(0);
+    });
+
+    it("falls back to the clipboard when there is something on it", async () => {
+      const s = session({ confirms: [true] });
+
+      await s.turn(said(INSTRUCTION), INSTRUCTION, "• formatted clipboard notes");
+
+      // The clipboard was formatted and sent; the echoed instruction went nowhere.
+      expect(s.lastLlm()?.lastUserPrompt).toBe(NOTES);
+      expect((s.sender as FakeSender).calls).toEqual([{ channel: "#team", text: "• formatted clipboard notes" }]);
+    });
+
+    it("does NOT mistake a message that merely appears in the instruction for the instruction", async () => {
+      // The precondition for the three cases above meaning anything: only the WHOLE instruction
+      // is an echo. Part of it is exactly what a quoted message is.
+      const s = session({ confirms: [true], selectedText: null });
+
+      const outcome = await s.turn(said("these notes"), INSTRUCTION);
+
+      expect(outcome.status).toBe("ok");
+      expect((s.sender as FakeSender).calls[0]?.text).toBe("these notes");
+    });
   });
 });
 

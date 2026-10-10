@@ -742,8 +742,8 @@ Given the user's instruction and captured context, run exactly this sequence:
    the confirm dialog, the handler and the log row. It exists so a dialog shows what will
    actually happen rather than a preview of the model's input (§6, "What is approved is what is
    sent"). Nothing has been approved yet, so it is handed **`PrepareDeps`** and not the full
-   bundle: the context, the model, a memory it can only read (`resolve`, no `write`) and
-   `chained`. There is no shell, no sender and no app surface in that object — a `prepare`
+   bundle: the context, the user's instruction (read-only text, added 2026-10-11), the model,
+   a memory it can only read (`resolve`, no `write`) and `chained`. There is no shell, no sender and no app surface in that object — a `prepare`
    cannot send, save or act because it holds nothing to do it with. It runs once per step. A
    throw ends the call before any gate: a `UserFixableError` as a refusal in the tool's words,
    anything else as an error.
@@ -1125,6 +1125,41 @@ confusion to a channel. The refusal does not repeat the formatter's words.
 The first wording of the `NO_NOTES` instruction ("only an instruction to send something")
 refused a genuine one-line note; it now says "nothing to tell anyone … without giving them".
 Every refusal in both runs was the literal `NO_NOTES`.
+
+**Where the text came from decides whether it is formatted (live regression, 2026-10-11).**
+The fix above first formatted *everything*, so `send "helluuu" to social channel` put the
+user's own quoted word through the formatter, which answered `NO_NOTES` and got the send
+refused. The rule is now by source:
+
+| Source of the text | What happens |
+|---|---|
+| `notes` — a message the user gave in the instruction (quoted, or after "say"/"saying") | **sent as written.** No model call; nothing judges what it says. A quoted "the team", a quoted question, quoted text that reads like a command — all go out as typed. |
+| `notes` that is only the whole instruction echoed back (rows 417, 419) | treated as **no notes**: falls through to the clipboard. Recognised by comparing it with the instruction (case, spacing, surrounding quotes and a closing full stop aside) — a comparison, not a judgement. |
+| the clipboard (no `notes`) | **formatted**, and the formatter's reply must be a message (`isMessage`). |
+| neither | refused before any dialog. |
+
+`PrepareDeps` therefore has a fifth key, `instruction`: the user's words as typed or
+transcribed, read-only. The tool description now tells the model to put a dictated message in
+`notes` word for word, never the instruction itself, and never clipboard text. Measured before
+and after (`tests/eval/quotedMessage.eval.test.ts`, `M21_QUOTED_EVAL=1`, 5 trials per cell):
+
+| Instruction | Context | Before | After |
+|---|---|---|---|
+| `send "helluuu" to social channel` | no email | 5/5 | 5/5 |
+| `send "helluuu" to social channel` | email open | 5/5 | 5/5 |
+| `send "hello guys" to social channel` | no email | 5/5 | 5/5 |
+| `send "hello guys" to social channel` | email open | 5/5 | 5/5 |
+| `send "hello guys" to social channel` | email open, unrelated clipboard text | 5/5 | 5/5 |
+| `tell the social channel saying we ship friday` | no email | 5/5 | 5/5 |
+| `say good morning team in the social channel` | email open | 5/5 | 5/5 |
+| `send these notes to the team` (notes on the clipboard) → no `notes` | — | 5/5 | 5/5 |
+
+The planner was already putting the quoted words in `notes`; the bug was entirely in the tool.
+**Not reproduced:** once, live, with an email open, `send "hello guys" to social channel`
+came back as prose asking what to do with the email (row 452, `no_tool`). Thirty-plus trials
+across the conditions above, including the previous turn the app actually had, all planned
+`sendMessage`. What the live run had that these do not is its real clipboard, which nothing
+recorded — and a `no_tool` row does not store the model's reply.
 
 **Still true:** "selected text" is the clipboard, so a send with no `notes` formats whatever
 was last copied. It is now *shown* before it is sent, which is the protection; it is not
@@ -2774,6 +2809,18 @@ Post-v0:
          It has no side effects by construction: it is handed `PrepareDeps` — four keys
          (`context`, `llm`, a read-only `memory`, `chained`) and no sender or shell. The
          handler never calls the model (`3320860`, `69b39cb`).
+         **This fix caused a regression, found live the next day (2026-10-11):** `send
+         "helluuu" to social channel` was refused with "what I was given to send wasn't
+         notes". *Cause:* the fix formatted everything, including a message the user had
+         given in the instruction, and the formatter's new `NO_NOTES` rule called a short
+         greeting "nothing to tell anyone" (3 of 3 against the real model). *Fix:* **where the
+         text came from decides whether it is formatted.** A message given in the instruction
+         (`notes`) is sent as written — no model call, no judgement of what it says. Only
+         clipboard text is formatted and has its formatter reply judged. `PrepareDeps` gained
+         a fifth key, `instruction` (the user's words, read-only), so that `notes` which is
+         merely the whole instruction echoed back (rows 417, 419) is recognised by comparison
+         and treated as no notes. The planner side was measured and was never the problem
+         (`tests/eval/quotedMessage.eval.test.ts`, 8 cases, 5/5 before and after).
       5. **"It may or may not have gone through" about a create that was never sent.**
          *Cause:* the session's first GitHub connection timed out while **connecting** —
          which happens in the confirm summary, before the dialog — and a connect timeout and

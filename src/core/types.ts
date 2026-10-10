@@ -628,7 +628,11 @@ export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 // Everything a `Tool.prepare` is allowed to touch — and the planner builds exactly this object,
 // so the list is enforced at run time as well as by the type.
 //
-//   context   what was captured when the instruction was given (read-only by nature)
+//   context      what was captured when the instruction was given (read-only by nature)
+//   instruction  the user's own words, exactly as typed or transcribed (added 2026-10-11). Text
+//                to READ: it lets a tool tell a message the user dictated from the model
+//                having copied the whole instruction into an argument. Not a channel to the
+//                user, and nothing a prepare can act with.
 //   llm       the model — the one outside call a prepare may make
 //   memory    lookups only: no `write`, so nothing can be remembered before it is approved
 //   chained   where this call sits, which decides whether there is anything to prepare
@@ -638,6 +642,7 @@ export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 // action, and actions happen in the handler, after the gates.
 export interface PrepareDeps {
   context: CapturedContext;
+  instruction: string;
   llm: LLMClient;
   memory: Pick<Memory, "resolve">;
   chained: boolean;

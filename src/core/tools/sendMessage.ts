@@ -169,6 +169,35 @@ function sourceText(input: ToolInput, deps: { context: CapturedContext }): strin
   return typeof notes === "string" && notes.trim().length > 0 ? notes : deps.context.selectedText;
 }
 
+// The message the user gave IN THE INSTRUCTION, or null when they gave none.
+//
+// `notes` is where the model puts words the user asked to have sent — `send "helluuu" to the
+// team`, `tell them saying we ship friday`. Those are the user's message, and are returned
+// exactly as written.
+//
+// One thing can be in `notes` that is not a message: the INSTRUCTION ITSELF. Asked to "send
+// these notes to the bugs channel" with nothing to send, the model has copied that whole
+// sentence into `notes` (action-log rows 417 and 419). That is recognised here, by comparing
+// the two — case, spacing, surrounding quotes and a closing full stop aside — and treated as no
+// notes at all. Only the WHOLE instruction is an echo: a part of it is exactly what a quoted
+// message is.
+//
+// A comparison, not a judgement. Nothing here asks what the words mean or whether they look
+// like notes, a question or a command — that is the user's business, and they will see them in
+// the dialog before anything is sent.
+function messageFromInstruction(input: ToolInput, instruction: string): string | null {
+  const notes = input["notes"];
+  if (typeof notes !== "string" || notes.trim().length === 0) return null;
+  const bare = (text: string): string =>
+    text
+      .trim()
+      .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
+      .replace(/[.!?]+$/, "")
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  return bare(notes) === bare(instruction) ? null : notes;
+}
+
 const NOTHING_TO_SEND =
   "There's nothing to send. Copy the notes first (select them and press Ctrl+C), or put them in " +
   'the instruction — for example: send "standup moved to 3pm" to the team.';
@@ -190,7 +219,11 @@ export const sendMessageTool: Tool = {
     "when the user asks to send, post, share, or message notes to a channel or a group of people. " +
     "Pass `channel` exactly as the user referred to it (e.g. 'the team', '#design-team') — it will " +
     "be resolved against their saved facts. Put the raw notes in `notes` if they are in the " +
-    "instruction; otherwise the user's selected text is used. As a step in a plan, `notes` is " +
+    "instruction; otherwise the user's selected text is used. When the user gives the message " +
+    "itself — in quotes, or after 'say' or 'saying' — put exactly those words in `notes`, " +
+    "unchanged and without the quotes: they are sent as written, whatever else is on screen " +
+    "(an open email, the clipboard). Never put the instruction itself in `notes`, and never " +
+    "copy clipboard text into it. As a step in a plan, `notes` is " +
     "sent EXACTLY as written once any {stepN} is filled in — nothing reformats it — so write " +
     "the whole message you want posted, e.g. 'New bug filed: {step2}'.",
   inputSchema: {
@@ -203,7 +236,9 @@ export const sendMessageTool: Tool = {
       },
       notes: {
         type: "string",
-        description: "The raw notes to send. Omit to use the user's selected text.",
+        description:
+          "The message or notes the user gave in the instruction, word for word. Omit to use " +
+          "the user's selected text.",
       },
     },
     required: ["channel"],
@@ -241,13 +276,22 @@ export const sendMessageTool: Tool = {
   //
   // So for a lone send this does, in order, and refuses at the first that fails:
   //   1. the channel is one we can name (the same check the confirm and the handler make)
-  //   2. there IS something to send
-  //   3. the formatter's reply is a message, not a request for one (`isMessage`)
-  // and returns the arguments with `notes` REPLACED by the exact text to post. The planner
-  // hands those to the dialog and the handler, which show and send `notes` as they find it.
+  //   2. a message the user GAVE IN THE INSTRUCTION is taken as written, and that is all
+  //   3. otherwise the text is the clipboard's: there must be some
+  //   4. and the formatter's reply to it must be a message, not a request for one (`isMessage`)
+  // and returns the arguments with `notes` set to the exact text to post. The planner hands
+  // those to the dialog and the handler, which show and send `notes` as they find it.
   //
-  // The cost, accepted on purpose: the dialog appears one model call later than it used to,
-  // and a send that is then cancelled has still paid for that call.
+  // WHERE THE TEXT CAME FROM DECIDES WHETHER IT IS FORMATTED (2026-10-11, live regression).
+  // The first version formatted everything, `notes` included — so `send "helluuu" to social
+  // channel` put the user's own quoted word through the formatter, which called it "nothing to
+  // tell anyone" (NO_NOTES, 3 of 3) and the send was refused. A message the user dictated is
+  // not rough notes: it is sent AS WRITTEN, with no model call and no opinion about what it
+  // says. Formatting, and the judgement of the formatter's reply, are for clipboard text only —
+  // text the user copied from somewhere and asked to have tidied.
+  //
+  // The cost, accepted on purpose: for clipboard text the dialog appears one model call later
+  // than it used to, and a send that is then cancelled has still paid for that call.
   //
   // IN A CHAIN it does nothing at all. There `notes` is written by the plan and filled from
   // earlier steps ("New bug filed: {step2}"); it is already the exact text, and is shown in
@@ -262,7 +306,13 @@ export const sendMessageTool: Tool = {
 
     knownChannel(args, deps);
 
-    const raw = sourceText(args, deps);
+    // The user's own message: as written. `args` already carries it in `notes`, untouched.
+    if (messageFromInstruction(args, deps.instruction) !== null) return args;
+
+    // No message in the instruction (or only the instruction echoed back), so this is about
+    // what was copied. Read from the clipboard directly — never through `notes`, which at this
+    // point is either absent or the echo.
+    const raw = deps.context.selectedText;
     if (raw === null || raw.trim().length === 0) throw new UserFixableError(NOTHING_TO_SEND);
 
     const formatted = (await deps.llm.complete(FORMAT_SYSTEM, raw)).trim();
