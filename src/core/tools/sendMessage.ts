@@ -178,9 +178,14 @@ function sourceText(input: ToolInput, deps: { context: CapturedContext }): strin
 // One thing can be in `notes` that is not a message: the INSTRUCTION ITSELF. Asked to "send
 // these notes to the bugs channel" with nothing to send, the model has copied that whole
 // sentence into `notes` (action-log rows 417 and 419). That is recognised here, by comparing
-// the two — case, spacing, surrounding quotes and a closing full stop aside — and treated as no
-// notes at all. Only the WHOLE instruction is an echo: a part of it is exactly what a quoted
-// message is.
+// the two — case, spacing, surrounding quotes and a closing run of `.`, `!` or `?` aside — and
+// treated as no notes at all. Only the WHOLE instruction is an echo: a part of it is exactly
+// what a quoted message is.
+//
+// Quotes are stripped first, then the closing punctuation, once each. Two echoes are therefore
+// NOT recognised, and are known and left alone (spec §6): punctuation after a closing quote
+// (`"send these notes to the bugs channel"!`) and the single ellipsis character (`…`). Both
+// would be shown in the dialog as the message, where the user can cancel.
 //
 // A comparison, not a judgement. Nothing here asks what the words mean or whether they look
 // like notes, a question or a command — that is the user's business, and they will see them in

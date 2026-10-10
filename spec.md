@@ -742,8 +742,11 @@ Given the user's instruction and captured context, run exactly this sequence:
    the confirm dialog, the handler and the log row. It exists so a dialog shows what will
    actually happen rather than a preview of the model's input (§6, "What is approved is what is
    sent"). Nothing has been approved yet, so it is handed **`PrepareDeps`** and not the full
-   bundle: the context, the user's instruction (read-only text, added 2026-10-11), the model,
-   a memory it can only read (`resolve`, no `write`) and `chained`. There is no shell, no sender and no app surface in that object — a `prepare`
+   bundle. `PrepareDeps` has **five keys**: `context`, `instruction` (added 2026-10-11),
+   `llm`, `memory` (read-only: `resolve`, no `write`) and `chained`. `instruction` is the
+   user's own typed or spoken text for this turn — never email text, clipboard text or an
+   earlier step's result. `sendMessage`, its one user, only **compares** it with `notes`; it
+   is never sent to the model. There is no shell, no sender and no app surface in that object — a `prepare`
    cannot send, save or act because it holds nothing to do it with. It runs once per step. A
    throw ends the call before any gate: a `UserFixableError` as a refusal in the tool's words,
    anything else as an error.
@@ -1134,12 +1137,23 @@ refused. The rule is now by source:
 | Source of the text | What happens |
 |---|---|
 | `notes` — a message the user gave in the instruction (quoted, or after "say"/"saying") | **sent as written.** No model call; nothing judges what it says. A quoted "the team", a quoted question, quoted text that reads like a command — all go out as typed. |
-| `notes` that is only the whole instruction echoed back (rows 417, 419) | treated as **no notes**: falls through to the clipboard. Recognised by comparing it with the instruction (case, spacing, surrounding quotes and a closing full stop aside) — a comparison, not a judgement. |
+| `notes` that is only the whole instruction echoed back (rows 417, 419) | treated as **no notes**: falls through to the clipboard. Recognised by comparing it with the instruction (case, spacing, surrounding quotes and a closing run of `.`, `!` or `?` aside) — a comparison, not a judgement. |
 | the clipboard (no `notes`) | **formatted**, and the formatter's reply must be a message (`isMessage`). |
 | neither | refused before any dialog. |
 
-`PrepareDeps` therefore has a fifth key, `instruction`: the user's words as typed or
-transcribed, read-only. The tool description now tells the model to put a dictated message in
+**Known edge cases of the echo comparison, not fixed.** Quotes are stripped first and closing
+punctuation second, once each, so two echoes are not recognised and are offered in the dialog
+as the message (the user can still cancel):
+
+- punctuation *after* a closing quote: `"send these notes to the bugs channel"!`
+- the single ellipsis character: `send these notes to the bugs channel…`
+
+Neither has been seen live. An instruction that is nothing but the message (`hello` as the
+whole instruction, `notes: "hello"`) is, by the same rule, an echo and not a message.
+
+`PrepareDeps` therefore has five keys, the fifth being `instruction`: the user's own words as
+typed or transcribed, read-only — never email, clipboard or step text, and only compared,
+never sent to the model. The tool description now tells the model to put a dictated message in
 `notes` word for word, never the instruction itself, and never clipboard text. Measured before
 and after (`tests/eval/quotedMessage.eval.test.ts`, `M21_QUOTED_EVAL=1`, 5 trials per cell):
 
@@ -2806,9 +2820,10 @@ Post-v0:
          is what the dialog, the handler and the log all use. For `sendMessage` it checks the
          channel **first** (so an unknown channel costs no model call), refuses when there is
          nothing to send, runs the formatter, and refuses a reply that asks for the notes.
-         It has no side effects by construction: it is handed `PrepareDeps` — four keys
-         (`context`, `llm`, a read-only `memory`, `chained`) and no sender or shell. The
-         handler never calls the model (`3320860`, `69b39cb`).
+         It has no side effects by construction: it is handed `PrepareDeps` — five keys
+         (`context`, `instruction`, `llm`, a read-only `memory`, `chained`; `instruction` was
+         added by the regression fix below) and no sender or shell. The handler never calls
+         the model (`3320860`, `69b39cb`).
          **This fix caused a regression, found live the next day (2026-10-11):** `send
          "helluuu" to social channel` was refused with "what I was given to send wasn't
          notes". *Cause:* the fix formatted everything, including a message the user had
@@ -2817,7 +2832,7 @@ Post-v0:
          text came from decides whether it is formatted.** A message given in the instruction
          (`notes`) is sent as written — no model call, no judgement of what it says. Only
          clipboard text is formatted and has its formatter reply judged. `PrepareDeps` gained
-         a fifth key, `instruction` (the user's words, read-only), so that `notes` which is
+         its fifth key, `instruction` (the user's words, read-only), so that `notes` which is
          merely the whole instruction echoed back (rows 417, 419) is recognised by comparison
          and treated as no notes. The planner side was measured and was never the problem
          (`tests/eval/quotedMessage.eval.test.ts`, 8 cases, 5/5 before and after).
