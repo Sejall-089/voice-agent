@@ -2704,10 +2704,11 @@ Post-v0:
       that is a native Windows message box and cannot be made so, and Slack linkifies the
       link itself once it is posted.
       **Follow-ups noted, not started:** `search_issues` and every write beyond create.
-- [ ] **M21 — close the orphaned-issue gap: check references before a chain starts, and ask
-      instead of refusing.** **Code-complete and PARTLY run live (2026-10-10); the box is left
-      open until its owner ticks it.** `docs/M21-live-checklist.md` says which items a person
-      watched (13) and which nobody has (16). 1704 tests green and 66 skipped at `22f9efb`
+- [x] **M21 — close the orphaned-issue gap: check references before a chain starts, and ask
+      instead of refusing.** **Code-complete and PARTLY run live (2026-10-10 and 2026-10-11).**
+      **Closed Oct 11 2026 after the live pass; unwatched checklist items listed in
+      docs/M21-live-checklist.md.** That checklist says which items a person watched (15) and
+      which nobody has (14). 1704 tests green and 66 skipped at `22f9efb`
       (the skips are the opt-in real-model evals).
 
       **What it closes.** M19 and M20 both found a chain creating a real issue at step 2 and
@@ -3374,6 +3375,36 @@ of it. None of it is started.
   placeholder (unknowable until that step runs); a LITERAL channel that does not exist
   (`#typo` — there is no list of real channels, and a webhook may ignore `channel` anyway);
   and any tool that does not declare `referenceArgs`.
+- **M22 (planned): one Slack webhook per channel. NOT DONE.** So that a channel name really
+  decides where a message goes, and a typo is refused for real. Today one webhook posts to one
+  channel whatever channel is named (M21: `#help` was answered, the message landed in
+  `#social`), "known channel" means only "resolves in memory or is a literal", and `#typo` is
+  accepted and remembered as typed. With a webhook per channel the set of real channels is the
+  set of configured webhooks: a name with no webhook can be refused before anything is sent,
+  and the confirm can name the destination without the "(You asked for…)" note.
+- **A "forget this fact" command. NOT DONE.** The app can remember and correct a fact but
+  cannot drop one. The M21 live pass needed "the bugs channel" forgotten several times, and it
+  was done by hand each time — deactivating the row in `memory.db`. Saying "forget the bugs
+  channel" is routed to `remember` with an empty value and fails ("I need both what to
+  remember and what its value is"). Not designed: it should deactivate rather than delete, the
+  way a superseding write does, and say what it forgot.
+- **Config warnings shown in the app, not only the terminal. NOT DONE.** The blank
+  `SLACK_WEBHOOK_CHANNEL` warning is a `console.warn` at startup — watched live, terminal
+  only; nothing shows in the app window. A user who is not looking at the terminal, or a
+  packaged build with no console, sees only the symptom (a dialog that names no channel). The
+  same is true of every other startup line that says a capability is off.
+- **A shell environment variable can hide the blank-`SLACK_WEBHOOK_CHANNEL` warning. NOT
+  DONE.** dotenv does not override a variable already set in the process environment
+  (measured with the real loader, dotenv 16.6.1). If the launching shell has
+  `SLACK_WEBHOOK_CHANNEL` set, a blank or unquoted line in `.env` is ignored: no warning, and
+  the app uses the shell's value — so what `.env` says and what the app does can disagree with
+  nothing to show for it. The same applies to every key the app reads.
+- **"playback did not report back: The recorder didn't respond" — seen twice, cause unknown.
+  NOT INVESTIGATED.** It appeared twice in the terminal during the M21 live pass. It is the
+  line `WindowsShell.play` logs when the renderer does not answer a `speech:play` within the
+  15-second reply timeout; the wording says "recorder" only because playback shares the voice
+  path's wait helper. **Not from M21** — nothing in M21 touched speech or playback. What made
+  the renderer not answer was not looked into.
 - **Warm connectors at startup. NOT DONE.** A connection opens lazily, on the first instruction
   that uses it, so the first connector call of a session pays the whole cold connect — measured
   at 1.4–7.1 s, and once, live, over 20 s (M21) — before its dialog can appear. Opening each

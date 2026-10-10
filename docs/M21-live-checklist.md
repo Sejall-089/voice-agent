@@ -1,6 +1,6 @@
 # M21 — live verification checklist (by hand)
 
-> **PARTLY RUN, 2026-10-10.** 13 boxes ticked, 16 open. A ticked box means **a person at the
+> **PARTLY RUN, 2026-10-10 and 2026-10-11.** 15 boxes ticked, 14 open. A ticked box means **a person at the
 > keyboard watched it happen in the running app** — nothing else earns a tick here. Every open
 > box says "not yet watched": that means *not seen by a person*, not *failing*.
 >
@@ -50,10 +50,11 @@ a bug on GitHub and post it in the bugs channel"**.
       that app — by design, and a known gap: it can cover what you switched to look at.
 - [x] **Two bad answers stop the chain.** An empty line, or an answer starting with "my"/"the",
       is asked about once more; a second one ends it with nothing created.
-- [ ] **Answering with a different real channel, and seeing where the message lands.**
-      *Not yet watched.* Expected, and a known gap rather than a bug: the dialog reports the
-      answer as what was asked for, and the message still goes to the webhook's own channel.
-      Worth watching once so the wording is seen against a channel that really exists.
+- [x] **Answering with a different real channel, and seeing where the message lands.**
+      **Answered #help; dialog said Send to #social via your Slack webhook (asked for help);
+      message landed in #social. Watched by me, Oct 11 2026.**
+      As expected, and a known gap rather than a bug: the dialog reports the answer as what
+      was asked for, and the message still goes to the webhook's own channel.
 - [ ] **The question cancels itself after 60 seconds.** *Not yet watched* (unit-tested with a
       fake clock only).
 
@@ -65,9 +66,10 @@ a bug on GitHub and post it in the bugs channel"**.
       `SLACK_WEBHOOK_CHANNEL="#social"` in `.env` — **with the quotes** — the dialog reads
       "Send to #social via your Slack webhook?" and, for another asked channel, "(You asked
       for …; the webhook posts to its own channel.)".
-- [ ] **The startup warning for a blank value.** *Not yet watched.* Set
-      `SLACK_WEBHOOK_CHANNEL=#social` without quotes, restart, and look for the one
-      `[main] SLACK_WEBHOOK_CHANNEL is set but blank…` line in the console.
+- [x] **The startup warning for a blank value** — **terminal only.** Watched in the
+      `npm run dev` terminal: the one `[main] SLACK_WEBHOOK_CHANNEL is set but blank…` line
+      appears at startup. Nothing shows in the app window. (To see it: leave the value blank,
+      or write `#social` without quotes, and restart.)
 
 ## 3. A lone send — what is approved is what is sent
 
