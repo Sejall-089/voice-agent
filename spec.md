@@ -2213,10 +2213,18 @@ Post-v0:
       its confirm dialog first, named `Sejall-089/throwaway_repo`, and answered `Created #3:
       M20 live test` with a working link. **The form handoff did not fire, and the create
       result matched the `{id, url}` the server's source describes.**
-      **Sections 3 and 5 are STILL UNRUN and rest on tests alone:** the Gmail → GitHub →
-      Slack **chain** and its declines; and the **failure wording** (wrong repository,
-      rejected token, a token that may not write, and the console line for an unrecognised
-      failure). **Section 4, the choice between two trackers, is half run:** "file this bug"
+      **Section 3, the Gmail → GitHub → Slack chain, has since been run** (three runs,
+      2026-10-10; checklist, Live results 3): the plan had three steps and picked GitHub, not
+      Linear; the step 2 dialog named the repository and showed the whole email; the step 3
+      dialog showed exactly the text then posted; issues #5 and #6 exist and Slack got one
+      message for each; and issue #5's body on github.com is the email (From, Subject, then
+      the full text). **Run 1 created issue #4 and then stopped at step 3** because "the bugs
+      channel" was not a channel it knew — M19's orphaned-issue follow-up, seen again and not
+      an M20 bug (Finding 3; the follow-up list below has it). The chain's two declines were
+      not run.
+      **Section 5 is STILL UNRUN and rests on tests alone:** the **failure wording** (wrong
+      repository, rejected token, a token that may not write, and the console line for an
+      unrecognised failure). **Section 4, the choice between two trackers, is half run:** "file this bug"
       with no tracker named picked Linear, once (cancelled; nothing created) — and its body
       was the instruction text itself, M19's made-up-description finding again, shown by the
       dialog and caught there (checklist, Live results 2 and Finding 2; not an M20 bug).
@@ -2224,7 +2232,7 @@ Post-v0:
       and confirmed after the first report: cancelling the dialog created nothing, and
       github.com showed exactly one new issue with #1 and #2 untouched. Within sections 0-2,
       four boxes are still open — the token's permissions, the `connectors.json` entry, the
-      recon script, and listing closed issues. 11 boxes ticked, 16 open; the live results in
+      recon script, and listing closed issues. 15 boxes ticked, 12 open; the live results in
       the checklist say which.
       What follows was written before the pass.
       Built and tested headless.
@@ -2292,7 +2300,10 @@ Post-v0:
       **Links in the result bar are plain text, not clickable** — found in the live pass; a UI
       follow-up for the result bar, not an M20 bug, not fixed. The links are correct, but one
       had to be copied into a browser. Seen on GitHub results only; it likely applies to
-      Linear's too, not checked (`docs/M20-live-checklist.md`, Finding 1).
+      Linear's too, not checked (`docs/M20-live-checklist.md`, Finding 1). **Only the result
+      bar needs the fix:** the link is not clickable in the step 3 confirm dialog either, but
+      that is a native Windows message box and cannot be made so, and Slack linkifies the
+      link itself once it is posted.
       **Follow-ups noted, not started:** `search_issues` and every write beyond create.
 
 **v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
@@ -2834,6 +2845,12 @@ of it. None of it is started.
   meant to be settled before a plan is narrated (§5b); whether a channel reference resolves is
   knowable then, and is not checked. Not designed: it needs a way for a tool to pre-flight its
   arguments at plan-validation time without that becoming a second gate.
+  **Seen again, 2026-10-10 (M20), with GitHub:** "the bugs channel" was unknown, so the chain
+  created issue #4 in `Sejall-089/throwaway_repo` and stopped at step 3; teaching the channel
+  and re-running filed the same email again as #5. Still not designed
+  (`docs/M20-live-checklist.md`, Finding 3). One detail from reading the code then, not from
+  a run: the refusal is in `sendMessage`'s handler, which runs AFTER that step's confirm gate
+  — so the step 3 dialog would ask "Send to the bugs channel?" before the step is refused.
 - **The confirm dialog's approve button says "Send" on every confirm, including a create.**
   `WindowsShell.confirm()` hard-codes `buttons: ["Send", "Cancel"]`, which was accurate while
   the only `dangerous` tools sent something (Slack, Gmail). It now also fronts

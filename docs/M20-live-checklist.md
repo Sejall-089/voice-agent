@@ -2,9 +2,11 @@
 
 > **PARTLY RUN, 2026-10-10.** A person ran sections 0, 1 and 2 and M20's box in `spec.md` §9 is
 > ticked on that basis: the reads work, and the first real create worked — the form handoff did
-> not fire. **Sections 3 and 5 have not been run** (the chain, the failure wording). Section 4
-> (the choice between two trackers) is half run: one of its two boxes was seen — "Live results
-> 2". Four boxes in sections 0-2 are still open. 11 boxes ticked, 16 open; the results
+> not fire. **Section 3, the chain, has since been run** (Live results 3): it works end to
+> end, and it found that a chain creates the issue before it discovers the Slack channel is
+> unknown (Finding 3). Its two declines were not run. **Section 5 has not been run** (the
+> failure wording). Section 4 (the choice between two trackers) is half run — "Live results
+> 2". Four boxes in sections 0-2 are still open. 15 boxes ticked, 12 open; the results
 > at the bottom say exactly which. An open box here means *not seen by a person*, not *failing*.
 >
 > The two paragraphs below were written before the pass and are kept as written.
@@ -86,14 +88,14 @@ Say **"open a GitHub issue called M20 live test"**.
 With a bug email open in Gmail and nothing important on the clipboard, say
 **"file this bug on GitHub and tell the bugs channel"**.
 
-- [ ] The plan preview shows three steps: read the email, file it on GitHub, tell the channel.
+- [x] The plan preview shows three steps: read the email, file it on GitHub, tell the channel.
       *Could be wrong:* with Linear also on the menu, the model may pick `linear__create_issue`,
       or skip the read (M19's finding). The dialog in the next box is what catches either.
-- [ ] `Step 2 of 3: Create this GitHub issue in owner/repo?` shows the **whole email**, and the
+- [x] `Step 2 of 3: Create this GitHub issue in owner/repo?` shows the **whole email**, and the
       dialog is fully visible (not under the instruction bar — M19's first live bug).
-- [ ] `Step 3 of 3: Send to #bugs?` shows `New bug filed: Created #N: …` and the link — the
+- [x] `Step 3 of 3: Send to #bugs?` shows `New bug filed: Created #N: …` and the link — the
       exact text that is then posted.
-- [ ] The issue exists with the email as its body; Slack got the message once.
+- [x] The issue exists with the email as its body; Slack got the message once.
 - [ ] Decline step 2 → no issue, no message. Decline step 3 → the issue exists, no message,
       and the app says so.
 
@@ -127,7 +129,7 @@ With a bug email open in Gmail and nothing important on the clipboard, say
 
 Reported by the person who ran it. 10 boxes ticked in this pass. (First recorded as 8; two
 more were confirmed afterwards, the same day, and are marked below.) With "Live results 2" the
-checklist stands at **11 ticked, 16 open**.
+checklist stood at 11 ticked, 16 open; with "Live results 3" it stands at **15 ticked, 12 open**.
 
 **Seen, and ticked:**
 
@@ -177,7 +179,17 @@ its link); not checked. A connector hands back a string and the right one, so th
 to the result bar, not to `core/mcp/`. The result bar's code was not read for this note.
 Recorded in `spec.md` §9 with the other follow-ups.
 
-**Not run at all** (as of Live results 1; section 4 has since been half run — Live results 2):
+**Addendum (Live results 3) — where a link is and is not clickable. Only the result bar needs
+the fix.**
+
+| Where the link appears | Clickable? | Anything to do? |
+|---|---|---|
+| The result bar | No | **Yes — this is the follow-up.** |
+| The step 3 confirm dialog (`Send to #social?` with the link in the message) | No | No. It is a native Windows message box and cannot be made clickable. |
+| The message in Slack | Yes | No. Slack linkifies it itself. |
+
+**Not run at all** (as of Live results 1; section 4 has since been half run — Live results 2 —
+and section 3 run apart from its declines — Live results 3):
 section 3 (the Gmail → GitHub → Slack chain, and both declines), section 4 (which tracker a
 model picks when two are on the menu), section 5 (a wrong repository, a broken token, a
 read-only token, and the console line for an unrecognised failure).
@@ -185,11 +197,11 @@ read-only token, and the console line for an unrecognised failure).
 **Known, cosmetic, not fixed:** the approve button on the create dialog says "Send".
 
 **Left behind:** issue #3, "M20 live test", in `Sejall-089/throwaway_repo`. GitHub's MCP server
-cannot delete it.
+cannot delete it. (Live results 3 left three more — the full list is at the end of this file.)
 
 ### Live results 2 — section 4, one box, by hand (recorded 2026-10-10)
 
-Reported by the person who ran it. 1 box ticked; the checklist stands at 11 ticked, 16 open.
+Reported by the person who ran it. 1 box ticked; the checklist then stood at 11 ticked, 16 open.
 
 **Seen, and ticked:**
 
@@ -222,3 +234,86 @@ titled `Bug` whose body was the instruction text, `file this bug` — a ticket a
 - **Not known:** whether it happens with an email open, how often it happens at all, and
   whether the GitHub tool does the same when it is the one chosen (its description carries
   the same rule). One run, one phrase.
+
+### Live results 3 — section 3, the chain, by hand (runs 2026-10-10)
+
+Reported by the person who ran it. Three runs of the chain. 4 boxes ticked (first recorded as
+3; the fourth was confirmed afterwards and is marked below); the checklist stands at
+**15 ticked, 12 open**.
+
+**Seen, and ticked:**
+
+- **The plan preview showed three steps** — read the email, create a GitHub issue, notify the
+  channel — **and picked GitHub, not Linear.** Both things the box warns about did not happen:
+  the model did not choose `linear__create_issue`, and it did not skip the read.
+- **The step 2 dialog** named `Sejall-089/throwaway_repo`, showed the **whole email** as the
+  body, and was fully visible. **Finding 2 did not recur with an email open**: the body was
+  the email, not the instruction.
+- **The step 3 dialog shows exactly what is then posted** (run 3). It read:
+
+  ```
+  Step 3 of 3: Send to #social?
+  Filed a bug on GitHub: Created #6: Bug report from email
+  https://github.com/Sejall-089/throwaway_repo/issues/6
+  ```
+
+  It was approved, and Slack `#social` received a message for #6 with the same text and link.
+  (The box's own wording, `New bug filed: …`, was this file's guess at the model's phrasing.
+  The model wrote `Filed a bug on GitHub: …`. What the box checks — that the dialog's text is
+  the text posted — is what was seen.)
+- **The issue exists with the email as its body, and Slack got the message once** (confirmed
+  afterwards). Issue #5 was opened on github.com: its body is the email — `From: Sejal Gupta`,
+  `Subject: Bug: login button does nothing on mobile`, then the full message text. Slack
+  `#social` received exactly one message for #5.
+
+**The three runs:**
+
+| Run | What happened | Issue | Slack `#social` |
+|---|---|---|---|
+| 1 | Steps 1 and 2 ran. **Step 3 did not**: *"I don't know which channel 'the bugs channel' means … I'd already done steps 1 and 2 of 3, but step 3 didn't run."* | **#4** "Bug reported via email" — created, and nobody was told | nothing posted |
+| 2 | After teaching the channel: completed. Result bar: `Sent to bugs channel.` and `Filed a bug on GitHub: Created #5: Bug report from email` with a link. | **#5**, seen on github.com | exactly one message (7:10 PM), same text and link |
+| 3 | Completed; the step 3 dialog was read before approving (above). | **#6** | a second message, for #6, same text and link |
+
+The #5 and #6 messages appear consecutively in the channel, from Project Notifications.
+Nothing was ever posted for #4.
+
+**Still open in section 3:**
+
+- *Decline step 2* and *decline step 3*: **not run.** The chain's declines rest on tests.
+
+### Finding 3 — the chain created the issue before finding out it could not announce it
+
+**Not an M20 bug: a known M19 follow-up, seen again. Not fixed.** In run 1 the chain ran its
+irreversible step — creating issue #4 — and only then discovered that step 3's channel, "the
+bugs channel", did not resolve to anything. Step 3 stopped. The issue stayed. Running the
+instruction again after teaching the channel created #5, so the same email is now filed twice:
+#4, which nobody was told about, and #5.
+
+- **It is on M19's follow-up list already**, in the same shape: *"A chain stops AFTER the
+  issue is created when the Slack channel is unknown, orphaning the issue"* (`spec.md` §9;
+  there it left SEJ-7 and SEJ-8 in Linear). That entry says it is not designed. This is the
+  first time it has been seen with GitHub; nothing about it is specific to either connector.
+- **Where the check is today** (read from the code, not changed): an unresolved reference is
+  found only when its own step runs, never when the plan is checked.
+  - `validatePlan` (`core/chain.ts`) checks that each tool exists, the step count, and the
+    `{stepN}` placeholders. It does not look at memory.
+  - Memory resolution happens inside `runStep` (`core/planner.ts`), per step, as that step
+    starts. A reference it cannot resolve is left as it was, silently.
+  - The refusal itself is in `sendMessage`'s **handler** (`isUnresolved`), which runs after
+    that step's confirm gate. So by the code's order, step 3's dialog — "Send to the bugs
+    channel?" — would be shown, and the refusal would come after approving it. Whether the
+    dialog appeared in run 1 was not reported; this is from reading the order, not from a run.
+- **It was knowable before step 1.** The channel is a literal in the plan — no `{stepN}` in
+  it — and looking it up in memory needs nothing an earlier step produces.
+
+**Also noted: the issue titles were written by the model, not taken from the email.** "Bug
+reported via email" (#4) and "Bug report from email" (#5, #6) — none is the email's subject.
+That is the design, and its known cost: the model plans once, before the email is read, and
+is told only that an email is open, never its subject (`core/contextHints.ts`: "the model
+still cannot write a specific issue title"). The body is the email; the title is generic.
+
+### Leftover throwaway issues
+
+In `Sejall-089/throwaway_repo`: **#3, #4, #5, #6.** (#1 and #2 are the fixture issues the
+tests' captures were taken from — keep those.) GitHub's MCP server cannot delete an issue, and
+this app cannot close one; close them by hand.

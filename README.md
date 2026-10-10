@@ -415,9 +415,13 @@ and one real create — the dialog came first, named the repository, and the app
 issue, so that one create is the evidence. Also seen, once: "file this bug", with no tracker
 named, went to **Linear**, not GitHub — and with no email open its body was just the
 instruction text, which the confirm dialog showed before anything was created (it was
-cancelled). **Not yet seen by anyone:** the Gmail → GitHub → Slack chain, "file this bug in
-Linear" with both trackers on the menu, and any of the failure messages.
-`docs/M20-live-checklist.md` has the open boxes.
+cancelled). The Gmail → GitHub → Slack chain has been seen working too: three steps, GitHub
+picked, the whole email in the dialog, and the Slack message matching what the dialog showed.
+Its first run also showed a known gap: the channel named was one the app didn't know, and it
+found that out only *after* creating the issue, leaving an issue nobody was told about.
+**Not yet seen by anyone:** declining a step of that chain, "file this bug in Linear" with
+both trackers on the menu, and any of the failure messages. `docs/M20-live-checklist.md` has
+the open boxes.
 
 ---
 
@@ -764,11 +768,13 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 **M20 (a second connector, GitHub issues) is ticked after a partial live pass (10 Oct 2026).**
 A person saw the three tools work, including one real create; the form handoff the server's
 source describes did not fire. It is also tested headless, and its read paths were checked
-against GitHub's real server, read-only. **Not run live:** the Gmail → GitHub → Slack chain
-and the failure wording. The choice between two trackers is half run: an instruction naming
-no tracker picked Linear, once. Also not verified: part of the mutation pass
+against GitHub's real server, read-only. The Gmail → GitHub → Slack chain has since been run
+and works; its declines have not. **Not run live:** the failure wording. The choice between
+two trackers is half run: an instruction naming no tracker picked Linear, once. Also not
+verified: part of the mutation pass
 (nine rules were broken one at a time and each was caught — some of the pinned arguments and
-the transport rules were not); and whether a model picks GitHub when asked to. The plan eval, re-run once with both
+the transport rules were not); and how often a model picks GitHub when asked to (it did in the
+live chain runs; the eval has no phrase that names GitHub). The plan eval, re-run once with both
 trackers on the menu, matched 27 of 28 against M19's 28 of 28: no call chose a GitHub tool, and
 the one miss was the right plan written with a `functions.` prefix the app strips. See
 `spec.md` §9 and `docs/M20-live-checklist.md`.
