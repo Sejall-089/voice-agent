@@ -1063,6 +1063,28 @@ pre-flight's unknown-reference clause — and passes no previous turn instead. T
 is unchanged. Every other row is shown as before, **including a lone `sendMessage`'s own
 "teach me with" refusal**, which has a tool name and is a different row.
 
+**And the prompt says not to ask (2026-10-10).** `CHOOSE_SYSTEM` gained one narrow rule, placed
+before the "If no tool fits… a clarifying question" sentence: a phrase starting "my" or "the"
+that the model does not recognise goes into the tool call or plan exactly as said, and the
+model never replies with a question about what it refers to — the app resolves it or asks. It
+covers what a *name* means and nothing else; a request missing a detail still gets a question.
+Measured with the refusal deliberately shown to the model
+(`tests/eval/unknownReference.eval.test.ts`, `M21_REFERENCE_EVAL=1`, 5 trials per cell):
+
+| Case | Before the rule | After |
+|------|-----------------|-------|
+| Chain, pre-flight refusal as previous turn → plan with channel "the bugs channel" | 0/5 | 5/5 |
+| Lone send, the tool's own refusal as previous turn → `sendMessage`, same phrase | 0/5 | 5/5 |
+| "file this bug in Linear and tell the social channel" → the M19 plan | 5/5 | 5/5 |
+| "send these notes to the team" → `sendMessage`, channel "the team" | 5/5 | 5/5 |
+| "move my meeting" → still a clarifying question | 5/5 | 5/5 |
+| "schedule a meeting" → still a clarifying question | 5/5 | 5/5 |
+
+The second row is the case the row filter above does **not** cover (a tool's own refusal is
+still shown), so the two fixes overlap on the first row only. One run of five per cell shows the
+direction, not a guarantee. **Not eliminated:** a prose reply is still displayed as a result,
+so any other way the model comes to ask in prose will look like a question nothing waits on.
+
 Consequences worth knowing: answers already given are **kept** when the plan is then refused
 for a later reference (a three-channel plan saves two facts and refuses on the third); the save
 writes no action-log row of its own; and neither the question nor the "Saved" line is spoken.

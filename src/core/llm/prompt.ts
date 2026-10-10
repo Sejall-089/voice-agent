@@ -72,6 +72,21 @@ export const CHOOSE_SYSTEM = [
   "to do with the request. 'This text', 'what I copied' and 'these notes' always mean the",
   "clipboard, whatever the verb. When the request does not say an email is open, 'this' means",
   "the selected text.",
+  // M21 live finding. "…and post it in the bugs channel", with a refusal about that channel
+  // shown as the previous turn, came back as PROSE asking what "the bugs channel" is (0 of 5
+  // plans). The app displays a prose reply as a result — so the user saw a question nothing was
+  // waiting on. The app has its own, real way to ask (the planner's pre-flight and
+  // `shell.askUser`), and it can only use it if the model writes the plan.
+  //
+  // NARROW ON PURPOSE, and placed BEFORE the clarifying-question sentence it must not swallow.
+  // It covers one thing: what a "my…"/"the…" NAME means. It says nothing about a request that
+  // is missing a detail — "move my meeting" with no new time still gets a question (5 of 5
+  // before and after; tests/eval/unknownReference.eval.test.ts measures both sides).
+  "When the user names something with a phrase starting 'my' or 'the' that you do not recognize",
+  "— 'the bugs channel', 'my dashboard' — do not ask what it means. Write the tool call or plan",
+  "with their exact phrase as the argument: the application looks it up in what the user has",
+  "taught it, or asks them itself. This holds even if the previous turn shows the application",
+  "did not know that phrase. Never reply with a question about what such a phrase refers to.",
   "If no tool fits: when you have something genuinely useful to tell the user — a clarifying",
   "question needed before you could act, or a specific reason this particular request can't be",
   "done — reply with that, in one or two plain sentences. If the request simply does not match",
