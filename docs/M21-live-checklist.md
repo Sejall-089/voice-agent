@@ -1,6 +1,6 @@
 # M21 — live verification checklist (by hand)
 
-> **PARTLY RUN, 2026-10-10 and 2026-10-11.** 23 boxes ticked, 8 open. A ticked box means **a person at the
+> **PARTLY RUN, 2026-10-10 and 2026-10-11.** 25 boxes ticked, 6 open. A ticked box means **a person at the
 > keyboard watched it happen in the running app** — nothing else earns a tick here. Every open
 > box says "not yet watched": that means *not seen by a person*, not *failing*.
 >
@@ -74,22 +74,24 @@ a bug on GitHub and post it in the bugs channel"**.
 
 - [x] **A lone send with nothing selected is refused before any dialog.** "There's nothing to
       send. Copy the notes first…". Nothing reaches Slack.
+      **Empty clipboard and nothing in the instruction: refused before any dialog, with a
+      sentence on what to do. Watched by me, Oct 11 2026.**
       *(Before the fix this posted "Please paste the rough notes you want formatted for the
       #bugs channel." — action-log rows 417 and 418.)*
 - [x] **A lone send with selected text shows the formatted text in the dialog, and Slack shows
       the same text.** The dialog's body is the whole formatted message; what arrives is
       identical.
 - [x] **Cancel posts nothing.**
-- [ ] **A message given in the instruction is sent as written.** *Not yet watched.* With
-      nothing selected, `send "helluuu" to social channel` shows a dialog whose body is exactly
-      `helluuu`, and Slack shows `helluuu`. (This was REFUSED live on Oct 11 — "what I was
-      given to send wasn't notes" — a regression from the fix above; see spec §9 M21,
-      finding 4.)
-- [ ] **The same with an email open in Gmail.** *Not yet watched.* Once, live,
-      `send "hello guys" to social channel` with an email open came back as the model asking
-      what to do with the email. That could not be reproduced in 30+ trials; if it happens
-      again, copy the `[main] no_tool…` line from the terminal and note what was on the
-      clipboard.
+- [x] **A message given in the instruction is sent as written.** **No email open: the dialog
+      showed exactly "hello guys", and Slack received it. Watched by me, Oct 11 2026.**
+      (A quoted message was REFUSED live earlier on Oct 11 — `send "helluuu" to social
+      channel`, "what I was given to send wasn't notes" — a regression from the fix above;
+      see spec §9 M21, finding 4.)
+- [x] **The same with an email open in Gmail.** **It still planned a send. Watched by me,
+      Oct 11 2026.** Once before, live, `send "hello guys" to social channel` with an email
+      open came back as the model asking what to do with the email. That could not be
+      reproduced in 30+ trials; if it happens again, copy the `[main] no_tool…` line from the
+      terminal and note what was on the clipboard.
 
 ## 4. The confirm button's label
 
