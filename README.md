@@ -321,6 +321,24 @@ Some plans are refused before anything runs at all — more than three steps, a 
 doesn't have, or a step trying to use a result from a step that hasn't happened yet. Better to
 decline the plan than to announce one that was always going to die halfway.
 
+**It checks the names in a plan before it starts, and asks about a channel it doesn't know
+(M21).** "File this bug on GitHub and tell the bugs channel" used to create the issue and only
+then discover it had never been told what "the bugs channel" is. Now that is settled before
+step 1. If the channel is unknown, it asks — in the command bar, before any dialog:
+
+```
+Before I start: which channel do you mean by 'the bugs channel'?
+```
+
+Type the channel's name and press Enter: it says `Saved: the bugs channel = #bugs`, remembers
+it, and runs the plan. Next time it doesn't ask. Escape (or no answer for 60 seconds) cancels,
+and nothing in the plan has happened. It asks at most twice per plan, and it will not take
+"the dev channel" as an answer — it wants the name itself. The question stays on screen if you
+click away to look something up; press the hotkey to get the keyboard back in it.
+
+What it can't check in advance: a channel that only exists once an earlier step has run, and
+whether a channel you name actually exists. See "Known gaps" in `spec.md` §9 (M21).
+
 While a chain is running, both hotkeys are blocked — and *say* they're blocked, because a hotkey
 that silently does nothing is indistinguishable from a broken app. If a chain is parked at a
 confirm dialog, it tells you about the dialog, not about the chain: that's the one you can act on.
@@ -381,6 +399,16 @@ Linear reports every failure as a normal-looking response, without an error — 
 checks: a response marked as a failure is a failure (*"Linear said no: Could not find team …"*),
 and a "success" it can't read is a failure too. A request that times out says the issue **may or
 may not** have been created, and is never sent twice.
+
+**It says which part failed (M21).** That warning is only true once something has been sent.
+The first use of a connector in a session has to open a connection first — the status line
+shows "Connecting to GitHub…" — and if *that* fails, it says so: *"GitHub didn't answer while I
+was connecting, so nothing was sent. It is safe to try again."* It waits up to 30 seconds to
+connect and 20 for anything after.
+
+**Links in a result are clickable (M21)** — the GitHub and Linear issue links it hands back,
+and only those: `https`, and exactly `github.com` or `linear.app`. Anything else in a result
+stays plain text. The button on a confirm now names what it does ("Create issue", not "Send").
 
 **Not built:** editing or closing issues, comments, labels, priority, assignees; connecting an
 app from the UI.
@@ -469,6 +497,20 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `DICTATE_HOTKEY` | Optional. Pins the **dictation** combo (M12) — separate from `HOTKEY` above. Needs `WHISPER_*` set too, or there's no transcriber to dictate with. |
 | `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` · `GOOGLE_REFRESH_TOKEN` | Tasks 12-14 (M13). All three, or the calendar tools aren't offered at all. The refresh token comes from `npm run calendar:connect` — it's a **secret**, and the app never logs it or puts it in an error. |
 | `CHROME_DEBUG_URL` | Tasks 8-11 (the Gmail reply tools **and** the Notion tool — one debug Chrome, both). Optional — leave it blank and none of those four tools are ever offered at all. |
+
+**Two things about `.env` that cost a debugging session (M21):**
+
+- **A value that starts with `#` must be in quotes.** `.env` reads an unquoted `#` as the start
+  of a comment, so `SLACK_WEBHOOK_CHANNEL=#social` is an *empty* value. Write
+  `SLACK_WEBHOOK_CHANNEL="#social"`. The app warns at startup if that variable is present but
+  blank.
+- **The Slack channel you name is not where a message goes.** A Slack app webhook posts to the
+  one channel it was created for. `SLACK_WEBHOOK_CHANNEL` only tells the app what to *call*
+  that channel, so its dialog can say "Send to #social via your Slack webhook?". Sending to a
+  channel by name needs one webhook per channel, which isn't built yet.
+
+Restart after changing `.env`, and after pulling new code: the main process is built once at
+startup.
 
 ### Setting up the Gmail reply tools (optional)
 

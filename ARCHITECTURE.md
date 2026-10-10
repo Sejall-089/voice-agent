@@ -190,6 +190,27 @@ only when, the remainder is exactly a name on the menu.
 registry check, the validation, and the risk gates are deterministic code — the
 model never gets to invent a capability or fire a dangerous action unchecked.
 
+**Two steps were added to that path in M21, and neither is a new gate.**
+
+- **Prepare** (after validation, before the tier). A tool may settle what a call will *actually*
+  do — `sendMessage` formats its rough notes here — and the arguments it returns are the ones
+  the tier, the dialog, the handler and the log all use. This is what makes a confirm dialog
+  show the exact text that will be sent instead of a preview of the model's input. It runs
+  before anything is approved, so it is handed only what it may touch: the context, the model, a
+  read-only memory. There is no sender or shell in that object.
+- **Which arguments are references.** Memory resolution looks at *values*, so it could not tell a
+  destination from a message. A tool now declares `referenceArgs`, and only those are resolved.
+
+**For a plan, references are settled before step 1 (M21).** After the plan is found runnable
+and before anything is narrated, read or confirmed, every step's declared references are
+checked against memory. An unknown one used to surface at the step that needed it — after an
+earlier step had already created an issue nobody was then told about. Now the plan does not
+start. For a Slack channel the app **asks** instead of refusing — a real question in the command
+bar, typed answer, at most two per chain — remembers the answer, and runs the plan unchanged.
+The model is not consulted again, and the answer comes only from what the user types. An
+argument that depends on an earlier step (`{stepN}`) cannot be checked in advance; that step
+still refuses on the real value.
+
 **Chained plans (M17) do not weaken that.** One instruction may resolve to a fixed, ordered
 sequence of up to three *existing* tools — but the model answers **once** and is never consulted
 again, so the step count is known before anything runs, and every step re-enters the same
@@ -247,6 +268,24 @@ sequenceDiagram
     Planner->>Memory: log action
     Planner->>Shell: showResult("Sent via your Slack webhook. …")
 ```
+
+**What that trace leaves out (M21).** Two things happen between "resolve" and "confirm", and
+two are true of the confirm itself:
+
+- **The message is formatted before the dialog**, in the tool's `prepare`, and the dialog shows
+  all of it. The handler sends that string and never calls the model. With nothing to send, or
+  a formatter that answers with a request for the notes instead of a message, the call is
+  refused and no dialog opens.
+- **The channel is checked before the dialog**, and before the formatter: a name memory does not
+  know is refused without costing a model call.
+- **The dialog does not claim the asked channel as the destination.** A Slack *app* webhook
+  posts to the one channel it was created for and ignores the channel it is handed. So the
+  question names the webhook's own channel when `SLACK_WEBHOOK_CHANNEL` says what that is
+  ("Send to #social via your Slack webhook?"), and otherwise only "your Slack webhook"; the
+  channel that was asked for appears as a note. Channel names start to mean something with one
+  webhook per channel, which is not built.
+- **The approve button names the action** — "Send" here, "Create issue" for an issue — from a
+  fixed string in the tool's code. Cancel is still the default and what Escape means.
 
 **Correction follow-up ("no, I meant the design channel"):** the planner routes this
 to the `remember` tool, which versions the old `team` fact inactive and writes a new
@@ -629,6 +668,25 @@ landed, and is never retried); a result marked `isError` — Linear reports ever
 way, without throwing — and a "success" whose result cannot be read. Each stops the chain where
 it stands, and the steps after it never run.
 
+**A failure says which phase it happened in (M21).** "May or may not have landed" is only true
+after something was sent, and a connector tool's connection is opened by its confirm summary —
+before the dialog. So a failure is worded by where it was caught, never by reading the error:
+
+| Phase | Requests | Budget | What a timeout or failure means |
+|---|---|---|---|
+| connecting | `initialize` | 30 s | nothing was sent; safe to try again |
+| connecting | `tools/list` | 20 s | the same |
+| calling | a tool call | 20 s | it was sent — it may or may not have landed |
+
+While a connection is being opened the status line shows "Connecting to GitHub…". The worst
+case before a dialog appears is 50 seconds. Connections are opened lazily and are **not** warmed
+at startup, and a failed call is still never retried in either phase.
+
+**The chain above, since M21.** Before step 1, the plan's references are checked: "the bugs
+channel" either resolves from memory, or the user is asked what it is and the answer is
+remembered. The Slack step's dialog names where the webhook really posts, not the channel that
+was asked for, and each dialog's button names its own action ("Create issue", then "Send").
+
 ---
 
 ## 5. Memory data model
@@ -679,6 +737,16 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 - **Results are data.** Text that comes back from an app — an email, a ticket body — is never
   shown to the model that planned the run, is substituted into a later step in a single pass, and
   appears in full in the confirm dialog before anything is created or sent from it.
+- **A dialog shows what will happen (M21).** What a confirm describes is settled before it is
+  shown — the exact text to be sent, the place it really goes — and the handler does that and
+  nothing else. No model runs between an approval and the act. The approve button's word is
+  fixed in the tool's code.
+- **Known before it starts, or asked.** A plan that names something the app does not know is
+  stopped before step 1, not at the step that needed it. Where a typed answer would fix it, the
+  app asks, through a question the hotkeys know is open — never by a model replying in prose.
+- **Links are opened by main, on its own check.** The result bar draws only `https` links to an
+  exact, short list of hosts, and main validates a URL again before opening it. The bar's own
+  window never navigates.
 - **Thin shell.** All OS-specific code sits behind `OSShell` (and `VoiceShell` for
   microphone capture). The core imports no `electron`. Porting = reimplementing those
   interfaces, nothing else.

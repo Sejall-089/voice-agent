@@ -2704,6 +2704,117 @@ Post-v0:
       that is a native Windows message box and cannot be made so, and Slack linkifies the
       link itself once it is posted.
       **Follow-ups noted, not started:** `search_issues` and every write beyond create.
+- [ ] **M21 — close the orphaned-issue gap: check references before a chain starts, and ask
+      instead of refusing.** **Code-complete and PARTLY run live (2026-10-10); the box is left
+      open until its owner ticks it.** `docs/M21-live-checklist.md` says which items a person
+      watched (13) and which nobody has (16). 1704 tests green and 66 skipped at `22f9efb`
+      (the skips are the opt-in real-model evals).
+
+      **What it closes.** M19 and M20 both found a chain creating a real issue at step 2 and
+      only then discovering, at step 3, that it did not know the Slack channel — SEJ-7, SEJ-8,
+      GitHub #4, and #5 when the channel was taught and the email filed again. That gap is
+      closed **for references that resolve from memory**:
+      - `sendMessage`'s channel check runs **before** its dialog, not after Send (`7233b96`).
+      - Tools declare `referenceArgs`; the planner resolves only those, so a message body is
+        never rewritten by memory (`a113949`). One rule decides "does this name something we
+        know": `checkReference` (`453314f`).
+      - `runChain` pre-flights every step's references after `validatePlan` and **before step
+        1** — nothing read, created, announced or asked when one is unknown (`6429979`).
+      - An unknown `sendMessage` channel makes the app **ask** (`OSShell.askUser`, `b61b90e`;
+        the pre-flight ask, `ce269a0`) and remember the answer, then run. At most two
+        questions per chain; no answer leaves the user at the old refusal.
+      - Confirm button labels are per tool (`22f9efb`); issue links in the result bar are
+        clickable (`bd57ea1`); a lone send formats **before** the dialog and sends exactly
+        what was shown (`3320860`, `69b39cb`).
+
+      **Six live findings, each with its cause and its fix.** All were found by a person at
+      the keyboard, after the tests were green.
+
+      1. **A dismissed question was followed by something that looked like a question and was
+         not one.** *Cause:* the refused run was logged in the pre-flight's words ("teach me
+         with: remember the bugs channel is…"), the next planning call was shown that row as
+         the previous turn, and the model answered in prose with its own "what is the bugs
+         channel?". The planner shows a prose reply as an ordinary result, so the instruction
+         hotkey — correctly — opened a fresh bar over it. It was reported as the hotkey
+         guard failing; the guard was never involved. *Fix:* that one kind of row is not shown
+         to the next planning call (`6cd26e4`), and the prompt gained a narrow rule: an
+         unrecognised "my…/the…" name goes into the plan as said and is never asked about
+         (`f942693`). Measured with the refusal deliberately shown, 5 trials per cell
+         (`tests/eval/unknownReference.eval.test.ts`):
+
+         | Case | Before | After |
+         |------|--------|-------|
+         | Chain, pre-flight refusal as previous turn | 0/5 | 5/5 |
+         | Lone send, the tool's own refusal as previous turn | 0/5 | 5/5 |
+         | "file this bug in Linear and tell the social channel" | 5/5 | 5/5 |
+         | "send these notes to the team" | 5/5 | 5/5 |
+         | "move my meeting" still gets a clarifying question | 5/5 | 5/5 |
+         | "schedule a meeting" still gets a clarifying question | 5/5 | 5/5 |
+
+      2. **The dialog named a channel the message did not go to.** *Cause:* a Slack **app**
+         webhook posts to the one channel it was created for and ignores the `channel` field;
+         with "the bugs channel" taught as `#help`, the dialog said `#help` and the message
+         landed in `#social`. *Fix:* the confirm, result and failure texts name only where
+         the webhook really posts — its own channel when `SLACK_WEBHOOK_CHANNEL` says what
+         that is, otherwise just "your Slack webhook" — and show the asked channel as a note
+         (`836dae3`).
+      3. **`SLACK_WEBHOOK_CHANNEL=#social` did nothing.** *Cause:* in `.env` an unquoted value
+         starting with `#` is a comment, so it parsed as blank — on advice this repo gave.
+         *Fix:* the quoted form is documented in `.env.example` and the README, and startup
+         warns when the variable is present but blank (`cc688da`).
+      4. **Slack received the formatter's own question.** A lone "send these notes to the bugs
+         channel" with nothing useful to send posted "Please paste the rough notes you want
+         formatted for the #bugs channel." — twice. *Cause:* the formatter ran in the handler,
+         **after** the dialog, and the dialog showed a preview of the raw input or nothing at
+         all. *Fix:* `Tool.prepare` runs once, before the tier and both gates, and its result
+         is what the dialog, the handler and the log all use. For `sendMessage` it checks the
+         channel **first** (so an unknown channel costs no model call), refuses when there is
+         nothing to send, runs the formatter, and refuses a reply that asks for the notes.
+         It has no side effects by construction: it is handed `PrepareDeps` — four keys
+         (`context`, `llm`, a read-only `memory`, `chained`) and no sender or shell. The
+         handler never calls the model (`3320860`, `69b39cb`).
+      5. **"It may or may not have gone through" about a create that was never sent.**
+         *Cause:* the session's first GitHub connection timed out while **connecting** —
+         which happens in the confirm summary, before the dialog — and a connect timeout and
+         a call timeout were worded alike. *Fix:* failures are phase-aware, decided by where
+         the error is caught: connecting → "nothing was sent, safe to try again"; calling →
+         the old warning (`2cb4a74`). Budgets: 30 s to connect, 20 s for `tools/list` and
+         every call (`f9f9144`); worst case before a dialog, 50 s. "Connecting to
+         <Connector>…" shows on the status line meanwhile. **A failed call is still never
+         retried.**
+      6. **Result links were plain text** (M20's Finding 1). *Fix:* `https` links to exactly
+         `github.com` or `linear.app` are drawn as links; main re-validates before opening,
+         and the bar's own window cannot be navigated (`bd57ea1`).
+
+      **KNOWN GAPS — not fixed in M21, stated plainly.**
+      - **A channel that comes from a `{stepN}` placeholder cannot be pre-checked.** It does
+        not exist until that step has run; the step refuses it then, after earlier steps ran.
+      - **"Known channel" means "resolves in memory" or "is a literal".** `#typo` is accepted,
+        and an answer of `#typo` is remembered exactly as typed. Nothing checks a channel
+        exists.
+      - **A webhook failure after an irreversible step can still orphan an issue.** The
+        pre-flight removes the *unknown-name* cause; a create that succeeds followed by a
+        Slack post that fails still leaves an issue nobody was told about.
+      - **Channel names only gain meaning with one webhook per channel** — the planned next
+        milestone ("B"). Today `#help` exists in Slack, "the bugs channel" can be taught as
+        `#help`, and the message still goes to `#social`, because one webhook posts to one
+        channel. The texts are now honest about that; the behaviour is unchanged.
+      - **A prose reply from the model can still look like a question nothing is waiting
+        on.** Fix 1 removes one trigger and the prompt rule a second; a prose reply is still
+        displayed as an ordinary result.
+      - **The question window stays on top of other apps** — by design (it must survive
+        switching away to look something up, and cancels itself after 60 s) — so it can cover
+        the very thing the user switched to look at.
+      - **Connectors are not warmed at startup.** The first connector use of a session pays
+        the whole cold connect before its dialog can appear.
+      - **A late answer after a timeout is invisible.** If a server answers after the app gave
+        up, nothing is shown or logged; for a create that is the "may or may not" case.
+      - **Esc-to-stop-speaking cancels a pending confirm** (M19 follow-up, still open).
+      - **A remembered channel is shown as it was typed** — "help", without the "#", when
+        that is what was answered.
+
+      **What was learned** is in `CLAUDE.md` ("M21"): seven rules, each from one of the
+      findings above.
 
 **v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's

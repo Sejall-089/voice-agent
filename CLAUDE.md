@@ -132,6 +132,67 @@ patterns behind them — each cost a real debugging session.
   context code path, run each case several times, and when a live failure will not reproduce,
   ask what the live run had that the eval does not.
 
+### M21 — seven more, each from a live finding
+
+- **A confirm dialog must describe what will actually happen, and show the exact text that will
+  be sent (M21).** `sendMessage`'s dialog previewed the model's raw `notes` — or showed no body
+  at all — and the formatter ran *after* Send was pressed. Slack received the formatter's own
+  "Please paste the rough notes you want formatted for the #bugs channel.", twice. The same
+  dialog named the channel that was asked for while a webhook posted somewhere else. Both were
+  approvals of a description rather than of the act. **Settle the act before the dialog
+  (`Tool.prepare`), show all of it, and have the handler do exactly that and nothing more** —
+  no model call, no reformatting, no second lookup between an approval and the thing approved.
+  If something cannot be shown truthfully (where a webhook posts), say what is known and no more.
+- **A live failure can have a different cause than the one suspected — find the root cause
+  before editing (M21).** "I pressed the hotkey during a question and the question vanished"
+  pointed straight at the hotkey guard, and the guard was fine: what was on screen was the
+  model's own prose, produced because the previous run's refusal had been fed to the next
+  planning call. An hour of "fixing" the guard would have changed working code and left the bug.
+  What found it was refusing to edit until the failure was reproduced: read the code path, read
+  the action log (a `no_tool` row where a chain was expected), then reproduce on a real window.
+  **When a report names a cause, treat the cause as a hypothesis and the symptom as the fact.**
+- **Fakes and unit tests do not see real-window behaviour — keep `scripts/ask-recon` and run it
+  (M21).** The hotkey guard had a unit test over the real shell with a fake window, and it was
+  green. Whether a real `BrowserWindow`, the real renderer and a key press arriving through the
+  OS behave the same is exactly what that test cannot say; `hotkey-during-question` could, and
+  cleared the guard. `dismissed-then-again` then reproduced the real bug, and `result-links`
+  showed a real click reaching main and `window.open` going nowhere. Same for the dev server:
+  only `scripts/vite-fs-probe.mjs` could say whether a renderer import from `src/core` would be
+  served. **For anything that ends in a window, a key press or a browser, a script against the
+  real thing is part of the test, not an extra.** They send keystrokes and flash windows; each
+  header says so. One of them also picked up the real clipboard on its first run and the bug
+  vanished — hold fixed whatever a recon is not measuring.
+- **`.env` treats an unquoted `#` as a comment (M21).** `SLACK_WEBHOOK_CHANNEL=#social` parses
+  to the empty string. Nothing failed; the setting silently did nothing — and it was written
+  that way on this repo's own advice. Any value that can start with `#` (a channel, a colour, a
+  fragment) must be documented **with quotes**, and a variable that is present but blank
+  deserves a startup warning, because "unset" and "set to nothing by accident" look identical
+  from inside the app. Check a config example with the real parser before publishing it.
+- **A failure message must say which phase failed — "it may have gone through" is only true
+  after a send (M21).** A first GitHub connection timed out while *connecting*, before any
+  dialog, and the user was told the create "may or may not have gone through". A connect timeout
+  and a call timeout are the identical error object, so the wording cannot be derived from the
+  error: **the code that catches it must say where it was caught** (`classifyMcpFailure`'s
+  required `phase`). The general form: a warning about a side effect belongs only on the path
+  where the side effect could have happened. Everywhere before that, say "nothing was sent".
+- **A model's prose reply can look exactly like an app prompt — never rely on looks (M21).** The
+  model's "What is 'the bugs channel'? Tell me…" was displayed as an ordinary result and read,
+  to a person, as a question waiting for an answer. Nothing was waiting: no state, no guard, no
+  place for the answer to go. A real question is a *state the app is in* (`isAskPending()`), set
+  before it is drawn and read by both hotkeys. **If the app needs something from the user, it
+  must ask through a mechanism it can hold itself to — and anything a model writes should be
+  assumed capable of imitating one.** The same reasoning is why a confirm button's label is a
+  fixed string in a tool's code and never text a model, an email or a server wrote.
+- **Break a rule on purpose to prove a test can fail — especially a test that passed the first
+  time it ran (M21).** Several M21 suites were written before the code and still went green on
+  their first run, because the code was written before they were *run*. "Tests first" that was
+  never seen red is not evidence. Each time, the rule was broken with the Edit tool and the
+  suite re-run: a handler that re-formats (18 tests noticed), a classifier that treats a connect
+  timeout as a call (8), a hostname matched loosely (10), a label taken from an argument (5). It
+  also found what first-run green hides: the formatter eval showed a `NO_NOTES` instruction
+  refusing a genuine one-line note, 0 of 2 — a fault no fixture could have. **If a test has
+  never failed, make it fail once before trusting it, and record which mutation it caught.**
+
 ## Scope added mid-milestone
 
 If something is added to a milestone's plan AFTER its build order is written, **fold it into the
