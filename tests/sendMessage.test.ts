@@ -1057,6 +1057,8 @@ describe("sendMessage — a message given in the instruction is sent as written"
       ["exactly", INSTRUCTION],
       ["with different case and a full stop", "Send these notes to the bugs channel."],
       ["in quotes, with extra spaces", `  "send  these notes to the  bugs channel" `],
+      ["with a closing exclamation mark", "send these notes to the bugs channel!"],
+      ["with a closing question mark", "send these notes to the bugs channel?"],
     ])("refuses before any dialog when the clipboard is empty (%s)", async (_label, notes) => {
       const s = session({ confirms: [true], selectedText: null });
 
