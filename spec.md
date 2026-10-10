@@ -886,7 +886,7 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard |
 | `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` |
 | `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible   | `memory.write()` (versions old fact on conflict) |
-| `sendMessage` | 5. Format notes and send             | yes (channel only — resolved by the tool, `checkChannel`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST |
+| `sendMessage` | 5. Format notes and send             | yes (channel only — `referenceArgs`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST |
 | `recall`      | 7. What do you remember about…       | reads         | safe         | `memory.query()` → showResult with metadata |
 | `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft |
 | `reviseDraft` | 9. Tweak that reply                   | yes (tone)    | caution      | re-compose from the LIVE box text → replace it |
@@ -945,17 +945,26 @@ whose args are *literals to store*. Without this flag, a `remember` call carryin
 value before the handler ran. Like `irreversible`, the planner reads this property
 generically — it never knows which tool it is running.
 
-`sendMessage` sets it too (2026-10-10), for a different reason: `resolveArgs` inspects every
-top-level string **value**, so it cannot tell the channel from the message, and a message body
-that read "the team" — typed, or substituted from an earlier step's result — was swapped for the
-fact it named and posted. The tool now resolves its one reference itself: `checkChannel(value,
-memory)` in `core/tools/sendMessage.ts` calls the same `memory.resolve` and returns
-`{ ok, channel }` or `{ ok: false, reason }`. Both `confirmSummary` and the handler ask it, so
-the dialog still shows the resolved channel, and an unknown or empty channel is refused **before**
+### `referenceArgs` (added 2026-10-10)
+
+`resolveArgs` inspects every top-level string **value**, so it cannot tell a tool's destination
+from its message: a `sendMessage` body that read "the team" — typed, or substituted from an
+earlier step's result — was swapped for the fact it named and posted. A tool may therefore
+declare `referenceArgs: string[]`, and the planner then resolves **only** those arguments at
+step 4. Undeclared, every top-level string is a candidate as before; `resolvesReferences: false`
+still switches resolution off entirely and wins over a declaration.
+
+| Tool | `referenceArgs` |
+|------|-----------------|
+| `sendMessage` | `["channel"]` — `notes` is sent as written |
+| `openTarget` | `["target", "url"]` — its only arguments, so what is resolved is unchanged |
+
+`sendMessage` then checks the result with `checkChannel(value, memory)`
+(`core/tools/sendMessage.ts`), which returns `{ ok, channel }` or `{ ok: false, reason }`. Both
+`confirmSummary` and the handler ask it, so an unknown or empty channel is refused **before**
 the dialog is shown rather than after Send is pressed. A literal channel (`#bugs`) is still
-taken as given — there is no list of real channels to check it against. One consequence: the
-action log now records `channel` as the model wrote it ("the team"), not as resolved; the
-result text still names the resolved channel.
+taken as given — there is no list of real channels to check it against. The action log records
+the resolved channel, as it always has.
 
 ### `risk` (added in M10 — replaced `irreversible`)
 
@@ -1036,8 +1045,8 @@ with the **resolved** arguments (step 4 runs before step 6), so the confirm dial
 describes the *concrete* action — "Send to #design-team?" — and never the vague phrasing the
 user typed ("send to the team"). Showing the unresolved version would be a trust bug: the
 user must approve what will actually happen. Tools without it fall back to a generic
-`Run <tool>?`. (`sendMessage` itself now resolves its channel inside `confirmSummary` rather
-than at step 4 — same dialog, see `resolvesReferences` above.)
+`Run <tool>?`. (`sendMessage`'s summary also REFUSES a channel step 4 could not resolve, so
+that dialog is never shown — see `referenceArgs` above.)
 
 M10 widened it to `(args, deps) => string | Promise<string>`. A GUI action's concrete facts —
 who this reply would actually reach, what is sitting in the box right now — live in the app
@@ -2865,7 +2874,7 @@ of it. None of it is started.
   a run: the refusal was in `sendMessage`'s handler, which runs AFTER that step's confirm gate
   — so the step 3 dialog would ask "Send to the bugs channel?" before the step is refused.
   **That detail is fixed (2026-10-10):** the check is now `checkChannel`, asked from the
-  confirm summary, so step 3 is refused with no dialog (§ `resolvesReferences`). **The
+  confirm summary, so step 3 is refused with no dialog (§ `referenceArgs`). **The
   orphaned issue is NOT fixed** — the refusal still happens at step 3, after step 2 has
   created the issue. Tests only; not re-run live.
 - **The confirm dialog's approve button says "Send" on every confirm, including a create.**

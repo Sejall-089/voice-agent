@@ -633,6 +633,17 @@ export interface Tool extends ToolSchema {
   // ("the team" is the subject to write, not a reference to look up), so resolving them would
   // silently replace the subject with the fact's current value.
   resolvesReferences?: boolean;
+  // WHICH arguments are references. When declared, the planner resolves these and no others;
+  // when absent, every top-level string is a candidate, as it always was. Resolution inspects
+  // values, so without this it cannot tell a tool's destination from its message — a body that
+  // read "the team" was swapped for the fact it named. Ignored when `resolvesReferences` is
+  // false.
+  //
+  // DECLARING IT ALSO OPTS THE TOOL INTO A CHAIN'S PRE-FLIGHT (core/chain.ts,
+  // `preflightReferences`), which reads the list as ALTERNATIVES: a step is refused before the
+  // plan starts only when none of them names something real. So list only arguments this tool
+  // cannot act without at least one of.
+  referenceArgs?: readonly string[];
   // How to describe this action to the user at the confirm gate. The planner calls this with the
   // RESOLVED args, so the user always approves the concrete action ("Send to #design-team?"),
   // never the vague one they typed ("send to the team"). `dangerous` tools should define it.

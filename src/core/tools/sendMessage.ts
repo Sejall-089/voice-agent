@@ -23,9 +23,9 @@ export type ChannelCheck = { ok: true; channel: string } | { ok: false; reason: 
 // is missing, or itself still reads like a reference, we do NOT know where this would go, and
 // say which words we could not place rather than send somewhere wrong.
 //
-// It is the tool that asks, not the planner (`resolvesReferences: false` below), because the
-// planner's resolution inspects every string VALUE: it cannot tell the channel from the message,
-// and a message that happened to read "the team" was being swapped for the fact it named.
+// Inside the planner `channel` arrives already resolved (`referenceArgs` below), and this is
+// then the check that it WAS: a resolved channel is a literal and passes; one memory did not
+// know still reads like a reference, is looked up again, and is refused.
 export function checkChannel(value: unknown, memory: Pick<Memory, "resolve">): ChannelCheck {
   const said = typeof value === "string" ? value.trim() : "";
   if (said.length === 0) {
@@ -92,11 +92,12 @@ export const sendMessageTool: Tool = {
     required: ["channel"],
   },
   risk: "dangerous",
-  // Only `channel` is a reference, and `checkChannel` resolves it. Left to the planner, `notes`
-  // would be resolved too — it is the user's message, to be sent as written.
-  resolvesReferences: false,
-  // The channel is resolved HERE, so the user approves the real destination — and an unknown
-  // one is refused here, BEFORE the dialog. Throwing from a confirm summary means nothing runs
+  // Only `channel` is a reference. `notes` is the user's message, to be sent as written — left
+  // undeclared, a body that read "the team" was swapped for the fact it named.
+  referenceArgs: ["channel"],
+  // The planner has resolved `channel` by now, so the user approves the real destination — and
+  // one it could NOT resolve is refused here, BEFORE the dialog (`checkChannel` asks memory
+  // again and gets the same answer). Throwing from a confirm summary means nothing runs
   // and nothing is asked: the user is never shown "Send to the bugs channel?" and then told,
   // after pressing Send, that there is no such place.
   //

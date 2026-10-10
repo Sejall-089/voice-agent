@@ -5,7 +5,13 @@ import { checkChannel } from "../src/core/tools/sendMessage.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
-import type { CapturedContext, MessageSender, ToolChoice } from "../src/core/types.ts";
+import type {
+  CapturedContext,
+  MessageSender,
+  Tool,
+  ToolChoice,
+  ToolInput,
+} from "../src/core/types.ts";
 import { FakeLLM } from "./FakeLLM.ts";
 import { FakeSender } from "./FakeSender.ts";
 import type { Database } from "better-sqlite3";
@@ -62,7 +68,15 @@ function session(options: {
       .prepare<[], { tool: string | null; status: string }>("SELECT tool, status FROM action_log")
       .all();
 
-  return { db, memory, shell, sender, turn, logRows, lastLlm: () => llm };
+  // What the action log recorded each call's arguments as — the row the NEXT planning prompt is
+  // shown as "the previous turn".
+  const loggedArgs = () =>
+    db
+      .prepare<[], { arguments: string | null }>("SELECT arguments FROM action_log ORDER BY id")
+      .all()
+      .map((row) => (row.arguments === null ? null : (JSON.parse(row.arguments) as ToolInput)));
+
+  return { db, memory, shell, sender, turn, logRows, loggedArgs, lastLlm: () => llm };
 }
 
 const sendChoice = (channel: string): ToolChoice => ({
@@ -286,6 +300,67 @@ describe("sendMessage — a known channel behaves as it always has", () => {
     expect(outcome.status).toBe("ok");
     expect(s.shell.confirmMessages).toEqual(["Send to #design-team?"]);
     expect((s.sender as FakeSender).calls).toEqual([{ channel: "#design-team", text: "FORMATTED" }]);
+  });
+});
+
+// `referenceArgs`: a tool names WHICH of its arguments are references, and the planner resolves
+// those and nothing else. Shown on a probe tool first, so the rule is pinned for the planner
+// rather than only for the one tool that happens to use it.
+describe("referenceArgs — the planner resolves only the arguments a tool declares", () => {
+  const probe = (declared: Pick<Tool, "referenceArgs" | "resolvesReferences">) => {
+    const seen: ToolInput[] = [];
+    const tool: Tool = {
+      name: "probe",
+      description: "records what it was handed",
+      inputSchema: { type: "object", properties: {}, required: [] },
+      risk: "safe",
+      ...declared,
+      handler: (input) => {
+        seen.push(input);
+        return Promise.resolve("done");
+      },
+    };
+    const memory = new SqliteMemory(createDatabase(":memory:"));
+    memory.write("team", "#design-team");
+    const shell = new MockShell({ context: contextWith(null) });
+    const choice: ToolChoice = {
+      kind: "tool",
+      name: "probe",
+      input: { where: "the team", what: "the team", count: 3 },
+    };
+    const run = () => new Planner(new FakeLLM(choice), shell, [tool], memory, memory).run("probe");
+    return { run, seen };
+  };
+
+  it("resolves a declared argument and leaves an undeclared one exactly as written", async () => {
+    const p = probe({ referenceArgs: ["where"] });
+    await p.run();
+    expect(p.seen).toEqual([{ where: "#design-team", what: "the team", count: 3 }]);
+  });
+
+  it("still resolves every argument when nothing is declared", async () => {
+    // The default every tool had before this, and the case the first test must differ from.
+    const p = probe({});
+    await p.run();
+    expect(p.seen).toEqual([{ where: "#design-team", what: "#design-team", count: 3 }]);
+  });
+
+  it("resolves nothing when a tool opts out, whatever it declares", async () => {
+    const p = probe({ referenceArgs: ["where"], resolvesReferences: false });
+    await p.run();
+    expect(p.seen).toEqual([{ where: "the team", what: "the team", count: 3 }]);
+  });
+
+  it("records the RESOLVED channel in the action log, the body as written", async () => {
+    const s = session({ confirms: [true] });
+    s.memory.write("team", "#design-team");
+
+    await s.turn(
+      { kind: "tool", name: "sendMessage", input: { channel: "the team", notes: "the team" } },
+      "send 'the team' to the team",
+    );
+
+    expect(s.loggedArgs()).toEqual([{ channel: "#design-team", notes: "the team" }]);
   });
 });
 

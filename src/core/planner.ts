@@ -213,10 +213,14 @@ export class Planner {
     // 4. Resolve vague argument references via memory — unless the tool declares its args are
     //    literals to store rather than references to look up (memory-writing tools). Declarative,
     //    like the risk gates below: the planner reads a property, it never knows the tool.
+    //    A tool that declares `referenceArgs` has only those resolved: resolution inspects
+    //    values, and cannot otherwise tell a destination from the message being sent to it.
     const args: ToolInput =
       tool.resolvesReferences === false
         ? proposed
-        : await this.memory.resolveArgs(proposed);
+        : tool.referenceArgs === undefined
+          ? await this.memory.resolveArgs(proposed)
+          : { ...proposed, ...(await this.memory.resolveArgs(pick(proposed, tool.referenceArgs))) };
 
     // 5. Validate — required args present and concrete (generic; no tool-specific logic).
     const missing = missingRequired(tool, args);
@@ -693,6 +697,16 @@ export class Planner {
     // whatever it is handed, and "Something went wrong: ..." is what a person needs to see.
     return { status: "error", tool, result: report ? message : shown };
   }
+}
+
+// The named arguments that are actually present — never a key the model did not send, so a
+// declared-but-absent argument stays absent for the required-argument check.
+function pick(args: ToolInput, keys: readonly string[]): ToolInput {
+  const out: ToolInput = {};
+  for (const key of keys) {
+    if (Object.hasOwn(args, key)) out[key] = args[key];
+  }
+  return out;
 }
 
 // Generic required-argument check driven by each tool's own inputSchema.
