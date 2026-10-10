@@ -49,6 +49,25 @@ export class SlackSender implements MessageSender {
   }
 }
 
+// What to say at startup about SLACK_WEBHOOK_CHANNEL, or null when there is nothing to say.
+//
+// PRESENT BUT BLANK is the one state worth a warning. Unset is an ordinary install. But a
+// variable someone wrote and got "" for is almost always this: a `.env` value beginning with
+// `#` that was not quoted, which dotenv reads as a comment — `SLACK_WEBHOOK_CHANNEL=#social`
+// parses to the empty string. Nothing fails; the app just stops naming the channel, and the
+// user has no way to tell their setting was thrown away.
+//
+// Pure, and here rather than in main.ts, because anything in main.ts has no test that could
+// fail (CLAUDE.md). main.ts logs whatever this returns, once.
+export function webhookChannelWarning(raw: string | undefined): string | null {
+  if (raw === undefined || raw.trim().length > 0) return null;
+  return (
+    "SLACK_WEBHOOK_CHANNEL is set but blank, so it is being ignored. In .env a value that " +
+    'starts with # must be quoted, or it is read as a comment: SLACK_WEBHOOK_CHANNEL="#social". ' +
+    'Until then the app says "via your Slack webhook" and names no channel.'
+  );
+}
+
 // The safe default when no sender is configured: it never sends, and says so.
 export class UnavailableSender implements MessageSender {
   send(_channel: string, _text: string): Promise<SendResult> {

@@ -463,7 +463,7 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `ANTHROPIC_API_KEY` | Only if `LLM_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` | Only if `LLM_PROVIDER=openai` |
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
-| `SLACK_WEBHOOK_CHANNEL` | Optional. The channel that webhook was created for (e.g. `#social`). A Slack app webhook posts to that one channel **whatever channel you name**, so this is only a label: with it the confirm and result say "Send to #social via your Slack webhook?", without it "Send via your Slack webhook?". The channel you asked for is shown as a note, never as the destination. |
+| `SLACK_WEBHOOK_CHANNEL` | Optional. The channel that webhook was created for, written **with quotes**: `SLACK_WEBHOOK_CHANNEL="#social"`. Unquoted, a value starting with `#` is read by `.env` as a comment and becomes empty; the app logs a warning at startup when the variable is present but blank. A Slack app webhook posts to that one channel **whatever channel you name**, so this is only a label: with it the confirm and result say "Send to #social via your Slack webhook?", without it "Send via your Slack webhook?". The channel you asked for is shown as a note, never as the destination. |
 | `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice **and** dictation (M12). Optional — leave them blank and neither the bar's microphone nor the dictation hotkey ever activate; typed commands work exactly as before. |
 | `HOTKEY` | Optional. Pins the instruction-bar combo instead of letting the app pick the first free one. |
 | `DICTATE_HOTKEY` | Optional. Pins the **dictation** combo (M12) — separate from `HOTKEY` above. Needs `WHISPER_*` set too, or there's no transcriber to dictate with. |

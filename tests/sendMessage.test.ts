@@ -5,7 +5,7 @@ import { UnresolvedReferenceError } from "../src/core/errors.ts";
 import { checkChannel, sendMessageTool } from "../src/core/tools/sendMessage.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
-import { SlackSender } from "../src/core/senders/SlackSender.ts";
+import { SlackSender, webhookChannelWarning } from "../src/core/senders/SlackSender.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import type {
   CapturedContext,
@@ -919,6 +919,38 @@ describe("SlackSender.postsTo", () => {
 
   it.each([undefined, "", "   "])("is null when the label is %j — never an empty destination", (label) => {
     expect(new SlackSender("https://hooks.example/x", label).postsTo).toBeNull();
+  });
+});
+
+// A `.env` value that starts with `#` and is not quoted is read as a COMMENT: dotenv gives
+// `SLACK_WEBHOOK_CHANNEL=#social` the value "". Found by doing exactly that on advice this repo
+// gave. The app then quietly says "via your Slack webhook" with no channel, and nothing tells
+// the user their setting was ignored — so startup says so, once.
+describe("webhookChannelWarning", () => {
+  it.each(["", "   ", "\t"])("warns when the variable is present but blank (%j)", (raw) => {
+    const warning = webhookChannelWarning(raw);
+    expect(warning).not.toBeNull();
+    // It names the variable, says why this usually happens, and shows the form that works.
+    expect(warning).toContain("SLACK_WEBHOOK_CHANNEL");
+    expect(warning).toContain('SLACK_WEBHOOK_CHANNEL="#social"');
+    expect(warning).toMatch(/quot/i);
+  });
+
+  it("says nothing when the variable is absent — unset is an ordinary install", () => {
+    expect(webhookChannelWarning(undefined)).toBeNull();
+  });
+
+  it.each(["#social", "social", " #social "])("says nothing when it has a value (%j)", (raw) => {
+    expect(webhookChannelWarning(raw)).toBeNull();
+  });
+
+  it("agrees with SlackSender about what counts as blank", () => {
+    // The warning and the sender must not disagree: a value the sender treats as "no channel"
+    // while startup stays silent would be the original problem again.
+    for (const raw of ["", "   ", "#social", " x "]) {
+      const blank = new SlackSender("https://hooks.example/x", raw).postsTo === null;
+      expect(webhookChannelWarning(raw) !== null, JSON.stringify(raw)).toBe(blank);
+    }
   });
 });
 

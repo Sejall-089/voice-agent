@@ -30,7 +30,7 @@ import { SdkMcpConnection } from "../core/mcp/SdkConnection.ts";
 import { createLLMClient } from "../core/llm/factory.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
-import { SlackSender } from "../core/senders/SlackSender.ts";
+import { SlackSender, webhookChannelWarning } from "../core/senders/SlackSender.ts";
 import { WhisperCppTranscriber } from "../core/transcribers/WhisperCppTranscriber.ts";
 import { PiperSynthesizer } from "../core/synthesizers/PiperSynthesizer.ts";
 import { SpeechSession } from "./shell/SpeechSession.ts";
@@ -242,6 +242,11 @@ app.whenReady().then(() => {
     process.env["SLACK_WEBHOOK_URL"],
     process.env["SLACK_WEBHOOK_CHANNEL"],
   );
+  // Once, at startup: a label that is present but blank was almost certainly an unquoted
+  // `#social`, which dotenv read as a comment. The wording and the rule are tested where they
+  // live (core/senders/SlackSender.ts); this is only the print.
+  const channelWarning = webhookChannelWarning(process.env["SLACK_WEBHOOK_CHANNEL"]);
+  if (channelWarning !== null) console.warn(`[main] ${channelWarning}`);
   // M10/M11: browser-backed tools are only on the menu when there is a Chrome to drive. A
   // capability the app cannot exercise is never offered to the model in the first place. Both
   // currently gate on the same CHROME_DEBUG_URL — one debug Chrome, two app surfaces in it.

@@ -1089,7 +1089,11 @@ message lands — and through M20 the confirm ("Send to #help?") and the result 
 said that it was. They no longer do.
 
 `SLACK_WEBHOOK_CHANNEL` (optional, in `.env` beside `SLACK_WEBHOOK_URL`, read in `main.ts` and
-handed to `SlackSender`) is a **label** for the webhook's own channel. The sender carries it as
+handed to `SlackSender`) is a **label** for the webhook's own channel. **It must be quoted** —
+`SLACK_WEBHOOK_CHANNEL="#social"` — because dotenv reads an unquoted value starting with `#` as
+a comment and yields the empty string. That state (present but blank) is treated as unset, and
+`webhookChannelWarning` (`core/senders/SlackSender.ts`) produces one startup warning naming the
+cause and the fix. The sender carries it as
 `MessageSender.postsTo` (`null` when unset), and every text that names a destination is worded
 from that — never from the asked channel:
 
