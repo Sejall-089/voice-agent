@@ -1,6 +1,13 @@
 import { UnresolvedReferenceError, UserFixableError } from "../errors.ts";
 import { checkReference } from "../memory/checkReference.ts";
-import type { Memory, Tool, ToolDeps, ToolInput } from "../types.ts";
+import type {
+  CapturedContext,
+  Memory,
+  PrepareDeps,
+  Tool,
+  ToolDeps,
+  ToolInput,
+} from "../types.ts";
 
 // What the formatter says when it was handed nothing to format. A fixed word rather than a
 // sentence, so it can be recognised exactly instead of guessed at.
@@ -96,7 +103,8 @@ export function checkChannel(value: unknown, memory: Pick<Memory, "resolve">): C
 const NOTHING_KNOWN: Pick<Memory, "resolve"> = { resolve: () => null };
 
 // The channel, or an honest "I don't know that yet" — a refusal the planner shows verbatim.
-function knownChannel(input: ToolInput, deps: ToolDeps): string {
+// Asks only for a memory it can READ, so `prepare` — which is handed nothing else — can use it.
+function knownChannel(input: ToolInput, deps: { memory: Pick<Memory, "resolve"> }): string {
   const check = checkChannel(input["channel"], deps.memory);
   if (!check.ok) throw new UnresolvedReferenceError(check.reason);
   return check.channel;
@@ -156,7 +164,7 @@ function postsTo(deps: ToolDeps): string | null {
 // which in this app means the CLIPBOARD (spec §4), so it is rarely empty and not always
 // relevant. ONE function, used by `prepare`, the confirm summary and the handler, so they cannot
 // disagree about what is being sent.
-function sourceText(input: ToolInput, deps: ToolDeps): string | null {
+function sourceText(input: ToolInput, deps: { context: CapturedContext }): string | null {
   const notes = input["notes"];
   return typeof notes === "string" && notes.trim().length > 0 ? notes : deps.context.selectedText;
 }
@@ -243,7 +251,12 @@ export const sendMessageTool: Tool = {
   // IN A CHAIN it does nothing at all. There `notes` is written by the plan and filled from
   // earlier steps ("New bug filed: {step2}"); it is already the exact text, and is shown in
   // full and sent verbatim exactly as it has been since M19.
-  prepare: async (args: ToolInput, deps: ToolDeps): Promise<ToolInput> => {
+  //
+  // THE ORDER IS PART OF THE CONTRACT. The channel is checked FIRST, so a send that was never
+  // going anywhere costs no model call; then that there is something to send; and only then is
+  // the formatter asked. And it does nothing but ask: it is handed `PrepareDeps`, which holds no
+  // sender, no shell and no way to write to memory.
+  prepare: async (args: ToolInput, deps: PrepareDeps): Promise<ToolInput> => {
     if (deps.chained) return args;
 
     knownChannel(args, deps);

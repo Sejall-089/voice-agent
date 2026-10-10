@@ -625,6 +625,24 @@ export interface ToolDeps {
 // Side effects (clipboard, open URL, Slack) are performed via deps.shell.executeAction.
 export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 
+// Everything a `Tool.prepare` is allowed to touch — and the planner builds exactly this object,
+// so the list is enforced at run time as well as by the type.
+//
+//   context   what was captured when the instruction was given (read-only by nature)
+//   llm       the model — the one outside call a prepare may make
+//   memory    lookups only: no `write`, so nothing can be remembered before it is approved
+//   chained   where this call sits, which decides whether there is anything to prepare
+//
+// Deliberately absent: the shell (no dialogs, no actions, no clipboard writes), the sender, and
+// every app surface. A tool that needs one of those to decide what it will do is describing an
+// action, and actions happen in the handler, after the gates.
+export interface PrepareDeps {
+  context: CapturedContext;
+  llm: LLMClient;
+  memory: Pick<Memory, "resolve">;
+  chained: boolean;
+}
+
 // One askable reference (see `Tool.askForReference`). The TOOL owns the wording and what counts
 // as an answer; the planner owns when to ask, how many times, and what happens to the answer.
 export interface ReferenceQuestion {
@@ -663,14 +681,18 @@ export interface Tool extends ToolSchema {
   // posts a formatted message, not the rough notes it was handed — can make the dialog show the
   // thing that will happen rather than a preview of its input.
   //
-  // It may do SAFE work only (read, compute, call the model): nothing here has been approved.
+  // NOTHING HERE HAS BEEN APPROVED, so it may read, compute and call the model — and nothing
+  // else. That is not left to good behaviour: it is handed `PrepareDeps`, which has no shell,
+  // no sender, no surfaces and a memory that can only look things up. A `prepare` cannot send,
+  // save or act because it is not holding anything to do it with.
+  //
   // Throwing means the call cannot be done: a `UserFixableError` is a refusal in the tool's own
   // words, anything else an error, and either way no gate fires and no handler runs.
   //
   // Before this, nothing connected a tool's confirm summary to its handler — each was handed
   // the model's arguments separately, which is exactly how a dialog and a send came to
   // disagree.
-  prepare?: (args: ToolInput, deps: ToolDeps) => ToolInput | Promise<ToolInput>;
+  prepare?: (args: ToolInput, deps: PrepareDeps) => ToolInput | Promise<ToolInput>;
   // WHICH arguments are references. When declared, the planner resolves these and no others;
   // when absent, every top-level string is a candidate, as it always was. Resolution inspects
   // values, so without this it cannot tell a tool's destination from its message — a body that

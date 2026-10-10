@@ -46,6 +46,7 @@ import type {
   NotionSurface,
   PlannedStep,
   PlannerOutcome,
+  PrepareDeps,
   ScreenSurface,
   ElementSurface,
   ElementChooser,
@@ -284,14 +285,23 @@ export class Planner {
     //     notes, and the formatter ran after Send was pressed and posted its own question.
     //
     //     Generic, like every other step here: the planner calls a property and never knows
-    //     which tool it belongs to. It gets the pre-tier deps for the reason the risk resolver
-    //     does — nothing has been decided yet. A throw ends the call before any gate: a
-    //     `UserFixableError` as a refusal in the tool's own words, anything else as an error.
-    //     Nothing has been approved at this point, so a tool may only do SAFE work here.
+    //     which tool it belongs to. A throw ends the call before any gate: a `UserFixableError`
+    //     as a refusal in the tool's own words, anything else as an error.
+    //
+    //     NOTHING HAS BEEN APPROVED YET, so it is handed `PrepareDeps` and not the bundle above:
+    //     the context, the model, and a memory that can only be read. Built here, key by key,
+    //     rather than passed as a narrower VIEW of `classifying` — a type alone would let a tool
+    //     reach the sender through a cast. With this object there is no sender to reach.
     let args: ToolInput = resolved;
     if (tool.prepare) {
+      const preparing: PrepareDeps = {
+        context,
+        llm: this.llm,
+        memory: { resolve: (reference) => this.memory.resolve(reference) },
+        chained: step.chained,
+      };
       try {
-        args = await tool.prepare(resolved, classifying);
+        args = await tool.prepare(resolved, preparing);
       } catch (error) {
         return await this.failOrRefuse(instruction, tool.name, resolved, error, step.report);
       }

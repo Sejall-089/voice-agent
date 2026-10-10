@@ -9,6 +9,7 @@ import { SlackSender, webhookChannelWarning } from "../src/core/senders/SlackSen
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import type {
   CapturedContext,
+  LLMClient,
   MessageSender,
   Tool,
   ToolChoice,
@@ -717,6 +718,110 @@ describe("sendMessage — what is approved is what is sent", () => {
 
     expect(llm.completeCalls).toBe(1); // the handler did not ask the formatter again
     expect(sender.calls).toEqual([{ channel: "#team", text: "FORMATTED" }]);
+  });
+
+  // THE TEST THAT A RE-FORMATTING HANDLER FAILS. Every other fake formatter here returns the
+  // same text however often it is asked, so a handler that formatted AGAIN after the dialog
+  // would send the same string and pass. This one answers differently each time: the only way
+  // for what is sent to equal what was shown is for nothing to have asked it twice.
+  it("sends the text the dialog showed even when the formatter would answer differently a second time", async () => {
+    const replies = ["FIRST ANSWER — the one that was shown", "SECOND ANSWER — never approved by anyone"];
+    const asked: string[] = [];
+    const llm: LLMClient = {
+      chooseTool: () => Promise.resolve(lone()),
+      complete: (_system, user) => {
+        asked.push(user);
+        return Promise.resolve(replies[asked.length - 1] ?? "A THIRD ANSWER");
+      },
+    };
+    const memory = new SqliteMemory(createDatabase(":memory:"));
+    const shell = new MockShell({ context: contextWith(NOTES), confirms: [true] });
+    const sender = new FakeSender();
+
+    const outcome = await new Planner(llm, shell, registry, memory, memory, sender).run("send these to #team");
+
+    expect(outcome.status).toBe("ok");
+    expect(asked).toEqual([NOTES]); // asked once, with the notes
+    const shown = shell.confirmMessages[0]?.split("\n\n").slice(1).join("\n\n");
+    expect(shown).toBe(replies[0]);
+    expect(sender.calls).toEqual([{ channel: "#team", text: replies[0] }]);
+    // And the result the user is shown afterwards is that same text again.
+    expect(shell.results[0]?.endsWith(`\n\n${replies[0] ?? ""}`)).toBe(true);
+  });
+
+  // Nothing is spent on a send that was never going anywhere: the channel is checked FIRST.
+  it.each([
+    { label: "an unknown channel", channel: "the bugs channel" },
+    { label: "an empty channel", channel: "  " },
+  ])("makes no formatting call for $label", async ({ channel }) => {
+    const s = session({ confirms: [true] });
+
+    const outcome = await s.turn(
+      { kind: "tool", name: "sendMessage", input: { channel, notes: "real notes worth formatting" } },
+      "send these",
+    );
+
+    expect(outcome.status).toBe("refused");
+    expect(s.lastLlm()?.completeCalls).toBe(0);
+    expect(s.shell.confirmMessages).toEqual([]);
+  });
+
+  // `prepare` runs before anything has been approved, so it may ask the model and do NOTHING
+  // else. Proved from both sides: it is handed only what it is allowed to touch, and through the
+  // whole planner nothing was sent, saved, or acted on by the time the dialog is up.
+  describe("prepare has no side effects", () => {
+    it("is handed the context, the model and a read-only memory — nothing it could act with", async () => {
+      let seen: object | null = null;
+      const tool: Tool = {
+        name: "probe",
+        description: "",
+        inputSchema: { type: "object", properties: {}, required: [] },
+        risk: "safe",
+        prepare: (args, deps) => {
+          seen = deps;
+          return args;
+        },
+        handler: () => Promise.resolve("done"),
+      };
+      const memory = new SqliteMemory(createDatabase(":memory:"));
+      const shell = new MockShell({ context: contextWith("clip") });
+      const choice: ToolChoice = { kind: "tool", name: "probe", input: {} };
+      await new Planner(new FakeLLM(choice), shell, [tool], memory, memory, new FakeSender()).run("probe");
+
+      expect(seen).not.toBeNull();
+      // Exactly these, and no more: no shell, no sender, no surfaces, no draft store.
+      expect(Object.keys(seen ?? {}).sort()).toEqual(["chained", "context", "llm", "memory"]);
+      // And the memory it gets can look things up but has no way to write.
+      expect(Object.keys((seen as unknown as { memory: object }).memory)).toEqual(["resolve"]);
+    });
+
+    it("has sent, saved and done nothing by the time the dialog is on screen", async () => {
+      const db = createDatabase(":memory:");
+      const memory = new SqliteMemory(db);
+      memory.write("team", "#team");
+      const factsBefore = db.prepare("SELECT * FROM facts").all();
+      const shell = new MockShell({ context: contextWith(NOTES), holdConfirm: true });
+      const sender = new FakeSender();
+      const llm = new FakeLLM(
+        { kind: "tool", name: "sendMessage", input: { channel: "the team" } },
+        "FORMATTED",
+      );
+      const running = new Planner(llm, shell, registry, memory, memory, sender).run("send these to the team");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Parked at the dialog: prepare has run (the message is there), and that is ALL.
+      expect(shell.isConfirmPending()).toBe(true);
+      expect(shell.confirmMessages[0]?.endsWith("\n\nFORMATTED")).toBe(true);
+      expect(sender.calls).toEqual([]);
+      expect(db.prepare("SELECT * FROM facts").all()).toEqual(factsBefore);
+      expect(db.prepare("SELECT * FROM action_log").all()).toEqual([]);
+      expect(shell.actions).toEqual([]);
+      expect(shell.results).toEqual([]);
+
+      shell.answerConfirm(false);
+      await running;
+      expect(sender.calls).toEqual([]);
+    });
   });
 
   it("sends nothing when the dialog is cancelled, though it had already formatted", async () => {

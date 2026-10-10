@@ -696,8 +696,12 @@ Given the user's instruction and captured context, run exactly this sequence:
    here, and **uses the arguments it returns for everything after**: the tier, the narration,
    the confirm dialog, the handler and the log row. It exists so a dialog shows what will
    actually happen rather than a preview of the model's input (§6, "What is approved is what is
-   sent"). Safe work only — nothing has been approved yet. A throw ends the call before any
-   gate: a `UserFixableError` as a refusal in the tool's words, anything else as an error.
+   sent"). Nothing has been approved yet, so it is handed **`PrepareDeps`** and not the full
+   bundle: the context, the model, a memory it can only read (`resolve`, no `write`) and
+   `chained`. There is no shell, no sender and no app surface in that object — a `prepare`
+   cannot send, save or act because it holds nothing to do it with. It runs once per step. A
+   throw ends the call before any gate: a `UserFixableError` as a refusal in the tool's words,
+   anything else as an error.
 5b. **Resolve the tier** — what does *this* call cost (§6)? Usually the constant the tool
    declares; for a tool with a `RiskPolicy` it is worked out from the resolved arguments,
    and may read the world to do it. Resolved **once** and reused by both gates below —
@@ -1037,7 +1041,8 @@ formatter paraphrasing the notes; it is never given the channel.)
 
 **The fix.** `sendMessage` declares `prepare` (planner step 5a). For a lone send it:
 
-1. checks the channel can be named (as the confirm and the handler also do);
+1. checks the channel can be named (as the confirm and the handler also do) — **first, before
+   any model call**, so an unknown channel never costs a formatting call;
 2. refuses if there is nothing to send — no `notes` and an empty or blank clipboard — with
    "There's nothing to send. Copy the notes first (select them and press Ctrl+C), or put them
    in the instruction — for example: send "standup moved to 3pm" to the team.";
