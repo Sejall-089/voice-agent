@@ -1,6 +1,6 @@
 # M21 — live verification checklist (by hand)
 
-> **PARTLY RUN, 2026-10-10 and 2026-10-11.** 15 boxes ticked, 14 open. A ticked box means **a person at the
+> **PARTLY RUN, 2026-10-10 and 2026-10-11.** 23 boxes ticked, 6 open. A ticked box means **a person at the
 > keyboard watched it happen in the running app** — nothing else earns a tick here. Every open
 > box says "not yet watched": that means *not seen by a person*, not *failing*.
 >
@@ -55,8 +55,7 @@ a bug on GitHub and post it in the bugs channel"**.
       message landed in #social. Watched by me, Oct 11 2026.**
       As expected, and a known gap rather than a bug: the dialog reports the answer as what
       was asked for, and the message still goes to the webhook's own channel.
-- [ ] **The question cancels itself after 60 seconds.** *Not yet watched* (unit-tested with a
-      fake clock only).
+- [x] **The question cancels itself after 60 seconds.** **Watched by me, Oct 11 2026.**
 
 ## 2. Where the message goes — the webhook, honestly
 
@@ -84,22 +83,22 @@ a bug on GitHub and post it in the bugs channel"**.
 
 ## 4. The confirm button's label
 
-*None of these has been watched.* Each is the word on the dialog's first button; Cancel must
+*All six were watched on Oct 11 2026.* Each is the word on the dialog's first button; Cancel must
 still be the second button, the default, and what Escape does.
 
-- [ ] **GitHub create says "Create issue"** — not "Send". *Not yet watched.*
-- [ ] **Linear create says "Create issue".** *Not yet watched.*
-- [ ] **A Slack send says "Send".** *Not yet watched.*
-- [ ] **Sending a Gmail reply says "Send reply".** *Not yet watched.*
-- [ ] **Creating a calendar event with guests says "Create event".** *Not yet watched.*
-- [ ] **Moving a calendar event that has guests says "Move event".** *Not yet watched.*
+- [x] **GitHub create says "Create issue"** — not "Send". **Watched by me, Oct 11 2026.**
+- [x] **Linear create says "Create issue".** **Watched by me, Oct 11 2026.**
+- [x] **A Slack send says "Send".** **Watched by me, Oct 11 2026.**
+- [x] **Sending a Gmail reply says "Send reply".** **Watched by me, Oct 11 2026.**
+- [x] **Creating a calendar event with guests says "Create event".** **Watched by me, Oct 11 2026.**
+- [x] **Moving a calendar event that has guests says "Move event".** **Watched by me, Oct 11 2026.**
 
 ## 5. Links in the result bar
 
 - [x] **A GitHub issue link in the result bar was clicked and opened** in the default browser.
       (This also closes `docs/M20-live-checklist.md`, Finding 1, for GitHub.)
-- [ ] **A Linear issue link, clicked.** *Not yet watched.*
-      Script-verified only: `node scripts/ask-recon/run.mjs result-links` shows a real click
+- [x] **A Linear issue link, clicked** — it opened the issue. **Watched by me, Oct 11 2026.**
+      Also script-verified: `node scripts/ask-recon/run.mjs result-links` shows a real click
       and a real Enter on a real window reaching main as the right URL, with the browser call
       replaced by a recorder.
 
