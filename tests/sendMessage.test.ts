@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { Planner } from "../src/core/planner.ts";
 import { registry } from "../src/core/registry.ts";
-import { checkChannel } from "../src/core/tools/sendMessage.ts";
+import { UnresolvedReferenceError } from "../src/core/errors.ts";
+import { checkChannel, sendMessageTool } from "../src/core/tools/sendMessage.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
@@ -10,6 +11,7 @@ import type {
   MessageSender,
   Tool,
   ToolChoice,
+  ToolDeps,
   ToolInput,
 } from "../src/core/types.ts";
 import { FakeLLM } from "./FakeLLM.ts";
@@ -292,6 +294,60 @@ describe("sendMessage — an unknown channel is refused BEFORE the confirm dialo
     expect((s.sender as FakeSender).calls).toHaveLength(0);
     expect(outcome.status).toBe("refused");
     expect(outcome.result).toContain('"the bugs channel"');
+  });
+});
+
+// Through the planner the confirm summary always refuses first, so no test above can tell
+// whether the HANDLER checks at all — delete its check and they all still pass. It is the last
+// thing between an argument and the sender, so it is called here directly, with nothing in front.
+describe("sendMessage — the handler refuses on its own, with no gate in front of it", () => {
+  function direct(facts: Record<string, string> = {}) {
+    const memory = new SqliteMemory(createDatabase(":memory:"));
+    for (const [subject, value] of Object.entries(facts)) memory.write(subject, value);
+    const sender = new FakeSender();
+    const llm = new FakeLLM({ kind: "none", text: null }, "FORMATTED");
+    // Only what this handler reads. The cast is the same one tests/mcpAdapter.test.ts makes.
+    const deps = {
+      context: contextWith(NOTES),
+      llm,
+      memory,
+      sender,
+      chained: false,
+    } as unknown as ToolDeps;
+    const call = (input: ToolInput) => sendMessageTool.handler(input, deps);
+    return { call, sender, llm };
+  }
+
+  it("throws an UnresolvedReferenceError for an unknown channel, and nothing reaches the sender", async () => {
+    const d = direct({ team: "#design-team" });
+
+    const error: unknown = await d.call({ channel: "the bugs channel", notes: "hello" }).catch((e: unknown) => e);
+
+    // The TYPE is what makes the planner show it as a refusal rather than "Something went wrong".
+    expect(error).toBeInstanceOf(UnresolvedReferenceError);
+    expect((error as Error).message).toContain('"the bugs channel"');
+    expect(d.sender.calls).toEqual([]);
+    // Refused before the notes were formatted, not after.
+    expect(d.llm.completeCalls).toBe(0);
+  });
+
+  it.each([{ channel: "" }, { channel: "   " }, {}])("refuses %j the same way", async (input) => {
+    const d = direct();
+
+    const error: unknown = await d.call({ ...input, notes: "hello" }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(UnresolvedReferenceError);
+    expect(d.sender.calls).toEqual([]);
+  });
+
+  it("resolves a reference itself when nothing resolved it first", async () => {
+    // The other half of "does not depend on a gate having run": handed the raw reference, it
+    // sends to what the reference MEANS — never to the words "the team".
+    const d = direct({ team: "#design-team" });
+
+    await d.call({ channel: "the team", notes: "hello" });
+
+    expect(d.sender.calls).toEqual([{ channel: "#design-team", text: "FORMATTED" }]);
   });
 });
 
