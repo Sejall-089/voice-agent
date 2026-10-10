@@ -333,8 +333,8 @@ describe("failures are worded by the phase they happened in", () => {
 // someone else's server and was measured live taking longer than 20s once; a request on an open
 // connection that takes 20s is hung.
 describe("SdkMcpConnection — timeouts", () => {
-  it("defaults to 45 seconds to connect and 20 for every other request", () => {
-    expect(DEFAULT_CONNECT_TIMEOUT_MS).toBe(45_000);
+  it("defaults to 30 seconds to connect and 20 for every other request", () => {
+    expect(DEFAULT_CONNECT_TIMEOUT_MS).toBe(30_000);
     expect(DEFAULT_REQUEST_TIMEOUT_MS).toBe(20_000);
   });
 

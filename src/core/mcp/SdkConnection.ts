@@ -17,12 +17,14 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 // Found live (M21): the session's first GitHub use took longer than the 20s it then shared with
 // every other request, and a chain stopped at step 2 for it. Measured the same day, cold, four
 // times each: GitHub 1.4-3.6s, Linear 2.9-7.1s — so 20s was not tight for a typical connect,
-// and the live one was an outlier. 45s is room for an outlier, not a measured need.
+// and the live one was an outlier. 30s is room for an outlier — about four times the slowest
+// connect measured — not a measured need. (It was 45s for one commit; brought down because the
+// worst case before a dialog is this plus the tool list's 20s, and 65s was too long to wait.)
 //
 // Giving up here costs nothing but the wait: no tool call has been sent, and the failure says
 // so (`connect-failed`). It is the tool call's own, shorter budget that guards against waiting
 // on something that may already have happened.
-export const DEFAULT_CONNECT_TIMEOUT_MS = 45_000;
+export const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
 export interface SdkConnectionOptions {
   // The connector's display name and the NAME of its key variable — for wording failures.

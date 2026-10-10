@@ -2155,13 +2155,15 @@ connecting failure it is. The chain accounting is unchanged and still follows th
 
 | Request | Budget | Constant |
 |---------|--------|----------|
-| `initialize` (opening the connection) | **45 s** | `DEFAULT_CONNECT_TIMEOUT_MS` |
+| `initialize` (opening the connection) | **30 s** | `DEFAULT_CONNECT_TIMEOUT_MS` |
 | `tools/list`, and every tool call | 20 s | `DEFAULT_REQUEST_TIMEOUT_MS` |
 
 Measured cold the same day, four connects each (initialize + tools/list): GitHub 1.4–3.6 s,
 Linear 2.9–7.1 s. So 20 s was not tight for a typical connect and the live one was an outlier;
-45 s is room for an outlier, not a measured need. **Worst case before a dialog appears: 65 s**
-(45 + 20) on top of the planning call — long, and the reason for the next line.
+30 s is room for an outlier — about four times the slowest connect measured — not a measured
+need. (It was 45 s for one commit; reduced because 65 s before a dialog was too long.)
+**Worst case before a dialog appears: 50 s** (30 + 20) on top of the planning call — still
+long, and the reason for the next line.
 
 **"Connecting to GitHub…"** is shown on the shell's existing status line (`narrate`, the one
 `caution` narrations use) each time a connection is about to be opened: once per attempt,
