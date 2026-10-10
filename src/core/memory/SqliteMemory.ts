@@ -1,5 +1,6 @@
 import type { Database } from "better-sqlite3";
 import { normalizeReference } from "./normalize.ts";
+import { isVagueReference } from "./checkReference.ts";
 import { decayed } from "./decay.ts";
 import type {
   ActionLog,
@@ -10,12 +11,6 @@ import type {
   ToolInput,
   WriteOptions,
 } from "../types.ts";
-
-// A value is treated as a vague reference when it's phrased like one ("my dashboard",
-// "the team", "the usual tone"). Literal values ("formal", "https://…") are left alone.
-function isVagueReference(value: string): boolean {
-  return /^\s*(my|the)\s+\S/i.test(value);
-}
 
 // The memory engine (spec.md §7). It implements MemoryResolver, so it drops straight into
 // the planner's existing seam, and ActionLog, so the same instance persists the action log.

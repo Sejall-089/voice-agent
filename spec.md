@@ -959,8 +959,15 @@ still switches resolution off entirely and wins over a declaration.
 | `sendMessage` | `["channel"]` — `notes` is sent as written |
 | `openTarget` | `["target", "url"]` — its only arguments, so what is resolved is unchanged |
 
+"Does this value name something we know?" is one function, `checkReference(value, memory)` in
+`core/memory/checkReference.ts`: a literal is taken as given; a "my/the" reference must resolve
+through `memory.resolve` (one lookup, never chased); empty, or a reference that does not
+resolve, is not ok. It returns a fact (`empty` / `unresolved` + the words), never a sentence.
+`isVagueReference` lives there too and is the single definition `resolveArgs` uses.
+
 `sendMessage` then checks the result with `checkChannel(value, memory)`
-(`core/tools/sendMessage.ts`), which returns `{ ok, channel }` or `{ ok: false, reason }`. Both
+(`core/tools/sendMessage.ts`), built on `checkReference`, which returns `{ ok, channel }` or
+`{ ok: false, reason }`. Both
 `confirmSummary` and the handler ask it, so an unknown or empty channel is refused **before**
 the dialog is shown rather than after Send is pressed. A literal channel (`#bugs`) is still
 taken as given — there is no list of real channels to check it against. The action log records

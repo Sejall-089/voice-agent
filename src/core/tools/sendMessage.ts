@@ -1,4 +1,5 @@
 import { UnresolvedReferenceError } from "../errors.ts";
+import { checkReference } from "../memory/checkReference.ts";
 import type { Memory, Tool, ToolDeps, ToolInput } from "../types.ts";
 
 const FORMAT_SYSTEM = [
@@ -7,40 +8,28 @@ const FORMAT_SYSTEM = [
   "Use short lines or bullets. No preamble, no sign-off, no commentary — output only the message.",
 ].join(" ");
 
-// Phrased like a reference ("the team", "my channel") rather than like a destination. The same
-// test memory's own `resolveArgs` applies to decide what is worth looking up.
-function isReference(channel: string): boolean {
-  return /^\s*(my|the)\s+\S/i.test(channel);
-}
-
 export type ChannelCheck = { ok: true; channel: string } | { ok: false; reason: string };
 
 // Is this somewhere we can name? THE ONE PLACE THAT DECIDES, asked by the confirm summary and
 // again by the handler, so the dialog and the send cannot disagree about where a message goes.
 //
-// A literal ("#design-team") is taken as given. A reference is looked up through the same
-// `memory.resolve` the planner's argument resolution uses — once, never chased: if the answer
-// is missing, or itself still reads like a reference, we do NOT know where this would go, and
-// say which words we could not place rather than send somewhere wrong.
+// The rule is `checkReference`'s (core/memory/checkReference.ts) — a literal is taken as given,
+// a reference must resolve. What this adds is the WORDING: when we do not know where this would
+// go, say which words we could not place rather than send somewhere wrong.
 //
 // Inside the planner `channel` arrives already resolved (`referenceArgs` below), and this is
 // then the check that it WAS: a resolved channel is a literal and passes; one memory did not
 // know still reads like a reference, is looked up again, and is refused.
 export function checkChannel(value: unknown, memory: Pick<Memory, "resolve">): ChannelCheck {
-  const said = typeof value === "string" ? value.trim() : "";
-  if (said.length === 0) {
+  const check = checkReference(value, memory);
+  if (check.ok) return { ok: true, channel: check.value };
+  if (check.why === "empty") {
     return { ok: false, reason: "I don't know which channel to send to." };
   }
-  if (!isReference(said)) return { ok: true, channel: said };
-
-  const channel = memory.resolve(said)?.value.trim() ?? "";
-  if (channel.length === 0 || isReference(channel)) {
-    return {
-      ok: false,
-      reason: `I don't know which channel "${said}" means — teach me with: remember ${said} is #your-channel.`,
-    };
-  }
-  return { ok: true, channel };
+  return {
+    ok: false,
+    reason: `I don't know which channel "${check.said}" means — teach me with: remember ${check.said} is #your-channel.`,
+  };
 }
 
 // The channel, or an honest "I don't know that yet" — a refusal the planner shows verbatim.
