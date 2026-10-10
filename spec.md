@@ -886,7 +886,7 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard |
 | `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` |
 | `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible   | `memory.write()` (versions old fact on conflict) |
-| `sendMessage` | 5. Format notes and send             | yes (channel) | **dangerous**| LLM formats notes → Slack webhook POST |
+| `sendMessage` | 5. Format notes and send             | yes (channel only — resolved by the tool, `checkChannel`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST |
 | `recall`      | 7. What do you remember about…       | reads         | safe         | `memory.query()` → showResult with metadata |
 | `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft |
 | `reviseDraft` | 9. Tweak that reply                   | yes (tone)    | caution      | re-compose from the LIVE box text → replace it |
@@ -944,6 +944,18 @@ whose args are *literals to store*. Without this flag, a `remember` call carryin
 `subject: "the team"` would have that subject silently resolved into the current fact's
 value before the handler ran. Like `irreversible`, the planner reads this property
 generically — it never knows which tool it is running.
+
+`sendMessage` sets it too (2026-10-10), for a different reason: `resolveArgs` inspects every
+top-level string **value**, so it cannot tell the channel from the message, and a message body
+that read "the team" — typed, or substituted from an earlier step's result — was swapped for the
+fact it named and posted. The tool now resolves its one reference itself: `checkChannel(value,
+memory)` in `core/tools/sendMessage.ts` calls the same `memory.resolve` and returns
+`{ ok, channel }` or `{ ok: false, reason }`. Both `confirmSummary` and the handler ask it, so
+the dialog still shows the resolved channel, and an unknown or empty channel is refused **before**
+the dialog is shown rather than after Send is pressed. A literal channel (`#bugs`) is still
+taken as given — there is no list of real channels to check it against. One consequence: the
+action log now records `channel` as the model wrote it ("the team"), not as resolved; the
+result text still names the resolved channel.
 
 ### `risk` (added in M10 — replaced `irreversible`)
 
@@ -1024,7 +1036,8 @@ with the **resolved** arguments (step 4 runs before step 6), so the confirm dial
 describes the *concrete* action — "Send to #design-team?" — and never the vague phrasing the
 user typed ("send to the team"). Showing the unresolved version would be a trust bug: the
 user must approve what will actually happen. Tools without it fall back to a generic
-`Run <tool>?`.
+`Run <tool>?`. (`sendMessage` itself now resolves its channel inside `confirmSummary` rather
+than at step 4 — same dialog, see `resolvesReferences` above.)
 
 M10 widened it to `(args, deps) => string | Promise<string>`. A GUI action's concrete facts —
 who this reply would actually reach, what is sitting in the box right now — live in the app
@@ -2849,8 +2862,12 @@ of it. None of it is started.
   created issue #4 in `Sejall-089/throwaway_repo` and stopped at step 3; teaching the channel
   and re-running filed the same email again as #5. Still not designed
   (`docs/M20-live-checklist.md`, Finding 3). One detail from reading the code then, not from
-  a run: the refusal is in `sendMessage`'s handler, which runs AFTER that step's confirm gate
+  a run: the refusal was in `sendMessage`'s handler, which runs AFTER that step's confirm gate
   — so the step 3 dialog would ask "Send to the bugs channel?" before the step is refused.
+  **That detail is fixed (2026-10-10):** the check is now `checkChannel`, asked from the
+  confirm summary, so step 3 is refused with no dialog (§ `resolvesReferences`). **The
+  orphaned issue is NOT fixed** — the refusal still happens at step 3, after step 2 has
+  created the issue. Tests only; not re-run live.
 - **The confirm dialog's approve button says "Send" on every confirm, including a create.**
   `WindowsShell.confirm()` hard-codes `buttons: ["Send", "Cancel"]`, which was accurate while
   the only `dangerous` tools sent something (Slack, Gmail). It now also fronts

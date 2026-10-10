@@ -1,5 +1,5 @@
 import { UnresolvedReferenceError } from "../errors.ts";
-import type { Tool, ToolDeps, ToolInput } from "../types.ts";
+import type { Memory, Tool, ToolDeps, ToolInput } from "../types.ts";
 
 const FORMAT_SYSTEM = [
   "You format rough notes into a clean message to post in a team chat channel.",
@@ -7,10 +7,47 @@ const FORMAT_SYSTEM = [
   "Use short lines or bullets. No preamble, no sign-off, no commentary — output only the message.",
 ].join(" ");
 
-// A channel that still reads like a reference ("the team", "my channel") means memory did not
-// resolve it — we do NOT know where this would go, so we refuse rather than send somewhere wrong.
-function isUnresolved(channel: string): boolean {
+// Phrased like a reference ("the team", "my channel") rather than like a destination. The same
+// test memory's own `resolveArgs` applies to decide what is worth looking up.
+function isReference(channel: string): boolean {
   return /^\s*(my|the)\s+\S/i.test(channel);
+}
+
+export type ChannelCheck = { ok: true; channel: string } | { ok: false; reason: string };
+
+// Is this somewhere we can name? THE ONE PLACE THAT DECIDES, asked by the confirm summary and
+// again by the handler, so the dialog and the send cannot disagree about where a message goes.
+//
+// A literal ("#design-team") is taken as given. A reference is looked up through the same
+// `memory.resolve` the planner's argument resolution uses — once, never chased: if the answer
+// is missing, or itself still reads like a reference, we do NOT know where this would go, and
+// say which words we could not place rather than send somewhere wrong.
+//
+// It is the tool that asks, not the planner (`resolvesReferences: false` below), because the
+// planner's resolution inspects every string VALUE: it cannot tell the channel from the message,
+// and a message that happened to read "the team" was being swapped for the fact it named.
+export function checkChannel(value: unknown, memory: Pick<Memory, "resolve">): ChannelCheck {
+  const said = typeof value === "string" ? value.trim() : "";
+  if (said.length === 0) {
+    return { ok: false, reason: "I don't know which channel to send to." };
+  }
+  if (!isReference(said)) return { ok: true, channel: said };
+
+  const channel = memory.resolve(said)?.value.trim() ?? "";
+  if (channel.length === 0 || isReference(channel)) {
+    return {
+      ok: false,
+      reason: `I don't know which channel "${said}" means — teach me with: remember ${said} is #your-channel.`,
+    };
+  }
+  return { ok: true, channel };
+}
+
+// The channel, or an honest "I don't know that yet" — a refusal the planner shows verbatim.
+function knownChannel(input: ToolInput, deps: ToolDeps): string {
+  const check = checkChannel(input["channel"], deps.memory);
+  if (!check.ok) throw new UnresolvedReferenceError(check.reason);
+  return check.channel;
 }
 
 function preview(text: string, max = 140): string {
@@ -55,7 +92,13 @@ export const sendMessageTool: Tool = {
     required: ["channel"],
   },
   risk: "dangerous",
-  // The planner calls this with the RESOLVED args, so the user approves the real destination.
+  // Only `channel` is a reference, and `checkChannel` resolves it. Left to the planner, `notes`
+  // would be resolved too — it is the user's message, to be sent as written.
+  resolvesReferences: false,
+  // The channel is resolved HERE, so the user approves the real destination — and an unknown
+  // one is refused here, BEFORE the dialog. Throwing from a confirm summary means nothing runs
+  // and nothing is asked: the user is never shown "Send to the bugs channel?" and then told,
+  // after pressing Send, that there is no such place.
   //
   // IN A CHAIN (M19) IT SHOWS THE WHOLE MESSAGE, AND THE HANDLER SENDS EXACTLY THAT. Standalone,
   // this is a 140-character preview of notes that are then reformatted by a model AFTER the
@@ -64,7 +107,7 @@ export const sendMessageTool: Tool = {
   // someone's email), the user has not seen it anywhere else, and it must not pass through a
   // model between the dialog and the send.
   confirmSummary: (args: ToolInput, deps: ToolDeps): string => {
-    const channel = typeof args["channel"] === "string" ? args["channel"] : "(unknown channel)";
+    const channel = knownChannel(args, deps);
     if (deps.chained) {
       const text = sourceText(args, deps);
       return text ? `Send to ${channel}?\n\n${text}` : `Send to ${channel}?`;
@@ -74,17 +117,9 @@ export const sendMessageTool: Tool = {
     return `Send to ${channel}?${body}`;
   },
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
-    const channel = typeof input["channel"] === "string" ? input["channel"].trim() : "";
-
-    if (channel.length === 0) {
-      throw new Error("I don't know which channel to send to.");
-    }
-    // Memory couldn't resolve it — refuse rather than post to the wrong place. Nothing is sent.
-    if (isUnresolved(channel)) {
-      throw new UnresolvedReferenceError(
-        `I don't know which channel "${channel}" means — teach me with: remember ${channel} is #your-channel.`,
-      );
-    }
+    // Asked again rather than trusted: the confirm summary's answer does not travel here, and a
+    // handler must not depend on a gate having run to know where it is sending.
+    const channel = knownChannel(input, deps);
 
     const rawNotes = sourceText(input, deps);
 
