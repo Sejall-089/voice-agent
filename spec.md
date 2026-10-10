@@ -352,12 +352,13 @@ export interface OSShell {
 }
 ```
 
-### `askUser` (added 2026-10-10 — shell only, nothing calls it yet)
+### `askUser` (added 2026-10-10)
 
 One question, one typed line back. **`""` and `null` are different answers:** `""` is the user
 pressing Enter on an empty line; `null` is no answer at all, and a caller must treat it as "do
 not proceed". Not a gate — `confirm()` remains the only thing that approves a `dangerous`
-action. **The planner does not call it yet**; this is the shell capability and its guards only.
+action. It has exactly one caller: a chain's pre-flight, for an unknown `sendMessage` channel
+(§6, "Asking instead of refusing").
 
 `WindowsShell` reuses the command bar: the question is shown above the input
 (`commandbar:ask`), and the same `commandbar:submit` channel is routed to the question when one
@@ -392,8 +393,8 @@ in the style of `holdConfirm`, `questions` (only those actually put), `isAskPend
 same refusal while a confirm or another question is pending.
 
 **Not verified:** the renderer half (`CommandBar.tsx` — the question line, Enter on an empty
-answer, the placeholder) has no test and has not been seen running; nothing can reach it until
-something calls `askUser`.
+answer, the placeholder) has no test and has not been seen running. It is now reachable — a
+chain naming an unknown channel — so it can be looked at live.
 
 **Build a `MockShell` first.** It returns canned context, logs actions instead of
 running them, and lets the entire core + memory + tests run headless with no
@@ -1017,6 +1018,41 @@ tool refuses in its own words. The pre-flight is deliberately one-sided: it neve
 the steps would have run (`tests/preflight.test.ts` runs each case alone and chained and
 compares), but it can pass a plan a step later refuses — `openTarget` with a plain word that is
 neither a reference nor a URL is the pinned example.
+
+#### Asking instead of refusing (added 2026-10-10)
+
+A tool may declare `askForReference: { <arg>: { question, retry, accept } }`. When the
+pre-flight's refusal is for an unresolved reference in such an argument, `runChain`
+(`settleReferences` in `core/planner.ts`) asks the user through `shell.askUser` instead of
+refusing. **Only `sendMessage.channel` declares it.** `openTarget`, an empty channel, a one-step
+plan and a lone `sendMessage` are refused exactly as before, in the same words.
+
+- **The question:** `Before I start: which channel do you mean by '<reference>'?`
+- **What counts as an answer:** `checkChannel` against a memory that knows nothing — so a
+  literal channel name only. An empty line is not one, and neither is anything starting with
+  my/the, *even a reference memory could resolve*.
+- **Budget:** at most **two questions per chain** (`MAX_QUESTIONS_PER_CHAIN`), and for any one
+  reference a first asking and one retry. Two unknown channels get one question each; a retry
+  spent on the first leaves none for the second; a third unknown channel is never asked about.
+- **`null`** (Escape, the 60s timeout, or the bar was busy) ends it at once, with no retry.
+- **Whenever asking does not produce an answer** the pre-flight's own refusal is shown,
+  unchanged ("…teach me with: remember the bugs channel is <what it is>."): nothing run, and
+  nothing saved for that reference.
+- **A valid answer** is written with `memory.write(normalizeReference(reference), value,
+  { source: "user:<date>" })` — the same subject and source `remember` would have used, so a
+  stale fact is superseded rather than duplicated — then `Saved: <reference> = <value>` is
+  shown and held for `SAVED_HOLD_MS` (1.5s; the plan preview uses the same status line and
+  would otherwise replace it instantly), and the pre-flight runs again from the top.
+- **The plan is not rewritten.** The step still says "the bugs channel"; `runStep` resolves it
+  as it resolves anything. The model is not consulted again, and the answer comes only from
+  `askUser` — never from the clipboard, an email or a step's result.
+
+Everything happens before the plan is previewed, before any dialog, and before `chain.begin()`:
+while the question is open it is `isAskPending()` that holds the hotkeys, not the chain.
+
+Consequences worth knowing: answers already given are **kept** when the plan is then refused
+for a later reference (a three-channel plan saves two facts and refuses on the third); the save
+writes no action-log row of its own; and neither the question nor the "Saved" line is spoken.
 
 "Does this value name something we know?" is one function, `checkReference(value, memory)` in
 `core/memory/checkReference.ts`: a literal is taken as given; a "my/the" reference must resolve
@@ -2944,7 +2980,10 @@ of it. None of it is started.
   refused with no dialog; and `runChain` runs a pre-flight (`preflightReferences`) after
   `validatePlan` and before step 1, which refuses the WHOLE plan — nothing read, created,
   announced or asked — when a step names a reference memory does not know. Against the fake
-  Linear and GitHub servers the unknown-channel chain now makes zero calls. What it does not
+  Linear and GitHub servers the unknown-channel chain now makes zero calls. And instead of
+  only refusing, it now ASKS which channel was meant, saves the answer and runs — so the
+  second half of the live finding (teach the channel, re-run, file the email twice) no longer
+  needs a second run at all (§6, "Asking instead of refusing"). What it does not
   cover, each of which still stops at the step as before: a channel that is a `{stepN}`
   placeholder (unknowable until that step runs); a LITERAL channel that does not exist
   (`#typo` — there is no list of real channels, and a webhook may ignore `channel` anyway);

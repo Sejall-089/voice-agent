@@ -68,6 +68,18 @@ export type PlanCheck = { ok: true } | { ok: false; reason: string };
 // What the pre-flight needs to know about a tool — and nothing about what it does.
 export type ReferenceDeclaration = Pick<Tool, "name" | "referenceArgs" | "resolvesReferences">;
 
+// A reference a plan names that memory could not place: which step (zero-based), which of the
+// tool's arguments, and the words as the plan wrote them.
+export interface UnknownReference {
+  step: number;
+  key: string;
+  said: string;
+}
+
+export type PreflightCheck =
+  | { ok: true }
+  | { ok: false; reason: string; unknown?: UnknownReference };
+
 export type ArgCheck =
   | { ok: true; args: ToolInput }
   | { ok: false; reason: string };
@@ -187,11 +199,15 @@ export function validatePlan(
 //
 // NOT A SECOND GATE. It reads arguments and memory, and nothing else: no tool is called, nothing
 // is shown, and a tool that declares nothing — or opts out of resolution — is never looked at.
+//
+// A refusal for an UNRESOLVED reference also says, as data, what it could not place and where
+// (`unknown`). The reason is still the whole message; `unknown` is for a caller that may be able
+// to do better than refuse — the planner asks the user about some of them.
 export function preflightReferences(
   steps: readonly PlannedStep[],
   tools: readonly ReferenceDeclaration[],
   memory: Pick<Memory, "resolve">,
-): PlanCheck {
+): PreflightCheck {
   for (const [index, step] of steps.entries()) {
     const tool = tools.find((candidate) => candidate.name === step.tool);
     const declared = tool?.resolvesReferences === false ? [] : (tool?.referenceArgs ?? []);
@@ -199,7 +215,7 @@ export function preflightReferences(
     if (first === undefined) continue;
 
     let usable = false;
-    let unknown: string | null = null;
+    let unknown: { key: string; said: string } | null = null;
     for (const key of declared) {
       const value = step.arguments[key];
       if (typeof value === "string" && hasPlaceholder(value)) {
@@ -211,18 +227,20 @@ export function preflightReferences(
         usable = true;
         break;
       }
-      if (check.why === "unresolved") unknown ??= check.said;
+      if (check.why === "unresolved") unknown ??= { key, said: check.said };
     }
     if (usable) continue;
 
     const where = `Step ${index + 1} of my plan`;
+    if (unknown === null) {
+      return { ok: false, reason: `${where} left "${first}" empty, so I didn't start it.` };
+    }
     return {
       ok: false,
       reason:
-        unknown !== null
-          ? `${where} needs "${unknown}", and I don't know what that refers to yet, so I ` +
-            `didn't start it — teach me with: remember ${unknown} is <what it is>.`
-          : `${where} left "${first}" empty, so I didn't start it.`,
+        `${where} needs "${unknown.said}", and I don't know what that refers to yet, so I ` +
+        `didn't start it — teach me with: remember ${unknown.said} is <what it is>.`,
+      unknown: { step: index, ...unknown },
     };
   }
 
@@ -298,6 +316,18 @@ export function spokenPlan(steps: readonly PlannedStep[]): string {
 // planner races through the steps afterward. This constant is the screen's equivalent of that
 // already-correct behaviour, not a change to speech.
 export const MIN_PREVIEW_HOLD_MS = 2500;
+
+// How long "Saved: the bugs channel = #bugs" stays on screen before the plan preview may replace
+// it. The same single status line, and the same problem MIN_PREVIEW_HOLD_MS exists for: with
+// nothing in between, the preview overwrites it in the same instant and the one confirmation
+// that the app has just REMEMBERED something is never readable. Shorter than the preview's hold
+// because it is one short line, and the user has only just typed the thing it repeats.
+export const SAVED_HOLD_MS = 1500;
+
+// The most questions one chain may put to the user before it starts. Two: enough for a plan
+// that names two unknown channels, or for one channel and one retry — and few enough that a
+// plan which needs more is told so plainly instead of becoming an interview.
+export const MAX_QUESTIONS_PER_CHAIN = 2;
 
 // How much LONGER the preview must stay up, given the instant it was shown and the current one.
 // Pure and separately testable, mirroring `core/llm/prompt.ts`'s `renderNow(now, zone)` split:

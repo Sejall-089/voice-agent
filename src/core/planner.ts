@@ -14,6 +14,8 @@ import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
 import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts";
 import { emailOpenHint } from "./contextHints.ts";
 import {
+  MAX_QUESTIONS_PER_CHAIN,
+  SAVED_HOLD_MS,
   canonicalToolName,
   preflightReferences,
   previewHoldRemaining,
@@ -23,6 +25,9 @@ import {
   stoppedMessage,
   validatePlan,
 } from "./chain.ts";
+import type { PreflightCheck } from "./chain.ts";
+import { normalizeReference } from "./memory/normalize.ts";
+import { userSource } from "./memory/source.ts";
 import { InMemoryChainState } from "./chainState.ts";
 import type { ChainState } from "./chainState.ts";
 import type { DraftStore } from "./draft.ts";
@@ -426,7 +431,10 @@ export class Planner {
     // here instead, as a whole — nothing narrated, nothing run, no dialog (core/chain.ts).
     // After the one-step case above on purpose: a lone call has no earlier step to protect, and
     // the tool refuses it in its own words.
-    const preflight = preflightReferences(steps, this.registry, this.memory);
+    //
+    // Some of those can be ASKED for instead (`settleReferences`). Either way it is settled
+    // here: by the time anything below runs, every reference the plan names means something.
+    const preflight = await this.settleReferences(steps);
     if (!preflight.ok) {
       return await this.refusePlan(instruction, proposed, preflight.reason);
     }
@@ -518,6 +526,63 @@ export class Planner {
       // In the `finally`, not after: a chain that THREW must not leave the hotkeys blocked
       // forever with nothing running. Same reasoning as confirm()'s own finally.
       this.chain.end();
+    }
+  }
+
+  // The pre-flight, with one way out of a refusal: ASK.
+  //
+  // `preflightReferences` says a step names something memory cannot place. If the tool declared
+  // how to ask for that argument (`askForReference`), the user is asked; a valid answer is saved
+  // as a fact and the pre-flight is run again from the top. Otherwise — and whenever asking does
+  // not produce an answer — the pre-flight's own refusal is returned unchanged, so a question
+  // that goes unanswered leaves the user exactly where they would have been without it.
+  //
+  // WHAT THIS DOES NOT DO, each on purpose:
+  //   - It never rewrites the plan. The step still says "the bugs channel"; what changed is
+  //     that memory now knows it, so `runStep` resolves it the way it resolves anything.
+  //   - It never takes an answer from anywhere but `shell.askUser`. Not the clipboard, not an
+  //     email, not a step's result — placeholders are skipped by the pre-flight, and nothing
+  //     here reads `context`.
+  //   - It never consults the model. The question is the tool's wording, the check is the
+  //     tool's rule, and the count is a constant.
+  //
+  // THE BUDGET is per chain, not per reference: MAX_QUESTIONS_PER_CHAIN in total, and for any
+  // one reference a first asking and one retry. So a plan with two unknown channels gets one
+  // question each, and a retry spent on the first leaves none for the second.
+  //
+  // `null` from the shell — Escape, the timeout, or a bar that was busy — ends it at once with
+  // no retry: the user declined, or could not be asked, and asking again would be nagging.
+  private async settleReferences(steps: readonly PlannedStep[]): Promise<PreflightCheck> {
+    let asked = 0;
+    for (;;) {
+      const check = preflightReferences(steps, this.registry, this.memory);
+      if (check.ok || check.unknown === undefined) return check;
+
+      const { step, key, said } = check.unknown;
+      const tool = this.registry.find((candidate) => candidate.name === steps[step]?.tool);
+      const ask = tool?.askForReference?.[key];
+      if (ask === undefined) return check;
+
+      let value: string | null = null;
+      for (const wording of [ask.question(said), ask.retry(said)]) {
+        if (asked >= MAX_QUESTIONS_PER_CHAIN) break;
+        asked += 1;
+        const answer = await this.shell.askUser(wording);
+        if (answer === null) return check;
+        value = ask.accept(answer);
+        if (value !== null) break;
+      }
+      if (value === null) return check;
+
+      // The same write `remember` makes, under the same key a reference resolves to and with
+      // the same source — so a stale fact for this subject is superseded, never duplicated,
+      // and the next run of this plan asks nothing.
+      this.memory.write(normalizeReference(said), value, { source: userSource() });
+
+      // Said, and then HELD: the plan preview that follows uses the same status line and would
+      // otherwise replace this in the same instant (core/chain.ts, SAVED_HOLD_MS).
+      await this.shell.executeAction({ kind: "notify", payload: `Saved: ${said} = ${value}` });
+      await this.sleep(SAVED_HOLD_MS);
     }
   }
 

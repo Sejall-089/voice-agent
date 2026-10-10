@@ -1,4 +1,5 @@
 import { normalizeReference } from "../memory/normalize.ts";
+import { userSource } from "../memory/source.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
 // Tasks 4 + 6 (spec.md §6): store a fact, and — the flagship — let a correction supersede an
@@ -67,7 +68,7 @@ export const rememberTool: Tool = {
 
     // The existing, already-tested version-on-conflict write: on a differing value the old row
     // is deactivated and a new version is inserted. Never an overwrite.
-    deps.memory.write(subject, value, { source: `user:${new Date().toISOString().slice(0, 10)}` });
+    deps.memory.write(subject, value, { source: userSource() });
 
     if (previous && previous.value !== value) {
       return `Updated "${subject}": ${previous.value} → ${value} (v${previous.version + 1}).`;

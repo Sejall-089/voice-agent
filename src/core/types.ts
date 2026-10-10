@@ -616,6 +616,18 @@ export interface ToolDeps {
 // Side effects (clipboard, open URL, Slack) are performed via deps.shell.executeAction.
 export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 
+// One askable reference (see `Tool.askForReference`). The TOOL owns the wording and what counts
+// as an answer; the planner owns when to ask, how many times, and what happens to the answer.
+export interface ReferenceQuestion {
+  // What to ask. `reference` is the phrase as the plan wrote it ("the bugs channel").
+  question(reference: string): string;
+  // What to ask the second time, after an answer that was not accepted.
+  retry(reference: string): string;
+  // The value to store for this answer, or null if it is not one. Given ONLY what the user
+  // typed: an answer is never checked against, or completed from, anything else.
+  accept(answer: string): string | null;
+}
+
 export interface Tool extends ToolSchema {
   // What this tool costs if it goes wrong (M10, core/risk.ts). Replaced the earlier
   // `irreversible: boolean` — see that file for why a boolean stopped being enough once tools
@@ -644,6 +656,12 @@ export interface Tool extends ToolSchema {
   // plan starts only when none of them names something real. So list only arguments this tool
   // cannot act without at least one of.
   referenceArgs?: readonly string[];
+  // How to ASK for a reference argument nobody has taught the app yet, keyed by argument name.
+  // Read only by a chain's pre-flight (the planner's `runChain`): when a declared argument is
+  // an unresolved reference and has an entry here, the user is asked instead of the plan being
+  // refused, and a valid answer is saved as a fact. An argument with no entry is refused as
+  // before. Declarative, like `risk` — the planner never knows which tool it is asking for.
+  askForReference?: Readonly<Record<string, ReferenceQuestion>>;
   // How to describe this action to the user at the confirm gate. The planner calls this with the
   // RESOLVED args, so the user always approves the concrete action ("Send to #design-team?"),
   // never the vague one they typed ("send to the team"). `dangerous` tools should define it.

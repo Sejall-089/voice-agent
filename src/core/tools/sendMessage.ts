@@ -32,6 +32,9 @@ export function checkChannel(value: unknown, memory: Pick<Memory, "resolve">): C
   };
 }
 
+// A memory with nothing in it: under it `checkChannel` accepts a literal and nothing else.
+const NOTHING_KNOWN: Pick<Memory, "resolve"> = { resolve: () => null };
+
 // The channel, or an honest "I don't know that yet" — a refusal the planner shows verbatim.
 function knownChannel(input: ToolInput, deps: ToolDeps): string {
   const check = checkChannel(input["channel"], deps.memory);
@@ -84,6 +87,24 @@ export const sendMessageTool: Tool = {
   // Only `channel` is a reference. `notes` is the user's message, to be sent as written — left
   // undeclared, a body that read "the team" was swapped for the fact it named.
   referenceArgs: ["channel"],
+  // And the one reference worth ASKING about rather than refusing: a chain that names a channel
+  // nobody has taught the app is one typed word away from being runnable.
+  //
+  // `accept` is `checkChannel` with a memory that knows NOTHING, on purpose. The question asked
+  // for the channel's name, so the answer has to be one — an empty line is not, and neither is
+  // another reference ("the team"), even one memory could resolve: saving one reference as the
+  // meaning of another is how a fact goes stale without anyone noticing.
+  askForReference: {
+    channel: {
+      question: (reference) => `Before I start: which channel do you mean by '${reference}'?`,
+      retry: (reference) =>
+        `I need the channel's own name, like #bugs. Which channel do you mean by '${reference}'?`,
+      accept: (answer) => {
+        const check = checkChannel(answer, NOTHING_KNOWN);
+        return check.ok ? check.channel : null;
+      },
+    },
+  },
   // The planner has resolved `channel` by now, so the user approves the real destination — and
   // one it could NOT resolve is refused here, BEFORE the dialog (`checkChannel` asks memory
   // again and gets the same answer). Throwing from a confirm summary means nothing runs
