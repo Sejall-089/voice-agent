@@ -88,14 +88,14 @@ describe("dictationIsBusy", () => {
 
 describe("combineInstructionBusy (M12.1)", () => {
   it("is idle when neither voice nor the bar is busy", () => {
-    const busy = combineInstructionBusy({ getState: () => "idle" }, { isInputCapturing: () => false, isConfirmPending: () => false });
+    const busy = combineInstructionBusy({ getState: () => "idle" }, { isInputCapturing: () => false, isConfirmPending: () => false, isAskPending: () => false });
     expect(busy.getState()).toBe("idle");
   });
 
   it("is busy while voice is recording, exactly as before", () => {
     const busy = combineInstructionBusy(
       { getState: () => "recording" },
-      { isInputCapturing: () => false, isConfirmPending: () => false },
+      { isInputCapturing: () => false, isConfirmPending: () => false, isAskPending: () => false },
     );
     expect(busy.getState()).not.toBe("idle");
   });
@@ -105,7 +105,7 @@ describe("combineInstructionBusy (M12.1)", () => {
     // is still open with unsubmitted typed text — dictation's Enter must not collide with it.
     const busy = combineInstructionBusy(
       { getState: () => "idle" },
-      { isInputCapturing: () => true, isConfirmPending: () => false },
+      { isInputCapturing: () => true, isConfirmPending: () => false, isAskPending: () => false },
     );
     expect(busy.getState()).not.toBe("idle");
   });
@@ -116,12 +116,13 @@ describe("combineInstructionBusy (M12.1)", () => {
     const busy = combineInstructionBusy(null, {
       isInputCapturing: () => false,
       isConfirmPending: () => true,
+      isAskPending: () => false,
     });
     expect(busy.getState()).not.toBe("idle");
   });
 
   it("is idle when there is no voice session at all and the bar isn't capturing", () => {
-    const busy = combineInstructionBusy(null, { isInputCapturing: () => false, isConfirmPending: () => false });
+    const busy = combineInstructionBusy(null, { isInputCapturing: () => false, isConfirmPending: () => false, isAskPending: () => false });
     expect(busy.getState()).toBe("idle");
   });
 });
@@ -131,7 +132,7 @@ describe("combineInstructionBusy (M12.1)", () => {
 // is very likely the reply box the chain is in the middle of writing. Same reasoning as the
 // confirm case, over a much longer window.
 describe("combineInstructionBusy while a chain is running (M17)", () => {
-  const idleShell = { isInputCapturing: () => false, isConfirmPending: () => false };
+  const idleShell = { isInputCapturing: () => false, isConfirmPending: () => false, isAskPending: () => false };
 
   it("is busy while a chain runs, even with the bar closed and voice idle", () => {
     const busy = combineInstructionBusy({ getState: () => "idle" }, idleShell, {
@@ -162,11 +163,32 @@ describe("combineInstructionBusy while a chain is running (M17)", () => {
     // specific fact and the one the instruction hotkey's own ordering agrees with.
     const busy = combineInstructionBusy(
       { getState: () => "idle" },
-      { isInputCapturing: () => false, isConfirmPending: () => true },
+      { isInputCapturing: () => false, isConfirmPending: () => true, isAskPending: () => false },
       { isRunning: () => true },
     );
 
     expect(busy.getState()).toBe("confirming");
+  });
+
+  // A question open in the bar (`shell.askUser`). Dictation would type into whatever has focus —
+  // which is the answer box — and its Enter-to-finish is the box's own Enter-to-answer.
+  it("is busy while a question is waiting, with everything else idle", () => {
+    const asking = { isInputCapturing: () => false, isConfirmPending: () => false, isAskPending: () => true };
+    // The precondition: the same shell with the question closed is idle, so "asking" below is
+    // the question's doing and not any of the three older reasons.
+    expect(
+      combineInstructionBusy({ getState: () => "idle" }, { ...asking, isAskPending: () => false }).getState(),
+    ).toBe("idle");
+
+    expect(combineInstructionBusy({ getState: () => "idle" }, asking).getState()).toBe("asking");
+  });
+
+  it("reports a waiting confirm ahead of a question, and a question ahead of its chain", () => {
+    const both = { isInputCapturing: () => false, isConfirmPending: () => true, isAskPending: () => true };
+    expect(combineInstructionBusy(null, both).getState()).toBe("confirming");
+
+    const inChain = { isInputCapturing: () => false, isConfirmPending: () => false, isAskPending: () => true };
+    expect(combineInstructionBusy(null, inChain, { isRunning: () => true }).getState()).toBe("asking");
   });
 
   it("is unchanged when no chain state is supplied at all", () => {

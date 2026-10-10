@@ -102,6 +102,7 @@ const { DictationSession } = await import("../src/main/shell/DictationSession.ts
 const { createOnInstructionHotkey, CONFIRM_WAITING, CHAIN_RUNNING } = await import(
   "../src/main/instructionHotkey.ts"
 );
+const { combineInstructionBusy } = await import("../src/main/dictate.ts");
 const { FakeTranscriber } = await import("./FakeTranscriber.ts");
 const { MockInputInjector } = await import("./MockInputInjector.ts");
 
@@ -1225,5 +1226,318 @@ describe("WindowsShell — the bar gets out of the confirm dialog's way (M19 liv
 
     dialog.answer(1);
     await asking;
+  });
+});
+
+// `askUser(question)`: the command bar, reused to put one question and take one typed line back.
+//
+// It differs from `showInput()` in every way that matters to the person looking at it, and each
+// difference below is a decision that was made on purpose:
+//
+//   - an EMPTY answer is an answer (""); only Escape, the timeout, or the bar going away is null
+//   - clicking away does NOT dismiss it — the user may be looking up the thing being asked for
+//   - it cancels itself after 60 seconds, so nothing can wait on it forever
+//   - it never takes the bar from something already using it: it answers null and touches nothing
+describe("WindowsShell.askUser", () => {
+  const sentOn = (channel: string): unknown[] =>
+    window.sent.filter((message) => message.channel === channel).map((message) => message.args[0]);
+  const answer = (text: string): void => {
+    ipcMain.emit("commandbar:submit", {}, text);
+  };
+  // Settled yet? Raced against a tick, never read from a flag the shell sets about itself.
+  async function isSettled(promise: Promise<unknown>): Promise<boolean> {
+    const pending = Symbol("pending");
+    const first = await Promise.race([promise, flush().then(() => pending)]);
+    return first !== pending;
+  }
+
+  it("shows and focuses the bar with the question, and resolves with what was typed", async () => {
+    const asking = shell.askUser("Which channel is the bugs channel?");
+
+    expect(window.isVisible()).toBe(true);
+    expect(window.isFocused()).toBe(true);
+    expect(sentOn("commandbar:ask")).toEqual(["Which channel is the bugs channel?"]);
+    expect(await isSettled(asking)).toBe(false);
+
+    answer("#bugs");
+
+    await expect(asking).resolves.toBe("#bugs");
+    // The question is taken down, and the bar stays: whatever asked is still running.
+    expect(sentOn("commandbar:ask")).toEqual(["Which channel is the bugs channel?", null]);
+    expect(window.isVisible()).toBe(true);
+  });
+
+  it("resolves an empty answer as an empty string — never as null", async () => {
+    const asking = shell.askUser("Anything to add?");
+    answer("");
+    await expect(asking).resolves.toBe("");
+  });
+
+  it("resolves null on Escape, and the bar goes away", async () => {
+    const asking = shell.askUser("Which channel?");
+    expect(escapeHandler()).toBeDefined();
+
+    fireEscape();
+
+    await expect(asking).resolves.toBeNull();
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("resolves null when the bar goes away by a route nobody wrote a handler for", async () => {
+    // Bound to the window's own events, like the capture cleanup above: a question nobody can
+    // see must not stay pending because the thing that hid it was impolite about it.
+    const hidden = shell.askUser("Which channel?");
+    window.hide();
+    await expect(hidden).resolves.toBeNull();
+
+    const closed = shell.askUser("Which channel?");
+    window.emit("closed");
+    await expect(closed).resolves.toBeNull();
+  });
+
+  it("reports isAskPending from the instant it is asked until every way out", async () => {
+    vi.useFakeTimers();
+    const waysOut: Record<string, () => void> = {
+      answered: () => answer("#bugs"),
+      "answered with nothing": () => answer(""),
+      escape: () => fireEscape(),
+      "timed out": () => vi.advanceTimersByTime(60_000),
+      "window hidden": () => window.hide(),
+    };
+
+    for (const [name, leave] of Object.entries(waysOut)) {
+      expect(shell.isAskPending(), `before: ${name}`).toBe(false);
+      const asking = shell.askUser("Which channel?");
+      // Synchronously. No instant in which the question is up and a hotkey guard cannot know.
+      expect(shell.isAskPending(), `during: ${name}`).toBe(true);
+      leave();
+      await asking;
+      expect(shell.isAskPending(), `after: ${name}`).toBe(false);
+    }
+  });
+
+  it("stays up when the user clicks away, and can still be answered", async () => {
+    const asking = shell.askUser("Which channel?");
+
+    window.focused = false;
+    shell.handleBlur();
+
+    expect(window.isVisible()).toBe(true);
+    expect(await isSettled(asking)).toBe(false);
+    // The precondition for that meaning anything: with no question open, the same blur hides
+    // the bar. (Asserted last, on a fresh opening, so it cannot disturb the question above.)
+    answer("#bugs");
+    await expect(asking).resolves.toBe("#bugs");
+
+    void shell.showInput();
+    shell.handleBlur();
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("is not taken down by the auto-hide while it waits unfocused", async () => {
+    vi.useFakeTimers();
+    const asking = shell.askUser("Which channel?");
+    window.focused = false;
+    // Something else reports a result into the unfocused bar, which arms the 12s auto-hide.
+    shell.showResult("an unrelated result");
+
+    vi.advanceTimersByTime(13_000);
+
+    expect(window.isVisible()).toBe(true);
+    expect(shell.isAskPending()).toBe(true);
+    answer("#bugs");
+    await expect(asking).resolves.toBe("#bugs");
+  });
+
+  it("cancels itself after 60 seconds, exactly as Escape would", async () => {
+    vi.useFakeTimers();
+    let settled: string | null | undefined;
+    void shell.askUser("Which channel?").then((value) => (settled = value));
+
+    vi.advanceTimersByTime(59_999);
+    await Promise.resolve();
+    expect(settled).toBeUndefined();
+    expect(window.isVisible()).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+
+    expect(settled).toBeNull();
+    expect(window.isVisible()).toBe(false);
+    expect(sentOn("speech:stop").length).toBeGreaterThan(0); // Escape's own "be quiet"
+  });
+
+  it("leaves no timer behind: an answered question cannot cancel the next one early", async () => {
+    vi.useFakeTimers();
+    const first = shell.askUser("Which channel?");
+    vi.advanceTimersByTime(50_000);
+    answer("#bugs");
+    await first;
+
+    const second = shell.askUser("And when?");
+    // 65s after the FIRST question, 15s after this one.
+    vi.advanceTimersByTime(15_000);
+
+    expect(shell.isAskPending()).toBe(true);
+    expect(window.isVisible()).toBe(true);
+    answer("tomorrow");
+    await expect(second).resolves.toBe("tomorrow");
+  });
+
+  it("keeps an answer and an instruction apart: each submit reaches only the thing that is open", async () => {
+    const asking = shell.askUser("Which channel?");
+    answer("#bugs");
+    await expect(asking).resolves.toBe("#bugs");
+
+    const capture = shell.showInput();
+    expect(shell.isAskPending()).toBe(false);
+    ipcMain.emit("commandbar:submit", {}, "summarize this");
+    await expect(capture).resolves.toBe("summarize this");
+  });
+
+  it("holds the IPC listener count flat across twenty questions", async () => {
+    const atRest = ipcMain.listenerCount("commandbar:submit");
+    for (let i = 0; i < 20; i++) {
+      const asking = shell.askUser("Which channel?");
+      if (i % 2 === 0) answer("#bugs");
+      else fireEscape();
+      await asking;
+    }
+    expect(ipcMain.listenerCount("commandbar:submit")).toBe(atRest);
+  });
+
+  // IT NEVER TAKES THE BAR FROM SOMETHING ALREADY USING IT. Each case: null, at once, and not
+  // one message sent or one window call made — the thing in flight cannot tell it was asked.
+  describe("when the bar is already busy", () => {
+    it("answers null and leaves an open instruction capture untouched", async () => {
+      const capture = shell.showInput();
+      const sentBefore = window.sent.length;
+
+      await expect(shell.askUser("Which channel?")).resolves.toBeNull();
+
+      expect(window.sent.length).toBe(sentBefore);
+      expect(shell.isAskPending()).toBe(false);
+      expect(shell.isInputCapturing()).toBe(true);
+      ipcMain.emit("commandbar:submit", {}, "summarize this");
+      await expect(capture).resolves.toBe("summarize this");
+    });
+
+    it.each(["recording", "stopped", "transcribing", "inserting"] as const)(
+      "answers null while voice is %s, without showing or focusing anything",
+      async (state) => {
+        shell.showVoiceState(state);
+        const sentBefore = window.sent.length;
+        const focusedBefore = window.isFocused();
+
+        await expect(shell.askUser("Which channel?")).resolves.toBeNull();
+
+        expect(window.sent.length).toBe(sentBefore);
+        expect(window.isFocused()).toBe(focusedBefore);
+        expect(shell.isAskPending()).toBe(false);
+      },
+    );
+
+    it("answers null while a confirm dialog is up", async () => {
+      let close: (value: { response: number }) => void = () => undefined;
+      dialogShowMessageBox.mockImplementation(
+        () => new Promise<{ response: number }>((resolve) => (close = resolve)),
+      );
+      const confirming = shell.confirm("Send it?");
+
+      await expect(shell.askUser("Which channel?")).resolves.toBeNull();
+
+      expect(sentOn("commandbar:ask")).toEqual([]);
+      expect(shell.isConfirmPending()).toBe(true);
+      close({ response: 1 });
+      await confirming;
+    });
+
+    it("answers null to a second question, and the first is still there to answer", async () => {
+      const first = shell.askUser("Which channel?");
+
+      await expect(shell.askUser("And when?")).resolves.toBeNull();
+
+      expect(sentOn("commandbar:ask")).toEqual(["Which channel?"]);
+      answer("#bugs");
+      await expect(first).resolves.toBe("#bugs");
+    });
+  });
+
+  // Pinned rather than designed: a confirm from some other run hides the bar for its dialog, and
+  // a hidden question is ended. Fail-closed — the asker hears null — and it cannot strand.
+  it("is ended with null if a confirm dialog takes the screen while it is open", async () => {
+    const asking = shell.askUser("Which channel?");
+
+    await shell.confirm("Send it?");
+
+    await expect(asking).resolves.toBeNull();
+  });
+
+  describe("focusAsk", () => {
+    it("gives the question focus back without resetting what was typed", async () => {
+      const asking = shell.askUser("Which channel?");
+      window.focused = false; // clicked away to look something up
+      const before = window.sent.length;
+
+      shell.focusAsk();
+
+      expect(window.isFocused()).toBe(true);
+      const since = window.sent.slice(before).map((message) => message.channel);
+      expect(since).toEqual(["commandbar:focus"]); // not :show, not :reset — the text survives
+      answer("#bugs");
+      await asking;
+    });
+
+    it("does nothing at all when no question is open", () => {
+      shell.focusAsk();
+
+      expect(window.isVisible()).toBe(false);
+      expect(window.isFocused()).toBe(false);
+      expect(window.sent).toEqual([]);
+    });
+  });
+
+  // The real handlers over the real shell.
+  it("turns an instruction-hotkey press into a refocus: no second capture, no run", async () => {
+    let ran = 0;
+    const onHotkey = createOnInstructionHotkey({
+      shell,
+      dictation: null,
+      voice: null,
+      speech: null,
+      chain: { isRunning: () => true }, // as when a chain is what asked
+      runInstruction: () => {
+        ran += 1;
+        return Promise.resolve();
+      },
+    });
+    const asking = shell.askUser("Which channel?");
+    window.focused = false;
+
+    onHotkey();
+    await flush();
+
+    expect(window.isFocused()).toBe(true);
+    expect(sentOn("commandbar:show")).toEqual([]); // showInput() never ran
+    expect(sentOn("commandbar:status")).toEqual([]); // and it was not told to wait for a chain
+    expect(shell.isInputCapturing()).toBe(false);
+    expect(shell.isAskPending()).toBe(true);
+    expect(ran).toBe(0);
+
+    answer("#bugs");
+    await expect(asking).resolves.toBe("#bugs");
+    expect(ran).toBe(0);
+  });
+
+  it("holds the dictation hotkey's guard busy for exactly as long as the question is open", async () => {
+    const busy = combineInstructionBusy(null, shell);
+    expect(busy.getState()).toBe("idle");
+
+    const asking = shell.askUser("Which channel?");
+    expect(busy.getState()).toBe("asking");
+
+    answer("#bugs");
+    await asking;
+    expect(busy.getState()).toBe("idle");
   });
 });

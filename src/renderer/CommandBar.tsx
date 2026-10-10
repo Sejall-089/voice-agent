@@ -13,6 +13,9 @@ export function CommandBar(): JSX.Element {
   // Narration for a `caution` action (M10): "Reading the open email and drafting a reply…".
   // Separate from `echo` because it is what is ABOUT to happen, not the result.
   const [status, setStatus] = useState<string | null>(null);
+  // A question the app is waiting on (`askUser`). While it is up the input is the ANSWER box:
+  // Enter submits whatever is there, an empty line included. Main owns when it ends.
+  const [question, setQuestion] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // One recorder for the window's lifetime — the mic is opened and released per recording.
   // useRef(null) + lazy init, not useRef(new MicRecorder()): the latter constructs a
@@ -40,9 +43,23 @@ export function CommandBar(): JSX.Element {
       setHeard(null);
       setThinking(false);
       setStatus(null);
+      setQuestion(null);
       typedRef.current = false;
       focusInput();
     });
+    const offAsk = window.api.onAsk((value) => {
+      setQuestion(value);
+      // Asked or ended, the box starts empty: a half-typed instruction must not become the
+      // answer, and a sent answer must not sit there looking like the next instruction.
+      setText("");
+      if (value !== null) {
+        // No microphone is open for a question, so there is nothing for "I started typing" to
+        // cancel — do not send it.
+        typedRef.current = true;
+        focusInput();
+      }
+    });
+    const offFocusInput = window.api.onFocusInput(focusInput);
     // The result supersedes the narration: once the action has happened, saying what it was
     // about to do is just stale.
     const offEcho = window.api.onEcho((value) => {
@@ -56,6 +73,7 @@ export function CommandBar(): JSX.Element {
       setHeard(null);
       setThinking(false);
       setStatus(null);
+      setQuestion(null);
     });
 
     const offThinking = window.api.onThinking((on) => setThinking(on));
@@ -106,6 +124,8 @@ export function CommandBar(): JSX.Element {
 
     return () => {
       offShow();
+      offAsk();
+      offFocusInput();
       offEcho();
       offReset();
       offThinking();
@@ -137,7 +157,10 @@ export function CommandBar(): JSX.Element {
       const value = text.trim();
       // An empty bar submits ONLY while dictating — there Enter means "stop talking, run
       // it". With nothing typed and nothing recorded there is nothing to run.
-      if (value.length > 0 || listening) {
+      //
+      // Or while a question is up: an empty line is a real answer there ("nothing to add"),
+      // and it is main, not this, that tells it apart from Escape.
+      if (value.length > 0 || listening || question !== null) {
         window.api.submit(value);
       }
     } else if (e.key === "Escape") {
@@ -151,11 +174,17 @@ export function CommandBar(): JSX.Element {
 
   return (
     <div className="command-bar">
+      {/* What the app is waiting to be told. Above the input, because the input is its answer. */}
+      {question !== null && <div className="command-question">{question}</div>}
       <input
         ref={inputRef}
         className="command-input"
         type="text"
-        placeholder="Speak, or type…  (Enter to run · Esc to cancel)"
+        placeholder={
+          question !== null
+            ? "Type your answer…  (Enter to answer · Esc to cancel)"
+            : "Speak, or type…  (Enter to run · Esc to cancel)"
+        }
         value={text}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
@@ -179,7 +208,8 @@ export function CommandBar(): JSX.Element {
       )}
       {/* The planner is working. 6-13s of it is the model, and an empty bar during that
           is indistinguishable from a hang. Shown for typed and dictated runs alike. */}
-      {thinking && (
+      {/* ...but not while it is waiting on a question: then it is the USER it is waiting for. */}
+      {thinking && question === null && (
         <div className="voice-indicator thinking">
           <span className="voice-dot" />
           Thinking…

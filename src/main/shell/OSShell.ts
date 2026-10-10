@@ -60,4 +60,15 @@ export interface OSShell {
   showInput(): Promise<string>; // opens command bar, resolves with typed text
   showResult(text: string): void; // result popup
   confirm(message: string): Promise<boolean>; // yes/no dialog for `dangerous` actions (core/risk.ts)
+  // Put one question to the user and wait for one typed line.
+  //
+  // THE TWO "NOTHING"S ARE DIFFERENT, and the return type is what keeps them apart: `""` is an
+  // answer — the user pressed Enter on an empty line — and `null` is no answer at all: they
+  // pressed Escape, the question timed out, or it could not be asked because something else
+  // already had the user's attention. A caller must treat null as "do not proceed", never as
+  // an empty answer.
+  //
+  // Not a gate. `confirm()` is the only thing that approves a `dangerous` action; this collects
+  // a missing piece of information and decides nothing.
+  askUser(question: string): Promise<string | null>;
 }

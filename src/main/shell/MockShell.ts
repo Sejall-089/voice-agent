@@ -25,6 +25,13 @@ export interface MockShellOptions {
   // only ever prove the guard was consulted, never that it held. When set, confirm() stays
   // pending until the test calls answerConfirm().
   holdConfirm?: boolean;
+  // Queued answers for askUser(): a string is what was typed ("" included), null is a question
+  // dismissed. An empty queue answers null — nobody answered, and a fake must not invent one.
+  asks?: (string | null)[];
+  // The same hold, for the same reason, for a question: the real `WindowsShell.askUser()` stays
+  // pending until a person types a line, and both hotkey guards are about what must be true
+  // DURING that wait. When set, askUser() stays pending until the test calls answerAsk().
+  holdAsk?: boolean;
   // When set, a `mediaKey` action fails with this message (M18) — the short-write / UIPI-blocked
   // case the real host reports as `KEY ERR`.
   failMediaKeyWith?: string;
@@ -41,6 +48,11 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   public readonly results: string[] = [];
   public readonly actions: LocalAction[] = [];
   public readonly confirmMessages: string[] = [];
+  // Every question that was actually PUT, in order. One refused because the shell was busy is
+  // not here: it was never shown to anyone.
+  public readonly questions: string[] = [];
+  // How many times a waiting question was asked to take focus back (the instruction hotkey).
+  public askFocusCalls = 0;
   public readonly voiceStates: { state: VoiceState; detail?: string }[] = [];
   public readonly thinking: boolean[] = [];
   // narrate() calls (M12: caution-tool narration AND DictationSession's window-title cue
@@ -87,6 +99,11 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   // anything. It is what the M17 chain tests read to prove the hotkey guard's precondition is
   // actually true while a chain is parked at a dialog.
   private confirmPending = false;
+  private readonly asks: (string | null)[];
+  private readonly holdAsk: boolean;
+  private pendingAsk: ((answer: string | null) => void) | null = null;
+  // Mirrors WindowsShell's `pendingAsk !== null`, and is set as synchronously as that is.
+  private askPending = false;
   // THE SAME LAUNCHER THE REAL SHELL BUILDS, over THE SAME built-in catalog — only the `io` is
   // faked (CLAUDE.md: "a fake must never be more lenient than the real thing"). The temptation
   // here was to let `executeAction` record an `openApp` action and return `{ ok: true }` the
@@ -116,6 +133,8 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     this.failRecording = options.failRecording;
     this.holdPlayback = options.holdPlayback ?? false;
     this.holdConfirm = options.holdConfirm ?? false;
+    this.asks = [...(options.asks ?? [])];
+    this.holdAsk = options.holdAsk ?? false;
     this.failMediaKeyWith = options.failMediaKeyWith;
     this.mediaKeyDelayMs = options.mediaKeyDelayMs ?? 1;
   }
@@ -192,6 +211,46 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     this.pendingConfirm = null;
     this.confirmPending = false;
     pending?.(approved ?? this.confirms.shift() ?? false);
+  }
+
+  askUser(question: string): Promise<string | null> {
+    // The real shell will not ask while something else has the user's attention: it answers
+    // null and touches nothing. Mirrored for the two such states this mock can be in, so a test
+    // cannot pass here on a question the app would never have shown.
+    if (this.confirmPending || this.askPending) return Promise.resolve(null);
+
+    this.questions.push(question);
+    // Set BEFORE anything awaits and cleared on every path out — confirm()'s own discipline.
+    this.askPending = true;
+    if (!this.holdAsk) {
+      this.askPending = false;
+      return Promise.resolve(this.asks.shift() ?? null);
+    }
+    return new Promise<string | null>((resolve) => {
+      this.pendingAsk = resolve;
+    });
+  }
+
+  // Is a question open, waiting for a typed answer? What both hotkey guards read in the real
+  // app (WindowsShell.isAskPending).
+  isAskPending(): boolean {
+    return this.askPending;
+  }
+
+  // Test helper: answer a held question, as a person at the keyboard would — a line of text
+  // ("" is a real answer), or null for Escape. With no argument it falls back to the queue, so
+  // `asks` and `holdAsk` can be used together, exactly like answerConfirm().
+  answerAsk(answer?: string | null): void {
+    const pending = this.pendingAsk;
+    this.pendingAsk = null;
+    this.askPending = false;
+    pending?.(answer !== undefined ? answer : (this.asks.shift() ?? null));
+  }
+
+  // The instruction hotkey's response to a waiting question. Counted, because "it refocused the
+  // question" is the one thing that press is supposed to do.
+  focusAsk(): void {
+    if (this.askPending) this.askFocusCalls += 1;
   }
 
   executeAction(action: LocalAction): Promise<{ ok: boolean; error?: string }> {

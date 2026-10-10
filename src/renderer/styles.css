@@ -138,6 +138,18 @@ body {
   border-radius: 4px;
 }
 
+/* A question the app is waiting on (askUser). Sits above the input it is answered in, and is
+   the brightest text in the bar: nothing else moves until it is answered. */
+.command-question {
+  margin-bottom: 10px;
+  color: #ffe9a8;
+  font-size: 15px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-app-region: no-drag;
+}
+
 /* Narration for a `caution` action (M10): what is about to happen inside another app.
    Deliberately quieter than .command-echo — it is a heads-up, not the answer. */
 .command-status {

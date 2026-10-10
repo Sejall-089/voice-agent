@@ -348,8 +348,52 @@ export interface OSShell {
   showInput(): Promise<string>;                 // opens command bar, resolves with typed text
   showResult(text: string): void;               // result popup
   confirm(message: string): Promise<boolean>;   // yes/no dialog for irreversible actions
+  askUser(question: string): Promise<string | null>; // one typed line; see below
 }
 ```
+
+### `askUser` (added 2026-10-10 — shell only, nothing calls it yet)
+
+One question, one typed line back. **`""` and `null` are different answers:** `""` is the user
+pressing Enter on an empty line; `null` is no answer at all, and a caller must treat it as "do
+not proceed". Not a gate — `confirm()` remains the only thing that approves a `dangerous`
+action. **The planner does not call it yet**; this is the shell capability and its guards only.
+
+`WindowsShell` reuses the command bar: the question is shown above the input
+(`commandbar:ask`), and the same `commandbar:submit` channel is routed to the question when one
+is open. Typed only — no microphone is opened. The decisions, each pinned in
+`tests/WindowsShell.capture.test.ts`:
+
+| Situation | What happens |
+|-----------|--------------|
+| Enter, with or without text | resolves with the trimmed line (`""` if empty) |
+| Escape | resolves `null`, bar hidden (Escape's usual "never mind": speech and marker too) |
+| No answer for 60 seconds | cancels itself exactly as Escape would (counted from when it was asked) |
+| User clicks away | **stays up** — they may be looking up the answer. Not auto-hidden either |
+| Bar hidden or closed by any other route | resolves `null` (bound to the window's own events) |
+| Asked while the bar is busy — an instruction capture open, voice not idle (recording, stopped, transcribing, dictation inserting), a confirm dialog up, or another question open | resolves `null` **immediately and touches nothing**. An ordinary planner run blocks neither hotkey, so this is reachable; the caller cannot tell it from a dismissal |
+| A confirm dialog opens while a question is up (a concurrent run) | the dialog hides the bar, so the question ends `null`. Pinned, not designed |
+
+**Hotkeys while a question is open.** `isAskPending()` is set synchronously and read by both
+guards, in the same position in each — after the confirm check, before the chain check:
+
+- *Instruction hotkey* (`instructionHotkey.ts`, guard 3): starts nothing and calls
+  `focusAsk()`, which gives the question the keyboard back without resetting what was typed
+  (`commandbar:focus`, not `commandbar:show`). No narration, no barge-in, no marker cleared.
+- *Dictation hotkey* (`dictate.ts`, `combineInstructionBusy` → `"asking"`): blocked. Dictation
+  would type into the answer box, and its global Enter-to-finish is the key that answers.
+- *Escape*: answers `null`, as above. It is also the "be quiet" key, so silencing a spoken
+  question would cancel it — the same trade already accepted for the confirm dialog (§9).
+- *Dictation's global Enter*: only armed during dictation, which cannot start during a question
+  and during which a question is refused.
+
+`MockShell` mirrors it: `asks` (queued answers, `null` when empty), `holdAsk` / `answerAsk()`
+in the style of `holdConfirm`, `questions` (only those actually put), `isAskPending()`, and the
+same refusal while a confirm or another question is pending.
+
+**Not verified:** the renderer half (`CommandBar.tsx` — the question line, Enter on an empty
+answer, the placeholder) has no test and has not been seen running; nothing can reach it until
+something calls `askUser`.
 
 **Build a `MockShell` first.** It returns canned context, logs actions instead of
 running them, and lets the entire core + memory + tests run headless with no

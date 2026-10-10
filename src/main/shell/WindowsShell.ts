@@ -38,6 +38,11 @@ const RENDERER_REPLY_TIMEOUT_MS = 15_000;
 // it with showInactive, so the usual blur-to-hide never fires).
 const AUTO_HIDE_MS = 12_000;
 
+// How long a question (`askUser`) waits for an answer before cancelling itself. A question does
+// not go away when the user clicks elsewhere, so without a ceiling a forgotten one would hold
+// its planner run — and both hotkeys — for ever. Counted from when it was asked.
+const ASK_TIMEOUT_MS = 60_000;
+
 // Windows implementation of the OSShell contract, plus the VoiceShell contract (M7).
 export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // What voice is doing right now. Tracked as the STATE rather than one "busy" boolean
@@ -94,12 +99,22 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // before the dialog is created, so there is no instant in which it is visible and this is
   // still false — the gap a live tester would find first.
   private confirmPending = false;
+  // The single open question (`askUser`), if any — its resolver, held on the instance for the
+  // reason `pendingInput` is: nothing per-call to strand. Non-null IS "a question is waiting",
+  // and it is assigned synchronously, so the hotkey guards can never see the bar asking while
+  // this still says it is not.
+  private pendingAsk: ((answer: string | null) => void) | null = null;
+  private askTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly window: BrowserWindow) {
     // Both listeners are registered ONCE, for the app's lifetime.
     ipcMain.on("commandbar:close", () => this.hide());
     ipcMain.on("commandbar:submit", (_event, text: unknown) => {
-      this.resolveInput(typeof text === "string" ? text : "");
+      const typed = typeof text === "string" ? text : "";
+      // ONE submit channel, routed by what is open. The two can never both be: a question is
+      // refused while a capture is pending, and the instruction hotkey is blocked by a question.
+      if (this.pendingAsk !== null) this.endAsk(typed);
+      else this.resolveInput(typed);
     });
 
     // The capture is tied to the WINDOW being hidden, not to our own hide() having been the
@@ -109,6 +124,10 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // a direct hide(), a close, and any path nobody has written yet.
     this.window.on("hide", () => this.endCapture());
     this.window.on("closed", () => this.endCapture());
+    // And the same binding for a question, for the same reason: one nobody can see any more
+    // must not stay pending because whatever hid the bar did not go through hide().
+    this.window.on("hide", () => this.endAsk(null));
+    this.window.on("closed", () => this.endAsk(null));
 
     // A renderer keydown listener for Escape only fires when the bar's own <input> has DOM
     // focus, which requires the WINDOW to have OS focus first. That's routinely false: voice
@@ -132,18 +151,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // bound to the window's "show" event, so anything that showed the bar mid-dialog would have
     // quietly taken the key back. `confirm()` re-arms it itself once the answer is in.
     if (this.confirmPending) return;
-    this.escapeRegistered = globalShortcut.register("Escape", () => {
-      // Escape means "never mind" everywhere else in this app, and live use found the only way
-      // to interrupt speech was the instruction hotkey — which also opens the bar and the
-      // microphone, so "just be quiet" left you with a bar to dismiss afterwards. This gives
-      // that gesture a key of its own without changing what the hotkey does.
-      this.stopSpeaking();
-      // M15: and takes the pointing marker with it. "Never mind" has to mean everything on
-      // screen at once, or the gesture that dismisses the bar leaves a highlight floating over
-      // another app with no obvious way to be rid of it.
-      this.dismissPointer?.();
-      this.hide();
-    });
+    this.escapeRegistered = globalShortcut.register("Escape", () => this.neverMind());
     if (!this.escapeRegistered) {
       // Rare (something else already owns global Escape) — the renderer's own keydown
       // listener remains as a fallback whenever the bar happens to have focus.
@@ -152,6 +160,21 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
           "close the bar while it has focus.",
       );
     }
+  }
+
+  // What Escape does — and what a question that has waited too long does to itself, which is
+  // why it is a method rather than the shortcut's own body.
+  private neverMind(): void {
+    // Escape means "never mind" everywhere else in this app, and live use found the only way
+    // to interrupt speech was the instruction hotkey — which also opens the bar and the
+    // microphone, so "just be quiet" left you with a bar to dismiss afterwards. This gives
+    // that gesture a key of its own without changing what the hotkey does.
+    this.stopSpeaking();
+    // M15: and takes the pointing marker with it. "Never mind" has to mean everything on
+    // screen at once, or the gesture that dismisses the bar leaves a highlight floating over
+    // another app with no obvious way to be rid of it.
+    this.dismissPointer?.();
+    this.hide();
   }
 
   private unregisterEscape(): void {
@@ -272,10 +295,87 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     resolve?.(text);
   }
 
+  // --- Asking the user a question ---
+
+  // The command bar, reused: the question is shown above the input, and one typed line comes
+  // back. See OSShell for what `""` and `null` each mean.
+  //
+  // TYPED ONLY. The microphone is not opened: voice is wired in by the instruction hotkey, not
+  // by the bar, and an answer here is usually a name ("#bugs") that speech would mangle.
+  askUser(question: string): Promise<string | null> {
+    // IT NEVER TAKES THE BAR FROM SOMETHING ALREADY USING IT. An ordinary planner run does not
+    // block either hotkey, so a question can arrive while an instruction is being typed, the
+    // microphone is live, or dictation is mid-sentence into another app — and showing the bar
+    // then would discard that work, or steal focus from the window being dictated into. So:
+    // null, at once, and nothing touched. The caller hears "no answer" and does not proceed.
+    if (
+      this.confirmPending ||
+      this.pendingAsk !== null ||
+      this.pendingInput !== null ||
+      this.voiceState !== "idle"
+    ) {
+      return Promise.resolve(null);
+    }
+
+    const asking = new Promise<string | null>((resolve) => {
+      // Synchronously, before any window call — the executor runs inline.
+      this.pendingAsk = resolve;
+    });
+
+    this.cancelAutoHide();
+    this.window.show();
+    this.window.focus();
+    this.window.webContents.send("commandbar:ask", question);
+
+    // "Treated like Escape": the same path, so a question that times out leaves exactly what a
+    // dismissed one does — no bar, no question, null to the caller.
+    this.askTimer = setTimeout(() => {
+      this.askTimer = null;
+      if (this.pendingAsk !== null) this.neverMind();
+    }, ASK_TIMEOUT_MS);
+
+    return asking;
+  }
+
+  // Is a question open, waiting for a typed answer? Read by both hotkey guards.
+  isAskPending(): boolean {
+    return this.pendingAsk !== null;
+  }
+
+  // Give the waiting question the keyboard back (the instruction hotkey, while one is open).
+  // A no-op with no question: this must never be a way to open the bar.
+  //
+  // `commandbar:focus`, not `commandbar:show` — the renderer resets the input on `show`, and
+  // whatever the user had half-typed as their answer has to survive coming back to it.
+  focusAsk(): void {
+    if (this.pendingAsk === null) return;
+    if (!this.window.isVisible()) this.window.show();
+    this.window.focus();
+    this.window.webContents.send("commandbar:focus");
+  }
+
+  // Ends the open question, if there is one, with `answer` — a typed line, or null for every
+  // way of not answering. Idempotent, so hide() and the window's own events can both call it.
+  private endAsk(answer: string | null): void {
+    const resolve = this.pendingAsk;
+    if (resolve === null) return;
+    this.pendingAsk = null;
+    if (this.askTimer !== null) {
+      clearTimeout(this.askTimer);
+      this.askTimer = null;
+    }
+    // Take the question down in the renderer, whichever way it ended.
+    if (!this.window.isDestroyed()) this.window.webContents.send("commandbar:ask", null);
+    resolve(answer);
+  }
+
   // Blur, handled here rather than in main.ts so the "am I recording?" rule and the
   // dismissal bookkeeping live together.
   handleBlur(): void {
     if (this.pinnedAgainstBlur) return; // unfocused on purpose, must stay visible
+    // A question stays up when the user clicks away: they may be going to look up the thing
+    // it asked for. Only an answer, Escape or its own timeout ends it.
+    if (this.pendingAsk !== null) return;
     // `confirm()` has already hidden the bar and will put it back; a blur arriving while the
     // dialog is up must not run the dismissal path over the top of that.
     if (this.confirmPending) return;
@@ -525,6 +625,9 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       // the user stopped at the 90s cap could vanish while they were deciding what to do
       // with it, with no action on their part. Nothing here may destroy unreviewed work.
       if (this.hasUnsubmittedAudio) return;
+      // Nor a question still waiting: it is unfocused on purpose (see handleBlur), and has its
+      // own, longer, deliberate timeout.
+      if (this.pendingAsk !== null) return;
       if (!this.window.isFocused()) this.hide();
     }, AUTO_HIDE_MS);
   }
@@ -541,6 +644,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // Explicit, so the ordering is deterministic rather than dependent on when Electron
     // emits "hide". The window event below is the backstop, not the primary path.
     this.endCapture();
+    this.endAsk(null);
     this.window.webContents.send("commandbar:reset");
     this.window.hide();
   }

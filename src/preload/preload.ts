@@ -29,6 +29,20 @@ const api = {
     ipcRenderer.on("commandbar:reset", listener);
     return () => ipcRenderer.removeListener("commandbar:reset", listener);
   },
+  // main → renderer: a question to show above the input (`askUser`), or null to take it down.
+  // While one is up, Enter submits the line as the ANSWER — an empty one included.
+  onAsk(callback: (question: string | null) => void): () => void {
+    const listener = (_e: IpcRendererEvent, question: string | null): void => callback(question);
+    ipcRenderer.on("commandbar:ask", listener);
+    return () => ipcRenderer.removeListener("commandbar:ask", listener);
+  },
+  // main → renderer: put the caret back in the input WITHOUT resetting it (the instruction
+  // hotkey, pressed while a question is waiting).
+  onFocusInput(callback: () => void): () => void {
+    const listener = (): void => callback();
+    ipcRenderer.on("commandbar:focus", listener);
+    return () => ipcRenderer.removeListener("commandbar:focus", listener);
+  },
   // renderer → main: user submitted the typed text.
   submit(text: string): void {
     ipcRenderer.send("commandbar:submit", text);

@@ -54,6 +54,10 @@ export interface InputCapturing {
   // the shared microphone and type into whatever has focus — which, with a modal dialog up,
   // is the dialog.
   isConfirmPending(): boolean;
+  // A question open in the bar (`shell.askUser`) blocks it for the same pair of reasons: the
+  // answer box has focus, so that is where dictation would type, and dictation's global
+  // Enter-to-finish is the very key that answers the question.
+  isAskPending(): boolean;
 }
 
 // Just enough of core/chainState.ts's ChainState to guard on (M17), declared here the same way
@@ -80,6 +84,9 @@ export function combineInstructionBusy(
   return {
     getState: () => {
       if (shell.isConfirmPending()) return "confirming";
+      // Next to the confirm, and ahead of the chain for the confirm's reason: inside a chain
+      // both are true, and this is the more specific fact. Same order as instructionHotkey.ts.
+      if (shell.isAskPending()) return "asking";
       if (chain?.isRunning() === true) return "chaining";
       if (shell.isInputCapturing()) return "capturing";
       return voice ? voice.getState() : "idle";

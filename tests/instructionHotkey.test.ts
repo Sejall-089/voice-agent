@@ -30,14 +30,19 @@ function harness(
     typed?: string;
     // M17. A chain partway through — the second long-lived state a press can land in.
     chaining?: boolean;
+    // A question is open in the bar, waiting for a typed answer (`shell.askUser`).
+    askPending?: boolean;
   } = {},
 ) {
   const events: string[] = [];
   let confirmPending = options.confirmPending ?? false;
   let chaining = options.chaining ?? false;
+  let askPending = options.askPending ?? false;
 
   const shell = {
     isConfirmPending: () => confirmPending,
+    isAskPending: () => askPending,
+    focusAsk: () => events.push("focusAsk"),
     narrate: (text: string) => events.push(`narrate:${text}`),
     showInput: () => {
       events.push("showInput");
@@ -95,6 +100,7 @@ function harness(
     events,
     release: () => (confirmPending = false),
     finishChain: () => (chaining = false),
+    answerAsk: () => (askPending = false),
   };
 }
 
@@ -389,6 +395,82 @@ describe("the instruction hotkey when a chain is parked at a confirm dialog", ()
   });
 });
 
+// A question is open in the bar (`shell.askUser`). The bar is ALREADY the thing on screen, so a
+// second capture would land on top of the answer box: `showInput()` resets the bar and opens the
+// microphone, and whatever was typed next would be taken as a new instruction instead of the
+// answer. Unlike the two guards above there is something better to do than say "wait" — the
+// question may have lost focus (it stays up when you click away), so the press brings it back.
+describe("the instruction hotkey while a question is waiting", () => {
+  it("starts no planner run and opens no competing capture", async () => {
+    const { onHotkey, events } = harness({ askPending: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events.filter((e) => e.startsWith("run:"))).toEqual([]);
+    expect(events).not.toContain("showInput");
+    expect(events).not.toContain("mic");
+  });
+
+  it("brings the question back into focus, and that is ALL it does", async () => {
+    const { onHotkey, events } = harness({ askPending: true });
+
+    onHotkey();
+    await settle();
+
+    // The whole event list: no narration over the question, no barge-in on a question that may
+    // still be being read out, no marker cleared, no target moved.
+    expect(events).toEqual(["focusAsk"]);
+  });
+
+  it("works normally again once the question is answered", async () => {
+    const { onHotkey, events, answerAsk } = harness({ askPending: true });
+
+    onHotkey();
+    await settle();
+    answerAsk();
+    onHotkey();
+    await settle();
+
+    expect(events).toContain("run:what's in my calendar today?");
+    expect(events.filter((e) => e === "focusAsk")).toHaveLength(1);
+  });
+
+  it("stays out of the way while dictation is running, question or not", async () => {
+    const { onHotkey, events } = harness({ askPending: true, dictating: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).toEqual([]);
+  });
+});
+
+// WHERE IT SITS IN THE ORDER, pinned from both sides. Each case makes two conditions true at once
+// and asserts which one answers — the only kind of test that can tell "in the right order" from
+// "both present".
+describe("the question guard's place in the order", () => {
+  it("comes AFTER a waiting confirm: the dialog is modal and is the thing to answer first", async () => {
+    const { onHotkey, events } = harness({ askPending: true, confirmPending: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).toContain(`narrate:${CONFIRM_WAITING}`);
+    expect(events).not.toContain("focusAsk");
+  });
+
+  it("comes BEFORE a running chain: a chain parked on a question is waiting for the user", async () => {
+    const { onHotkey, events } = harness({ askPending: true, chaining: true });
+
+    onHotkey();
+    await settle();
+
+    expect(events).toContain("focusAsk");
+    expect(events).not.toContain(`narrate:${CHAIN_RUNNING}`);
+  });
+});
+
 // THE GAP THE TWO SUITES ABOVE LEAVE BETWEEN THEM, CLOSED.
 //
 // tests/planner.chain.test.ts's "pending-confirm guard at the last step of a chain" proves the
@@ -441,6 +523,8 @@ const sendThing: Tool = {
 // on the property under test, only on two unrelated methods this code path cannot reach.
 function hotkeyShellFrom(shell: MockShell): {
   isConfirmPending: () => boolean;
+  isAskPending: () => boolean;
+  focusAsk: () => void;
   narrate: (text: string) => void;
   showInput: () => Promise<string>;
   clearPointer: () => void;
@@ -448,6 +532,8 @@ function hotkeyShellFrom(shell: MockShell): {
 } {
   return {
     isConfirmPending: () => shell.isConfirmPending(),
+    isAskPending: () => shell.isAskPending(),
+    focusAsk: () => shell.focusAsk(),
     narrate: (text: string) => shell.narrate(text),
     showInput: () => shell.showInput(),
     clearPointer: () => {},

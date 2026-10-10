@@ -31,6 +31,11 @@ export const CHAIN_RUNNING =
 
 export interface InstructionHotkeyShell {
   isConfirmPending(): boolean;
+  // A question is open in the bar, waiting for a typed answer (`OSShell.askUser`).
+  isAskPending(): boolean;
+  // Give that question the keyboard back. It stays on screen when the user clicks away — they
+  // may be looking up the very thing it asked for — so it can be visible and unfocused.
+  focusAsk(): void;
   narrate(text: string): void;
   showInput(): Promise<string>;
   // M15. Take down the pointing marker, if there is one. A no-op on an install with vision off,
@@ -114,7 +119,28 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
       return;
     }
 
-    // 3. A chain is partway through (M17).
+    // 3. A question is open in the bar, waiting for a typed answer (`shell.askUser`).
+    //
+    //    Without this the press opens a COMPETING capture in the same window: showInput() resets
+    //    the bar and the microphone opens, so the question vanishes and whatever is typed next
+    //    is run as a new instruction instead of being the answer.
+    //
+    //    Unlike its two neighbours it does not say "wait" — there is something more useful to
+    //    do. The question stays up when the user clicks away, so it can be on screen without the
+    //    keyboard; reaching for the hotkey then means "back to that", and it gets focus back.
+    //    Nothing else: no barge-in (the question may still be being read out), no marker
+    //    cleared, no target moved. A press that started nothing changes nothing.
+    //
+    //    AFTER the confirm, because a dialog is modal and is the thing to answer first. BEFORE
+    //    the chain, for the reason the confirm is: a chain parked on a question makes both true,
+    //    and telling someone to wait for a chain that is waiting for THEM is the wrong answer.
+    if (shell.isAskPending()) {
+      console.log("[main] instruction hotkey refocused the waiting question");
+      shell.focusAsk();
+      return;
+    }
+
+    // 4. A chain is partway through (M17).
     //
     //    DELIBERATELY AFTER THE CONFIRM CHECK, and the ordering is the load-bearing part. Inside
     //    a chain, a step parked at its confirm gate makes BOTH conditions true at once — and of
@@ -134,19 +160,19 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
       return;
     }
 
-    // 4. Barge-in. Here as well as in startRecording() on purpose: this fires the instant the
+    // 5. Barge-in. Here as well as in startRecording() on purpose: this fires the instant the
     //    key is pressed, while the microphone takes 160-680ms to warm up, so the app goes
     //    quiet when you reach for it rather than when the mic is ready.
     speech?.stop();
 
-    // 5. And the marker goes with it (M15). A pointing overlay answers a question asked at a
+    // 6. And the marker goes with it (M15). A pointing overlay answers a question asked at a
     //    moment; reaching for the hotkey is the clearest possible signal that the moment has
-    //    passed. Deliberately AFTER all three guards above: a press that was ignored changed
+    //    passed. Deliberately AFTER all four guards above: a press that was ignored changed
     //    nothing, and should not silently clear the answer to the question still on screen.
     shell.clearPointer();
 
     void (async () => {
-      // 6. Snapshot the target window BEFORE the bar takes focus (M16.9, fixed at M16.11).
+      // 7. Snapshot the target window BEFORE the bar takes focus (M16.9, fixed at M16.11).
       //
       //    AWAITED, and that is the whole fix. This was fire-and-forget, which meant the
       //    foreground was read a tick (or, on the first press, ~918ms) after showInput() had
