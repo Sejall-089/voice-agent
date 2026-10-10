@@ -2213,15 +2213,19 @@ Post-v0:
       its confirm dialog first, named `Sejall-089/throwaway_repo`, and answered `Created #3:
       M20 live test` with a working link. **The form handoff did not fire, and the create
       result matched the `{id, url}` the server's source describes.**
-      **Sections 3, 4 and 5 are STILL UNRUN and rest on tests alone:** the Gmail → GitHub →
-      Slack **chain** and its declines; the **choice between two trackers** when both are on
-      the menu; and the **failure wording** (wrong repository, rejected token, a token that may
-      not write, and the console line for an unrecognised failure). Also seen by the person,
+      **Sections 3 and 5 are STILL UNRUN and rest on tests alone:** the Gmail → GitHub →
+      Slack **chain** and its declines; and the **failure wording** (wrong repository,
+      rejected token, a token that may not write, and the console line for an unrecognised
+      failure). **Section 4, the choice between two trackers, is half run:** "file this bug"
+      with no tracker named picked Linear, once (cancelled; nothing created) — and its body
+      was the instruction text itself, M19's made-up-description finding again, shown by the
+      dialog and caught there (checklist, Live results 2 and Finding 2; not an M20 bug).
+      "file this bug in Linear" has not been run. Also seen by the person,
       and confirmed after the first report: cancelling the dialog created nothing, and
       github.com showed exactly one new issue with #1 and #2 untouched. Within sections 0-2,
       four boxes are still open — the token's permissions, the `connectors.json` entry, the
-      recon script, and listing closed issues. 10 boxes ticked, 17 open; "Live results 1" in
-      the checklist says which.
+      recon script, and listing closed issues. 11 boxes ticked, 16 open; the live results in
+      the checklist say which.
       What follows was written before the pass.
       Built and tested headless.
       Adds `connectors/github.ts` (three tools of the server's 46), `transport.ts`, and four
@@ -2287,8 +2291,8 @@ Post-v0:
       M19 follow-up list has the detail; a GitHub create is one more dialog it mislabels).
       **Links in the result bar are plain text, not clickable** — found in the live pass; a UI
       follow-up for the result bar, not an M20 bug, not fixed. The links are correct, but one
-      had to be copied into a browser. As reported it applies to Linear's links too
-      (`docs/M20-live-checklist.md`, Finding 1).
+      had to be copied into a browser. Seen on GitHub results only; it likely applies to
+      Linear's too, not checked (`docs/M20-live-checklist.md`, Finding 1).
       **Follow-ups noted, not started:** `search_issues` and every write beyond create.
 
 **v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

@@ -2,9 +2,10 @@
 
 > **PARTLY RUN, 2026-10-10.** A person ran sections 0, 1 and 2 and M20's box in `spec.md` §9 is
 > ticked on that basis: the reads work, and the first real create worked — the form handoff did
-> not fire. **Sections 3, 4 and 5 have not been run** (the chain, the choice between two
-> trackers, the failure wording), and four boxes in sections 0-2 are still open. "Live results 1"
-> at the bottom says exactly which. An open box here means *not seen by a person*, not *failing*.
+> not fire. **Sections 3 and 5 have not been run** (the chain, the failure wording). Section 4
+> (the choice between two trackers) is half run: one of its two boxes was seen — "Live results
+> 2". Four boxes in sections 0-2 are still open. 11 boxes ticked, 16 open; the results
+> at the bottom say exactly which. An open box here means *not seen by a person*, not *failing*.
 >
 > The two paragraphs below were written before the pass and are kept as written.
 >
@@ -99,7 +100,7 @@ With a bug email open in Gmail and nothing important on the clipboard, say
 ## 4. Which tracker? (two connectors on one menu — unmeasured)
 
 - [ ] **"file this bug in Linear"** → the dialog says **Linear**, not GitHub.
-- [ ] **"file this bug"** (no tracker named) → note which one it picks. The GitHub tool's
+- [x] **"file this bug"** (no tracker named) → note which one it picks. The GitHub tool's
       description tells the model to use it only when GitHub is named; whether a real model
       obeys is a live-only fact, and the plan eval was not re-run for M20.
 
@@ -124,8 +125,9 @@ With a bug email open in Gmail and nothing important on the clipboard, say
 
 ### Live results 1 — Saturday 10 October 2026, by hand (sections 0, 1, 2)
 
-Reported by the person who ran it. 10 boxes ticked, 17 open. (First recorded as 8 and 19; two
-more were confirmed afterwards, the same day, and are marked below.)
+Reported by the person who ran it. 10 boxes ticked in this pass. (First recorded as 8; two
+more were confirmed afterwards, the same day, and are marked below.) With "Live results 2" the
+checklist stands at **11 ticked, 16 open**.
 
 **Seen, and ticked:**
 
@@ -170,17 +172,53 @@ more were confirmed afterwards, the same day, and are marked below.)
 copied and pasted into a browser. **The links themselves are correct** — the pasted one opened
 the right issue.
 
-It is not specific to GitHub: as reported, it applies to Linear's links too (`Created ENG-5: …`
-and its link). A connector hands back a string and the right one, so the fix belongs to the
-result bar, not to `core/mcp/`. The result bar's code was not read for this note; whether any
-other result with a URL in it behaves the same has not been checked. Recorded in `spec.md` §9
-with the other follow-ups.
+It was seen on GitHub results only. It likely applies to Linear's too (`Created ENG-5: …` and
+its link); not checked. A connector hands back a string and the right one, so the fix belongs
+to the result bar, not to `core/mcp/`. The result bar's code was not read for this note.
+Recorded in `spec.md` §9 with the other follow-ups.
 
-**Not run at all:** section 3 (the Gmail → GitHub → Slack chain, and both declines), section 4
-(which tracker a model picks when two are on the menu), section 5 (a wrong repository, a broken
-token, a read-only token, and the console line for an unrecognised failure).
+**Not run at all** (as of Live results 1; section 4 has since been half run — Live results 2):
+section 3 (the Gmail → GitHub → Slack chain, and both declines), section 4 (which tracker a
+model picks when two are on the menu), section 5 (a wrong repository, a broken token, a
+read-only token, and the console line for an unrecognised failure).
 
 **Known, cosmetic, not fixed:** the approve button on the create dialog says "Send".
 
 **Left behind:** issue #3, "M20 live test", in `Sejall-089/throwaway_repo`. GitHub's MCP server
 cannot delete it.
+
+### Live results 2 — section 4, one box, by hand (recorded 2026-10-10)
+
+Reported by the person who ran it. 1 box ticked; the checklist stands at 11 ticked, 16 open.
+
+**Seen, and ticked:**
+
+- **"file this bug", with no tracker named, picked Linear.** The dialog read
+  `Create this Linear issue in Sejal Gupta?`, with Title `Bug` and body `file this bug`. It was
+  cancelled, and nothing was created.
+  This is the outcome the GitHub tool's description asks for ("Use this ONLY when the user
+  asks for GitHub by name"). It is one run: it shows what happened once, not a rate.
+
+**Still open in section 4:** "file this bug in Linear" → the dialog says Linear. That phrase
+was not run; the run above named no tracker.
+
+### Finding 2 — with no email open, the issue's body was the instruction itself
+
+**Not an M20 bug. Related to M19's finding; not fixed.** No email was open, so there was no
+bug content for "this bug" to mean. The model did not refuse or ask: it proposed an issue
+titled `Bug` whose body was the instruction text, `file this bug` — a ticket about nothing.
+
+- **It is M19's finding again, in a different spelling.** M19's live pass found a plan that
+  skipped `readEmail` and filled the description with text the model made up
+  (`spec.md` §9, "M19 — proven vs. live-only"). The `linear__create_issue` description tells
+  the model never to fill the description with a note about the instruction, and to leave it
+  out when there is nothing to put there. Here it put the instruction there.
+- **The dialog showed it, so it was catchable** — and it was caught: the whole body was on
+  screen before anything was created, and the create was cancelled. The gate held; the plan
+  did not. That is the same division of labour M19 recorded.
+- **Why it is not M20's:** the tool chosen was Linear's, its description is unchanged by M20,
+  and `plan.ts` was not touched. What M20 changed about this run is only that a second
+  tracker was on the menu, and the model did not pick it.
+- **Not known:** whether it happens with an email open, how often it happens at all, and
+  whether the GitHub tool does the same when it is the one chosen (its description carries
+  the same rule). One run, one phrase.
