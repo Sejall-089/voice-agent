@@ -8,6 +8,10 @@ export class FakeSender implements MessageSender {
   constructor(
     private readonly result: SendResult = { ok: true },
     private readonly throws = false,
+    // Where this sender really posts, as the real SlackSender reports it: the webhook's own
+    // channel when configured, null when not. Null by default — an unconfigured install, which
+    // is what a test that says nothing about it should be exercising.
+    public readonly postsTo: string | null = null,
   ) {}
 
   send(channel: string, text: string): Promise<SendResult> {

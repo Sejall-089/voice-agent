@@ -42,6 +42,56 @@ function knownChannel(input: ToolInput, deps: ToolDeps): string {
   return check.channel;
 }
 
+// --- Saying where a message goes, honestly ---
+//
+// A Slack app webhook posts to the one channel it was created for and ignores the channel it is
+// handed. So the channel the user ASKED for — resolved, checked, confirmed — is not where the
+// message lands, and through M20 every text here said that it was: "Send to #help?" and then
+// "Sent to #help." about a message that went to #social.
+//
+// The three functions below are the only places a destination is worded. They take the asked
+// channel and what the sender says it really posts to (`MessageSender.postsTo`), and the rule
+// is the same for the question, the result and the failure:
+//
+//   - the destination named is the webhook's own channel, or — when the app has not been told
+//     what that is — no channel at all, only "your Slack webhook"
+//   - the asked channel appears in ONE place: a parenthesised second line, present whenever it
+//     is not the channel the message is actually going to
+//
+// Channel NAMES only start to mean something with one webhook per channel, which is the next
+// milestone; until then this is the most that can be said truthfully.
+
+// "to #social via your Slack webhook" — or, not knowing the channel, "via your Slack webhook".
+function destination(postsTo: string | null): string {
+  return postsTo === null ? "via your Slack webhook" : `to ${postsTo} via your Slack webhook`;
+}
+
+// The same channel, however it was typed: "#Social", "social" and " #social " are one place.
+function sameChannel(a: string, b: string): boolean {
+  const bare = (name: string): string => name.trim().replace(/^#/, "").toLowerCase();
+  return bare(a) === bare(b);
+}
+
+// The second line, or null when there is nothing to correct.
+function askedNote(asked: string, postsTo: string | null): string | null {
+  if (postsTo === null) {
+    return `(You asked for ${asked}. A webhook posts to its own channel and ignores this.)`;
+  }
+  return sameChannel(asked, postsTo)
+    ? null
+    : `(You asked for ${asked}; the webhook posts to its own channel.)`;
+}
+
+function withNote(headline: string, asked: string, postsTo: string | null): string {
+  const note = askedNote(asked, postsTo);
+  return note === null ? headline : `${headline}\n${note}`;
+}
+
+// Where this sender really posts, as far as it can say.
+function postsTo(deps: ToolDeps): string | null {
+  return deps.sender.postsTo ?? null;
+}
+
 function preview(text: string, max = 140): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
@@ -117,15 +167,22 @@ export const sendMessageTool: Tool = {
   // fixed here. A chain must not inherit it: the text is another step's output (a ticket link,
   // someone's email), the user has not seen it anywhere else, and it must not pass through a
   // model between the dialog and the send.
+  //
+  // WHAT THE QUESTION NAMES is where the message is really going — the webhook's channel, or
+  // just "your Slack webhook" — and the channel that was asked for only as a note beneath it
+  // (see "Saying where a message goes, honestly" above). The message stays after a blank line,
+  // so the first paragraph, which is what gets spoken, is still the whole question.
   confirmSummary: (args: ToolInput, deps: ToolDeps): string => {
     const channel = knownChannel(args, deps);
+    const where = postsTo(deps);
+    const question = withNote(`Send ${destination(where)}?`, channel, where);
     if (deps.chained) {
       const text = sourceText(args, deps);
-      return text ? `Send to ${channel}?\n\n${text}` : `Send to ${channel}?`;
+      return text ? `${question}\n\n${text}` : question;
     }
     const notes = typeof args["notes"] === "string" ? args["notes"] : "";
     const body = notes ? `\n\n${preview(notes)}` : "";
-    return `Send to ${channel}?${body}`;
+    return `${question}${body}`;
   },
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     // Asked again rather than trusted: the confirm summary's answer does not travel here, and a
@@ -144,13 +201,20 @@ export const sendMessageTool: Tool = {
       ? rawNotes
       : await deps.llm.complete(FORMAT_SYSTEM, rawNotes);
 
+    const where = postsTo(deps);
     const result = await deps.sender.send(channel, formatted);
     if (!result.ok) {
       // Fail loudly. The planner logs this as an error and shows it — the user is never told
-      // the message went out when it did not.
-      throw new Error(`Could not send to ${channel}: ${result.error ?? "unknown error"}`);
+      // the message went out when it did not. Nor WHERE it did not go: the same rule as above.
+      throw new Error(
+        withNote(
+          `Could not send ${destination(where)}: ${result.error ?? "unknown error"}`,
+          channel,
+          where,
+        ),
+      );
     }
 
-    return `Sent to ${channel}.\n\n${formatted}`;
+    return `${withNote(`Sent ${destination(where)}.`, channel, where)}\n\n${formatted}`;
   },
 };

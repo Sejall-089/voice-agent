@@ -240,12 +240,12 @@ sequenceDiagram
     Planner->>Planner: registry check — sendMessage exists ✓
     Planner->>Memory: resolve("the team")
     Memory-->>Planner: "#design-team" (confidence 0.9)
-    Planner->>Shell: confirm("Send to #design-team?")
+    Planner->>Shell: confirm("Send via your Slack webhook?<br/>(You asked for #design-team. …)")
     Shell-->>Planner: approved
     Planner->>Slack: POST webhook (formatted notes)
     Slack-->>Planner: 200 OK
     Planner->>Memory: log action
-    Planner->>Shell: showResult("Sent to #design-team")
+    Planner->>Shell: showResult("Sent via your Slack webhook. …")
 ```
 
 **Correction follow-up ("no, I meant the design channel"):** the planner routes this

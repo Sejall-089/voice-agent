@@ -205,7 +205,14 @@ describe("an unknown channel in a chain is asked for, not refused", () => {
     // The email and the clipboard both name a channel. Neither is where this went.
     expect(h.sender.calls).toHaveLength(1);
     expect(h.sender.calls[0]?.channel).toBe("#bugs");
-    expect(h.shell.confirmMessages[1]).toMatch(/^Step 3 of 3: Send to #bugs\?/);
+    // The dialog reports the ANSWER as the channel asked for. (It no longer calls it the
+    // destination: a webhook posts to its own channel — tests/sendMessage.test.ts.)
+    expect(
+      h.shell.confirmMessages[1]?.startsWith(
+        "Step 3 of 3: Send via your Slack webhook?\n" +
+          "(You asked for #bugs. A webhook posts to its own channel and ignores this.)\n\n",
+      ),
+    ).toBe(true);
   });
 
   it("says what it saved, before it previews the plan", async () => {

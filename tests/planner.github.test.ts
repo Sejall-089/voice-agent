@@ -338,7 +338,13 @@ describe("what a plan cannot make GitHub do", () => {
     expect(h.github.calls.map((call) => call.name)).toEqual(["issue_read"]);
     expect(h.sender.calls).toHaveLength(1);
     expect(h.sender.calls[0]?.text).toContain(HOSTILE);
-    expect(h.shell.confirmMessages[0]).toBe(`Step 2 of 2: Send to #bugs?\n\n${h.sender.calls[0]?.text ?? ""}`);
+    // The sender here does not say where its webhook posts, so the question names no channel
+    // and reports #bugs only as what was asked for (tests/sendMessage.test.ts pins the wording).
+    expect(h.shell.confirmMessages[0]).toBe(
+      "Step 2 of 2: Send via your Slack webhook?\n" +
+        "(You asked for #bugs. A webhook posts to its own channel and ignores this.)\n\n" +
+        (h.sender.calls[0]?.text ?? ""),
+    );
   });
 });
 

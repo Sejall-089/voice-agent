@@ -69,6 +69,13 @@ const BUG_CHAIN: PlannedStep[] = [
   step("sendMessage", { channel: "#bugs", notes: "New bug filed: {step2}" }, "tell #bugs"),
 ];
 
+// The send step's question when the plan says "#bugs". This harness's sender does not say which
+// channel its webhook posts to (the unconfigured install), so the question names no destination
+// and reports #bugs only as what was asked for — a webhook ignores it (tests/sendMessage.test.ts
+// pins the wording; this is here so every dialog assertion below states the WHOLE text).
+const SEND_BUGS =
+  "Send via your Slack webhook?\n(You asked for #bugs. A webhook posts to its own channel and ignores this.)";
+
 interface HarnessOptions {
   server?: FakeMcpServerOptions;
   confirms?: boolean[];
@@ -199,7 +206,7 @@ describe("the bug-report chain: Gmail → Linear → Slack", () => {
 
     const sent = h.sender.calls[0]?.text ?? "";
     expect(sent.length).toBeGreaterThan(0);
-    expect(h.shell.confirmMessages[1]).toBe(`Step 3 of 3: Send to #bugs?\n\n${sent}`);
+    expect(h.shell.confirmMessages[1]).toBe(`Step 3 of 3: ${SEND_BUGS}\n\n${sent}`);
   });
 
   // Addition (a): a real bug report can be long. The dialog text must carry ALL of it.
@@ -304,7 +311,7 @@ describe("tool results are data, never instructions", () => {
     expect(h.sender.calls[0]?.channel).toBe("#bugs");
     expect(h.sender.calls[0]?.text).toContain(HOSTILE);
     // Shown in full before it was posted, and nothing else was called on the connector.
-    expect(h.shell.confirmMessages[0]).toBe(`Step 2 of 2: Send to #bugs?\n\n${h.sender.calls[0]?.text ?? ""}`);
+    expect(h.shell.confirmMessages[0]).toBe(`Step 2 of 2: ${SEND_BUGS}\n\n${h.sender.calls[0]?.text ?? ""}`);
     expect(h.server.calls.map((call) => call.name)).toEqual(["get_issue"]);
   });
 });
@@ -488,7 +495,9 @@ describe("an unknown channel stops the plan before it starts", () => {
     expect(h.server.created).toHaveLength(1);
     expect(h.sender.calls).toHaveLength(1);
     expect(h.sender.calls[0]?.channel).toBe("#bugs");
-    expect(h.shell.confirmMessages[1]).toMatch(/^Step 3 of 3: Send to #bugs\?/);
+    // The resolved channel is what the dialog reports as asked for — never the phrase.
+    expect(h.shell.confirmMessages[1]?.startsWith(`Step 3 of 3: ${SEND_BUGS}\n\n`)).toBe(true);
+    expect(h.shell.confirmMessages[1]).not.toContain("the bugs channel");
   });
 
   it("leaves the literal-channel chain exactly as it was", async () => {
@@ -663,7 +672,7 @@ describe("sendMessage: verbatim inside a chain, unchanged outside one", () => {
     expect(h.llm.completeCalls).toBe(1);
     expect(h.sender.calls[0]?.text).toBe("REWRITTEN BY A MODEL");
     // The 140-character preview — the standalone gap that is on the follow-up list.
-    expect(h.shell.confirmMessages[0]).toBe(`Send to #bugs?\n\n${"x".repeat(140)}…`);
+    expect(h.shell.confirmMessages[0]).toBe(`${SEND_BUGS}\n\n${"x".repeat(140)}…`);
   });
 
   it("sends selected text verbatim too, when a chained step gives no notes", async () => {
@@ -681,7 +690,7 @@ describe("sendMessage: verbatim inside a chain, unchanged outside one", () => {
     expect(h.llm.completeCalls).toBe(0);
     expect(h.sender.calls[0]?.text).toBe("Exactly  this,\nspacing and all.");
     expect(h.shell.confirmMessages[0]).toBe(
-      "Step 2 of 2: Send to #bugs?\n\nExactly  this,\nspacing and all.",
+      `Step 2 of 2: ${SEND_BUGS}\n\nExactly  this,\nspacing and all.`,
     );
   });
 });

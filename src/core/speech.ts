@@ -49,7 +49,7 @@ const SEE_DIALOG = "Check the dialog.";
 // one plain sentence, and each wants different speech.
 //
 // The paragraph rule comes first and does most of the work: this codebase already uses a blank
-// line to mean "headline, then the bulk" — `Sent to #design-team.\n\n<the whole message>`,
+// line to mean "headline, then the bulk" — `Sent via your Slack webhook.\n\n<the whole message>`,
 // `Sent.\n\n<the whole reply>`. Speaking a message back at the person who just sent it is noise,
 // so only the headline is spoken and the body becomes the remainder.
 export function toSpokenResult(text: string): SpokenText {
@@ -84,8 +84,9 @@ export function toSpokenNarration(text: string): SpokenText {
 //
 // Both existing summaries lead with the decisive fact and put the bulk after a blank line —
 // sendReply's `Send this reply to alex@example.com?\n\n<the draft>`, sendMessage's
-// `Send to #design-team?\n\n<the message>` — so the first paragraph is reliably the question
-// itself. The draft body is never spoken, and there is deliberately no remainder: the dialog
+// `Send via your Slack webhook?\n(You asked for #design-team. …)\n\n<the message>` — so the
+// first paragraph is reliably the question itself, with its one-line note about where a
+// webhook really posts. The draft body is never spoken, and there is deliberately no remainder: the dialog
 // on screen IS the full text, so "want me to read the rest?" would be offering to duplicate
 // the thing the user is already looking at, out loud, at the one moment they should be reading.
 export function toSpokenConfirm(summary: string): SpokenText {

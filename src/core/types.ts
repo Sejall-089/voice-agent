@@ -100,6 +100,15 @@ export interface SendResult {
 
 export interface MessageSender {
   send(channel: string, text: string): Promise<SendResult>;
+  // The channel this sender ACTUALLY posts to, when that is fixed and known — or null/absent
+  // when it is not known.
+  //
+  // It exists because of what a Slack app webhook is: a URL bound to the one channel it was
+  // created for, which ignores the `channel` passed to `send`. So "where did this go?" cannot
+  // be answered from the channel the user asked for; only the sender can say, and only if it
+  // has been told (SLACK_WEBHOOK_CHANNEL). Every text that names a destination reads this,
+  // never the asked channel (core/tools/sendMessage.ts).
+  readonly postsTo?: string | null;
 }
 
 // --- Speech to text, behind an interface like LLMClient / MessageSender (M7) ---

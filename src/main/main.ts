@@ -235,7 +235,13 @@ app.whenReady().then(() => {
   );
   seedIfEmpty(memory);
   // Secrets are read HERE, in composition — /core never touches process.env. Never log the URL.
-  const sender = new SlackSender(process.env["SLACK_WEBHOOK_URL"]);
+  // SLACK_WEBHOOK_CHANNEL is optional and is only a label: the channel that webhook was created
+  // for. A webhook ignores the channel it is asked to post to, so this is what lets the confirm
+  // dialog and the result name where a message really goes.
+  const sender = new SlackSender(
+    process.env["SLACK_WEBHOOK_URL"],
+    process.env["SLACK_WEBHOOK_CHANNEL"],
+  );
   // M10/M11: browser-backed tools are only on the menu when there is a Chrome to drive. A
   // capability the app cannot exercise is never offered to the model in the first place. Both
   // currently gate on the same CHROME_DEBUG_URL — one debug Chrome, two app surfaces in it.

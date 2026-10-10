@@ -5,8 +5,21 @@ import type { MessageSender, SendResult } from "../types.ts";
 //
 // The webhook URL is a CONSTRUCTOR ARGUMENT: /core never reads process.env. main.ts injects it.
 // The URL is a secret — it is never logged and never appears in an error message (spec §10).
+//
+// `webhookChannel` is a LABEL, and optional (SLACK_WEBHOOK_CHANNEL): the channel this webhook
+// was created for, as the user knows it ("#social"). It changes nothing about where a message
+// goes — the webhook decides that — only what the app is able to honestly SAY about it. Unset
+// or blank means the app does not know, and says "via your Slack webhook" with no channel.
 export class SlackSender implements MessageSender {
-  constructor(private readonly webhookUrl: string | undefined) {}
+  readonly postsTo: string | null;
+
+  constructor(
+    private readonly webhookUrl: string | undefined,
+    webhookChannel?: string,
+  ) {
+    const label = webhookChannel?.trim() ?? "";
+    this.postsTo = label.length > 0 ? label : null;
+  }
 
   async send(channel: string, text: string): Promise<SendResult> {
     if (!this.webhookUrl) {
@@ -18,8 +31,9 @@ export class SlackSender implements MessageSender {
         method: "POST",
         headers: { "content-type": "application/json" },
         // Note: a Slack *app* webhook always posts to the channel it was configured with.
-        // `channel` is a legacy custom-integration override and may be ignored — but it is
-        // still the channel we resolved, confirmed, and logged.
+        // `channel` is a legacy custom-integration override and is ignored by an app webhook.
+        // It is still sent, and still logged, as what was ASKED for — but it is no longer
+        // presented to the user as the destination (see `postsTo`).
         body: JSON.stringify({ text, channel }),
       });
 

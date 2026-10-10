@@ -1019,6 +1019,39 @@ the steps would have run (`tests/preflight.test.ts` runs each case alone and cha
 compares), but it can pass a plan a step later refuses — `openTarget` with a plain word that is
 neither a reference nor a URL is the pinned example.
 
+#### Where a message really goes (added 2026-10-10)
+
+A Slack **app** webhook is bound to the one channel it was created for and **ignores the
+`channel` field**. So the channel `sendMessage` resolves, checks and confirms is not where the
+message lands — and through M20 the confirm ("Send to #help?") and the result ("Sent to #help.")
+said that it was. They no longer do.
+
+`SLACK_WEBHOOK_CHANNEL` (optional, in `.env` beside `SLACK_WEBHOOK_URL`, read in `main.ts` and
+handed to `SlackSender`) is a **label** for the webhook's own channel. The sender carries it as
+`MessageSender.postsTo` (`null` when unset), and every text that names a destination is worded
+from that — never from the asked channel:
+
+| | `SLACK_WEBHOOK_CHANNEL=#social` | not set |
+|---|---|---|
+| Confirm | `Send to #social via your Slack webhook?` | `Send via your Slack webhook?` |
+| Result | `Sent to #social via your Slack webhook.` | `Sent via your Slack webhook.` |
+| Failure | `Could not send to #social via your Slack webhook: <error>` | `Could not send via your Slack webhook: <error>` |
+| Second line, when the asked channel is not the webhook's | `(You asked for #help; the webhook posts to its own channel.)` | `(You asked for #help. A webhook posts to its own channel and ignores this.)` — always present |
+
+"The same channel" ignores case, surrounding spaces and a leading `#`. The message body still
+follows after a blank line and the step label still goes in front, so the first paragraph —
+the part that is spoken — is the whole question, note included. The asked channel is still
+sent in the request body and still recorded in the action log, as what was asked for.
+`tests/sendMessage.test.ts` holds a guard that collects every confirm and result text and
+fails if the asked channel appears anywhere but that note.
+
+**Channel names only gain meaning with one webhook per channel, which is the next milestone.**
+Until then "the bugs channel" → `#bugs` is a fact the app can store and repeat but cannot act
+on: every message goes wherever the single webhook points. For that reason the pre-flight
+question ("which channel do you mean by…?") and the "Saved: …" line are **deliberately left
+as they are for now** — they are about the name, and will be about the destination once a name
+can select a webhook. A literal channel that does not exist is likewise still accepted.
+
 #### Asking instead of refusing (added 2026-10-10)
 
 A tool may declare `askForReference: { <arg>: { question, retry, accept } }`. When the
@@ -1192,7 +1225,8 @@ Three things make this safe rather than a loophole:
 
 An irreversible tool should also define `confirmSummary(args): string`. The planner calls it
 with the **resolved** arguments (step 4 runs before step 6), so the confirm dialog always
-describes the *concrete* action — "Send to #design-team?" — and never the vague phrasing the
+describes the *concrete* action — "Send to #design-team?" as it then read; see "Where a message
+really goes" for what `sendMessage` says now — and never the vague phrasing the
 user typed ("send to the team"). Showing the unresolved version would be a trust bug: the
 user must approve what will actually happen. Tools without it fall back to a generic
 `Run <tool>?`. (`sendMessage`'s summary also REFUSES a channel step 4 could not resolve, so

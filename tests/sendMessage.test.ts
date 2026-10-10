@@ -5,6 +5,7 @@ import { UnresolvedReferenceError } from "../src/core/errors.ts";
 import { checkChannel, sendMessageTool } from "../src/core/tools/sendMessage.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
+import { SlackSender } from "../src/core/senders/SlackSender.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import type {
   CapturedContext,
@@ -358,7 +359,11 @@ describe("sendMessage — a known channel behaves as it always has", () => {
     const outcome = await s.turn(sendChoice("#design-team"), "send these notes to #design-team");
 
     expect(outcome.status).toBe("ok");
-    expect(s.shell.confirmMessages).toEqual(["Send to #design-team?"]);
+    // "Known" is about the channel being ACCEPTED. What the question says about where the
+    // message goes is a separate matter, pinned in "honest about where a webhook posts" below.
+    expect(s.shell.confirmMessages).toEqual([
+      "Send via your Slack webhook?\n(You asked for #design-team. A webhook posts to its own channel and ignores this.)",
+    ]);
     expect((s.sender as FakeSender).calls).toEqual([{ channel: "#design-team", text: "FORMATTED" }]);
   });
 });
@@ -440,7 +445,9 @@ describe("sendMessage — the message body is never a reference", () => {
       "send 'the team' to #general",
     );
 
-    expect(s.shell.confirmMessages).toEqual([`Send to #general?\n\n${BODY}`]);
+    expect(s.shell.confirmMessages).toEqual([
+      `Send via your Slack webhook?\n(You asked for #general. A webhook posts to its own channel and ignores this.)\n\n${BODY}`,
+    ]);
     expect(s.lastLlm()?.lastUserPrompt).toBe(BODY);
     expect((s.sender as FakeSender).calls[0]?.channel).toBe("#general");
   });
@@ -466,8 +473,179 @@ describe("sendMessage — the message body is never a reference", () => {
     );
 
     expect(outcome.status).toBe("ok");
-    expect(s.shell.confirmMessages).toEqual([`Step 2 of 2: Send to #design-team?\n\n${BODY}`]);
+    expect(s.shell.confirmMessages).toEqual([
+      `Step 2 of 2: Send via your Slack webhook?\n(You asked for #design-team. A webhook posts to its own channel and ignores this.)\n\n${BODY}`,
+    ]);
     expect((s.sender as FakeSender).calls).toEqual([{ channel: "#design-team", text: BODY }]);
+  });
+});
+
+// A Slack app webhook posts to the ONE channel it was created for and ignores the `channel`
+// field. So the channel the user named is not where the message goes, and no text may say it is.
+// What the app can honestly name is the webhook's own channel — when it has been told
+// (SLACK_WEBHOOK_CHANNEL, carried by the sender as `postsTo`) — and otherwise only "your Slack
+// webhook".
+describe("sendMessage — honest about where a webhook posts", () => {
+  const ASKED_NOTE_KNOWN = "(You asked for #help; the webhook posts to its own channel.)";
+  const ASKED_NOTE_UNKNOWN = "(You asked for #help. A webhook posts to its own channel and ignores this.)";
+
+  const send = (channel: string, notes?: string): ToolChoice => ({
+    kind: "tool",
+    name: "sendMessage",
+    input: notes === undefined ? { channel } : { channel, notes },
+  });
+  const chained = (channel: string): ToolChoice => ({
+    kind: "plan",
+    steps: [
+      { tool: "summarize", arguments: {}, describe: "summarize it" },
+      { tool: "sendMessage", arguments: { channel, notes: "{step1}" }, describe: "send it" },
+    ],
+  });
+  const through = (postsTo: string | null, result = { ok: true } as { ok: boolean; error?: string }) =>
+    session({ confirms: [true], sender: new FakeSender(result, false, postsTo) });
+
+  describe("the confirm question", () => {
+    it("names the webhook's channel, and nothing else, when that is the channel asked for", async () => {
+      const s = through("#social");
+      await s.turn(send("#social"), "send these to #social");
+      expect(s.shell.confirmMessages).toEqual(["Send to #social via your Slack webhook?"]);
+    });
+
+    it("treats '#Social', 'social' and '#social' as the same channel", async () => {
+      for (const asked of ["#Social", "social", " #social "]) {
+        const s = through("#social");
+        await s.turn(send(asked), "send these");
+        expect(s.shell.confirmMessages, asked).toEqual(["Send to #social via your Slack webhook?"]);
+      }
+    });
+
+    it("says so on a second line when a DIFFERENT channel was asked for", async () => {
+      const s = through("#social");
+      await s.turn(send("#help"), "send these to #help");
+      expect(s.shell.confirmMessages).toEqual([`Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}`]);
+    });
+
+    it("names no destination at all when the webhook's channel is not configured", async () => {
+      const s = through(null);
+      await s.turn(send("#help"), "send these to #help");
+      expect(s.shell.confirmMessages).toEqual([`Send via your Slack webhook?\n${ASKED_NOTE_UNKNOWN}`]);
+    });
+
+    it("reports the RESOLVED channel as what was asked for, not the phrase", async () => {
+      const s = through("#social");
+      s.memory.write("team", "#design-team");
+      await s.turn(send("the team"), "send these to the team");
+      expect(s.shell.confirmMessages[0]).toBe(
+        "Send to #social via your Slack webhook?\n(You asked for #design-team; the webhook posts to its own channel.)",
+      );
+    });
+
+    it("keeps the message preview after a blank line, on a lone send", async () => {
+      const s = through("#social");
+      await s.turn(send("#help", "ship it friday"), "send this");
+      expect(s.shell.confirmMessages).toEqual([
+        `Send to #social via your Slack webhook?\n${ASKED_NOTE_KNOWN}\n\nship it friday`,
+      ]);
+    });
+
+    it("keeps the step label in front and the whole message after, in a chain", async () => {
+      const s = through(null);
+      await s.turn(chained("#help"), "summarize and send", "THE SUMMARY");
+      expect(s.shell.confirmMessages).toEqual([
+        `Step 2 of 2: Send via your Slack webhook?\n${ASKED_NOTE_UNKNOWN}\n\nTHE SUMMARY`,
+      ]);
+    });
+  });
+
+  describe("the result", () => {
+    it.each([
+      { label: "configured, same channel", postsTo: "#social", asked: "#social", head: "Sent to #social via your Slack webhook." },
+      {
+        label: "configured, different channel",
+        postsTo: "#social",
+        asked: "#help",
+        head: `Sent to #social via your Slack webhook.\n${ASKED_NOTE_KNOWN}`,
+      },
+      { label: "not configured", postsTo: null, asked: "#help", head: `Sent via your Slack webhook.\n${ASKED_NOTE_UNKNOWN}` },
+    ])("$label", async ({ postsTo, asked, head }) => {
+      const s = through(postsTo);
+      const outcome = await s.turn(send(asked), "send these");
+      expect(outcome.status).toBe("ok");
+      expect(s.shell.results).toEqual([`${head}\n\nFORMATTED`]);
+    });
+  });
+
+  describe("a failed send", () => {
+    const REJECTED = { ok: false, error: "Slack rejected the message (HTTP 404)." };
+
+    it.each([
+      { label: "configured, same channel", postsTo: "#social", asked: "#social", said: `Could not send to #social via your Slack webhook: ${REJECTED.error}` },
+      {
+        label: "configured, different channel",
+        postsTo: "#social",
+        asked: "#help",
+        said: `Could not send to #social via your Slack webhook: ${REJECTED.error}\n${ASKED_NOTE_KNOWN}`,
+      },
+      {
+        label: "not configured",
+        postsTo: null,
+        asked: "#help",
+        said: `Could not send via your Slack webhook: ${REJECTED.error}\n${ASKED_NOTE_UNKNOWN}`,
+      },
+    ])("$label", async ({ postsTo, asked, said }) => {
+      const s = through(postsTo, REJECTED);
+      const outcome = await s.turn(send(asked), "send these");
+      expect(outcome.status).toBe("error");
+      expect(s.shell.results).toEqual([`Something went wrong: ${said}`]);
+    });
+  });
+
+  // THE GUARD. Whatever these texts come to say later, the channel that was ASKED FOR may appear
+  // in exactly one place — the parenthesised "You asked for…" line — and never as where a
+  // message is going, went, or failed to go. Every text a person is shown is collected and
+  // checked, for a configured webhook and an unconfigured one.
+  describe("no text claims the asked channel as the destination", () => {
+    const BODY = "the release is out";
+
+    async function everyText(postsTo: string | null): Promise<string[]> {
+      const texts: string[] = [];
+      const lone = through(postsTo);
+      await lone.turn(send("#help", BODY), "send this to #help", BODY);
+      const chain = through(postsTo);
+      await chain.turn(chained("#help"), "summarize and send to #help", BODY);
+      const failed = through(postsTo, { ok: false, error: "Slack rejected the message (HTTP 404)." });
+      await failed.turn(send("#help", BODY), "send this to #help", BODY);
+      for (const s of [lone, chain, failed]) texts.push(...s.shell.confirmMessages, ...s.shell.results);
+      return texts;
+    }
+
+    it.each([{ postsTo: "#social" }, { postsTo: null }])("webhook channel: $postsTo", async ({ postsTo }) => {
+      const texts = await everyText(postsTo);
+      // Three confirms and four results — two sent, one failed, and the chain's first step
+      // showing its summary. The check below is only worth anything if it is looking at all of
+      // them, and if the six that are ABOUT the send really do mention the asked channel.
+      expect(texts).toHaveLength(7);
+      expect(texts.filter((text) => text.includes("#help"))).toHaveLength(6);
+
+      for (const text of texts) {
+        expect(text, text).not.toMatch(/\b(send|sent|sending|posted|post) (it |this |these )?to #help\b/i);
+        const withoutTheNote = text
+          .split("\n")
+          .filter((line) => !/^\(You asked for #help[.;] /.test(line))
+          .join("\n");
+        expect(withoutTheNote, text).not.toContain("#help");
+      }
+    });
+  });
+});
+
+describe("SlackSender.postsTo", () => {
+  it("is the configured label, trimmed", () => {
+    expect(new SlackSender("https://hooks.example/x", "  #social ").postsTo).toBe("#social");
+  });
+
+  it.each([undefined, "", "   "])("is null when the label is %j — never an empty destination", (label) => {
+    expect(new SlackSender("https://hooks.example/x", label).postsTo).toBeNull();
   });
 });
 

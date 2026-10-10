@@ -347,7 +347,8 @@ Three steps:
 3. Tell #bugs
 
 Step 2 of 3: Create this Linear issue in Engineering?     ← asks, showing the WHOLE email
-Step 3 of 3: Send to #bugs?                               ← asks, showing the exact message
+Step 3 of 3: Send to #social via your Slack webhook?      ← asks, showing the exact message
+             (You asked for #bugs; the webhook posts to its own channel.)
              New bug filed: Created ENG-5: Login button does nothing on Safari
              https://linear.app/…/ENG-5/…
 ```
@@ -462,6 +463,7 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `ANTHROPIC_API_KEY` | Only if `LLM_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` | Only if `LLM_PROVIDER=openai` |
 | `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
+| `SLACK_WEBHOOK_CHANNEL` | Optional. The channel that webhook was created for (e.g. `#social`). A Slack app webhook posts to that one channel **whatever channel you name**, so this is only a label: with it the confirm and result say "Send to #social via your Slack webhook?", without it "Send via your Slack webhook?". The channel you asked for is shown as a note, never as the destination. |
 | `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice **and** dictation (M12). Optional — leave them blank and neither the bar's microphone nor the dictation hotkey ever activate; typed commands work exactly as before. |
 | `HOTKEY` | Optional. Pins the instruction-bar combo instead of letting the app pick the first free one. |
 | `DICTATE_HOTKEY` | Optional. Pins the **dictation** combo (M12) — separate from `HOTKEY` above. Needs `WHISPER_*` set too, or there's no transcriber to dictate with. |
