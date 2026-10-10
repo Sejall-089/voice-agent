@@ -124,6 +124,24 @@ Fuzzy human sentence  →  exact function call.
   - **Still out**: stdio MCP servers (nothing needs one — Linear is hosted), OAuth for
     connectors, a "connect an app" UI, Slack DMs, and every Linear tool beyond those three.
 
+**Added after v0 (M20) — reads and one real create seen live 2026-10-10; the chain, the
+two-tracker choice and the failure wording are NOT yet run live (§9):**
+- **GitHub issues, as the second connector**, added to find out what in `core/mcp/` was really
+  about Linear. Three tools: `github__create_issue` (`dangerous`), `github__list_issues` and
+  `github__get_issue` (both `safe`), against GitHub's hosted MCP server, with a fine-grained
+  token in `.env` as `GITHUB_TOKEN`. The server has 46 tools. See §6e, "The second connector".
+  - **The answer to the question**: no new auth, no new headers, no new result handling — and
+    three places the adapter had assumed Linear. A formatter now receives the connector's
+    settings; the drift check no longer relies on the server being strict; a connector may own
+    its failure wording. Plus one rule that removes a question instead of answering it: a key is
+    the model's or code's, never both.
+  - **The repository is never the model's to choose.** `owner` and `repo` come from
+    `connectors.json` on every tool, reads included — the token can read every public
+    repository on GitHub.
+  - **`search_issues` was considered and left out**; `list_issues` took its place (§6e).
+  - **Still out**: comments, labels, assignees, editing or closing an issue, pull requests,
+    files, and the other 43 tools; Slack DMs; OAuth; stdio servers; any change to `plan.ts`.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
   live-verified. It was out of v0 deliberately — voice is a second way to produce the
@@ -851,7 +869,7 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16, +1 in M18 and +2 more with Spotify, +1 in M19 and 3 connector tools)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16, +1 in M18 and +2 more with Spotify, +1 in M19 and 3 connector tools, +3 connector tools in M20)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -887,6 +905,9 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `linear__create_issue` | 22. File an issue in Linear  | **never** (`resolvesReferences: false`) | **dangerous** | validate → merge `team` from config → drift check → remote `save_issue` → `Created ID: title` + link (§6e) |
 | `linear__search_issues`| 23. Find an issue in Linear  | never         | safe (a server hint may raise it) | remote `list_issues` with `limit` and `fields` fixed in code → up to 5 lines with links |
 | `linear__get_issue`    | 24. What does ENG-123 say    | never         | safe (a server hint may raise it) | remote `get_issue` → title, status, link, description |
+| `github__create_issue` | 25. Open a GitHub issue      | never         | **dangerous** (declared; the server hints nothing) | validate → merge `method: "create"`, `owner`, `repo` → drift check → remote `issue_write` → `Created #N: title` + link, refused if the link is outside the pinned repo (§6e, M20) |
+| `github__list_issues`  | 26. What's open on GitHub    | never         | safe (a server hint may raise it) | remote `list_issues` with repo, page size, fields and order fixed in code → up to 5 lines, links built from settings |
+| `github__get_issue`    | 27. What does GitHub issue 12 say | never    | safe (a server hint may raise it) | remote `issue_read` with `method: "get"` and repo fixed → title, state, link, body |
 
 > **The three `linear__` rows are not constants of `registry.ts`**, unlike every row above them:
 > they are built at startup by `core/mcp/load.ts` from a connector definition, `connectors.json`
@@ -1666,6 +1687,8 @@ is the first. Everything is in `src/core/mcp/`:
 |---|---|
 | `types.ts` | `McpConnection` (list tools, call tool), `ConnectorDef`, `ConnectorToolDef` |
 | `connectors/linear.ts` | Linear's definition: every name, description, schema, tier and formatter |
+| `connectors/github.ts` | GitHub's (M20): the same, plus its own failure wording |
+| `transport.ts` | how a connector's link is built: Streamable HTTP, the key as a Bearer token, https only (M20 — out of `main.ts`, where it had no test) |
 | `config.ts` | what `connectors.json` means, and which tools survive it |
 | `load.ts` | the join: config + `.env` → built `Tool[]`; `CONNECTORS` is the closed list |
 | `adapter.ts` | a pinned tool → an ordinary registry `Tool` |
@@ -1731,13 +1754,18 @@ never shown for a call that could not have been made, and what it shows is what 
 1. **Validate** the model's arguments against **our** pinned schema (Ajv). An unlisted argument
    is refused here and nothing is sent.
 2. **Merge** the arguments code fixes — `team` for a create, `limit: 5` and `fields` for a
-   search. Fixed wins.
-3. **Check drift** against the **server's** schema: the remote tool must still exist and still
-   accept exactly what is about to be sent. This is the only use the server's schema is put to.
-   A mismatch is a named refusal that never echoes an argument's value.
+   search. **A key is the model's or code's, never both (M20):** a definition where a fixed key
+   is also in the pinned schema is refused at startup, so the merge has nothing to decide.
+   (Through M19 this read "Fixed wins", and no test using a real definition could tell which
+   side won.)
+3. **Check drift** against the **server's** schema: the remote tool must still exist, still
+   accept exactly what is about to be sent, and (M20) **name every key of it** in its
+   `properties`. This is the only use the server's schema is put to. A mismatch is a named
+   refusal that never echoes an argument's value.
 
-After it: an `isError` result is a **failure** (`tool-failed`, in the server's own words,
-bounded to 300 characters); an empty result, or one the tool's formatter cannot read, is a
+After it: an `isError` result is a **failure** (`tool-failed`) — in the server's own words,
+bounded to 300 characters, **unless the connector defines its own failure wording (M20)**, in
+which case the server's text is never shown at all; an empty result, or one the tool's formatter cannot read, is a
 failure too (`bad-result`) — M11's rule that reporting success proves nothing. A failed call is
 **never retried**: a dropped connection is reopened by the *next* call, because the one that
 failed may have been a create that landed.
@@ -1779,10 +1807,78 @@ same connection — fail-closed twice. `linear__create_issue` is `dangerous` as 
 
 No message can contain the key: only the *name* of its variable is ever passed in.
 
+### The second connector (M20): GitHub
+
+Added to answer one question — is a new app "a definition plus config"? — by picking a server
+that differs from Linear. `scripts/github-recon.mjs` (strictly read-only) and the fixtures in
+`tests/fixtures/github/` are the evidence; its README says which two shapes were **not**
+captured.
+
+**What recon found** (hosted server `https://api.githubcopilot.com/mcp/`, protocol 2025-11-25):
+
+- **Auth and shape are the same as Linear's.** A bare `Authorization: Bearer` header; one text
+  block of JSON per result; failures as `isError` results; a rejected token as a thrown
+  `StreamableHTTPError`, code 401. No extra header is needed.
+- **`issue_write` creates or updates depending on the VALUE of `method`**, and an update can
+  close. Its hints say not-read-only and nothing about destructive.
+- **The server silently ignores an argument it does not know**, and none of its schemas set
+  `additionalProperties: false`.
+- **The token reads every public repository**, and writes wherever it was granted.
+- **A list item has no URL**; `state` is `OPEN` in a list and `open` in a read.
+- **A failure's text carries the API URL**, and for a rate limit a user ID and a request ID.
+  A missing issue and a missing repository are the same 404 from `issue_read`.
+- **`search_issues` is not usable here**: it returned nothing for queries that had to match, a
+  `repo:` qualifier typed into the query displaced the repository named in the arguments (seen
+  in the request the server built), and it is limited to about ten calls a minute.
+
+**What that forced in `core/mcp/`** — the answer to the question is "nearly":
+
+| Change | Why |
+|---|---|
+| `format(text, args, settings)` | List links have to be built from the pinned owner and repo; and a formatter that knows where a result should have come from refuses one from elsewhere. |
+| Drift: every sent key must be in the server's `properties` | A renamed `body` would validate against a schema that forbids nothing, be dropped, and create an empty issue. |
+| A fixed key may not also be a model key (startup refusal) | `method` is the whole difference between create and update; merge order should not be a question. |
+| `failure(text, args, settings)` on a tool | The M19 fallback *is* the server's text. A connector that defines this shows its own sentence or, unrecognised, only "GitHub said no." |
+| `transport.ts` | Not forced by GitHub (same header). Moved because it was the one deciding piece with no test; now refuses a non-https URL. |
+
+Nothing changed in the planner, the registry, the chain gate, the tiers or `plan.ts`.
+
+**The definition** (`connectors/github.ts`). `owner` and `repo` are required settings on all
+three tools, fixed in code, reads included.
+
+| Tool | Remote | The model may send | Fixed in code |
+|---|---|---|---|
+| `create_issue` | `issue_write` | `title`, `body` | `method: "create"`, `owner`, `repo` |
+| `list_issues` | `list_issues` | `state`: `OPEN` / `CLOSED` | `owner`, `repo`, `perPage: 5`, `fields`, newest first |
+| `get_issue` | `issue_read` | `issue_number` | `method: "get"`, `owner`, `repo` |
+
+`state` is upper-case because the adapter sends model arguments unchanged and that is the
+server's spelling. A create's result is `{id, url}` (from the server's source — never captured);
+the formatter reads the issue number out of the link and refuses a link that is not to an issue
+in the pinned repository.
+
+**Failure wording**, matched on the measured status-and-reason and built from our own arguments
+and settings:
+
+| The server's text contains | Said |
+|---|---|
+| `: 404 Not Found` (get) | I couldn't find issue #N in owner/repo. |
+| `: 404 Not Found` (other), `Could not resolve to a Repository` | I couldn't find owner/repo — check connectors.json, and that GITHUB_TOKEN can see it. |
+| `: 403 Resource not accessible by personal access token` | GITHUB_TOKEN isn't allowed to do that in owner/repo — check its Issues permission. |
+| `: 403 API rate limit exceeded` | it is rate-limiting me. Try again in a minute. |
+| starts `An interactive form has been shown` | it showed a form instead of creating the issue. Nothing was created. |
+| anything else | *(nothing — "GitHub said no.")* |
+
+The last row but one is the **form handoff**: by the server's source, `issue_write` answers a
+client that advertises the `io.modelcontextprotocol/ui` extension with an `isError` result
+saying it showed a form and wrote nothing. This app advertises no extensions, so by the source
+it cannot fire. That has not been tested by a real create.
+
 ### Not built
 
 Stdio servers; OAuth; any Linear tool beyond the three; priority, labels and assignee on create;
-a UI for adding connectors (the config file only).
+a UI for adding connectors (the config file only). For GitHub: everything but the three tools
+above — no editing, closing, commenting, labels, pull requests or files, and no search.
 
 ---
 
@@ -2108,6 +2204,92 @@ Post-v0:
       issue → Slack link. The planner's gate, the registry's closed world and M17's per-step
       gating are unchanged; hand-built Gmail, Notion and Calendar are untouched. See §6e, §5b's
       "Chains and connectors", and "M19 — proven vs. live-only" below.
+
+- [x] **M20 — a second connector (GitHub issues), to find out what in the MCP path was
+      Linear-specific.** **Ticked after a PARTIAL live pass (2026-10-10), with a caveat that is
+      part of the tick.** A person ran sections 0, 1 and 2 of `docs/M20-live-checklist.md`:
+      the console listed all six connector tools and an older Linear instruction still worked;
+      the reads worked (list, an issue by number, not-found); and the first real create showed
+      its confirm dialog first, named `Sejall-089/throwaway_repo`, and answered `Created #3:
+      M20 live test` with a working link. **The form handoff did not fire, and the create
+      result matched the `{id, url}` the server's source describes.**
+      **Sections 3, 4 and 5 are STILL UNRUN and rest on tests alone:** the Gmail → GitHub →
+      Slack **chain** and its declines; the **choice between two trackers** when both are on
+      the menu; and the **failure wording** (wrong repository, rejected token, a token that may
+      not write, and the console line for an unrecognised failure). Also seen by the person,
+      and confirmed after the first report: cancelling the dialog created nothing, and
+      github.com showed exactly one new issue with #1 and #2 untouched. Within sections 0-2,
+      four boxes are still open — the token's permissions, the `connectors.json` entry, the
+      recon script, and listing closed issues. 10 boxes ticked, 17 open; "Live results 1" in
+      the checklist says which.
+      What follows was written before the pass.
+      Built and tested headless.
+      Adds `connectors/github.ts` (three tools of the server's 46), `transport.ts`, and four
+      changes to the generic adapter (§6e, "The second connector"): `format` receives settings,
+      drift requires the server to name every sent key, a fixed key may not also be a model
+      key, and a connector may own its failure wording. `tests/FakeMcpServer.ts` was split into
+      a protocol harness (`tests/fakes/McpHarness.ts`) and per-app behaviour, with a
+      `FakeGitHubServer` written from recon. `plan.ts`, the planner, the registry and the tiers
+      are unchanged; hand-built Gmail, Notion and Calendar are untouched.
+      **Proven headless:** the three tools through the SDK's real client; that hostile
+      arguments (`method: "update"`, `issue_number`, `state`, `owner`/`repo`) are refused before
+      anything is sent, against a fake that really would update, close and write elsewhere;
+      that the repository on every call is the configured one; that no failure message carries
+      a URL, a user ID or a request ID; the confirm gate and the Gmail → GitHub → Slack chain
+      with both connectors on one menu.
+      **Checked read-only against the real server:** the tool names, schemas and hints; that
+      the Bearer header alone connects; that the fixed list arguments are accepted; the 404,
+      missing-repository, missing-argument and rejected-token shapes; and (2026-10-10) a
+      non-empty list and both single-issue shapes, captured from two issues made by hand in
+      the configured repository — #1 open, #2 closed — and now the fixtures the formatters are
+      tested against. Earlier recon runs listed 0 issues there; the non-empty fixtures were
+      then built on a public repository's structure, and have been replaced.
+      **NOT verified, by anyone or anything** (as of the build; the first item was then
+      settled by the live pass above and is kept for the record):
+      - ~~**A real create.**~~ **Seen live 2026-10-10:** one create worked, the handoff did not
+        fire, and the result was read as `{id, url}`. Once, by one person; the raw result was
+        not saved, so the fixture is still "from source". Every create *failure* is unmeasured.
+      - **Part of the mutation pass.** Nine rules were broken one at a time (2026-10-10), each
+        was caught, and the suite was green after each revert. In the adapter: the shared-key
+        startup refusal (1 test failed), the unknown-key drift check (3), settings reaching the
+        formatter (14), and "an unrecognised failure shows none of the server's text" (6). In
+        the GitHub definition: `create_issue` declared `safe` (7), the fixed `method` changed
+        to `"update"` (7), `owner`/`repo` dropped from `get_issue`'s fixed arguments (14), the
+        pinned-repository link check disabled in the create and get formatters (2), and the
+        rate-limit matcher widened to any 403 (2). **Not mutated:** `owner`/`repo` on create
+        and list, the pinned page size, fields and order, the 404 and form-handoff matchers,
+        and the transport's https and header rules. For those, "pinned" still means "has a
+        test written for it", not "has a test that was seen to fail".
+      - **A token without Issues access on an issue call**, and **every create failure** —
+        the permission wording was written from a stand-in (`list_branches`).
+      - **Whether a model ever picks GitHub when it should, or when it should not.** The plan
+        eval was re-run once with both connectors on the menu (below), but every phrase in it
+        names Linear or no tracker: it shows GitHub's presence did not pull those phrases
+        away, and says nothing about a phrase that names GitHub.
+      **The plan eval, once, with both connectors on the menu** (2026-10-10, `gpt-5`,
+      `M19_PLAN_SET=verbs`, 28 calls; the eval's config now supplies GitHub's `owner` and
+      `repo`, without which its tools are silently left off the menu). **27 of 28 matched,
+      against M19's 28 of 28. No call chose a GitHub tool, and the tools chosen were the
+      expected ones in all 28.** The one mismatch is "log this as an issue and let #bugs
+      know", trial 2 of 3: the right three steps, each named with the provider's `functions.`
+      prefix (`functions.readEmail > functions.linear__create_issue > functions.sendMessage`).
+      The eval compares raw names, so it counts as a miss; the app's `canonicalToolName`
+      (`core/chain.ts`) strips that prefix, so the same answer would have run. It is the first
+      time a real model has produced the prefix since that rule shipped — M19's follow-up list
+      says none had in 15 eval calls. One trial cannot say whether the larger menu made it more
+      likely.
+      **An unrecognised GitHub failure is now logged to the console** (added 2026-10-10): the
+      person is still told only "GitHub said no.", and the server's text — one line, bounded
+      at 1000 characters — goes to an injected logger that `main.ts` points at the console. It
+      is not on the error, so it cannot reach the screen, speech, the action log or a later
+      chain step; tests assert its absence from each of those.
+      **The confirm button says "Send" on a create** — cosmetic, a follow-up, not fixed (the
+      M19 follow-up list has the detail; a GitHub create is one more dialog it mislabels).
+      **Links in the result bar are plain text, not clickable** — found in the live pass; a UI
+      follow-up for the result bar, not an M20 bug, not fixed. The links are correct, but one
+      had to be copied into a browser. As reported it applies to Linear's links too
+      (`docs/M20-live-checklist.md`, Finding 1).
+      **Follow-ups noted, not started:** `search_issues` and every write beyond create.
 
 **v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
@@ -2609,7 +2791,29 @@ of it. None of it is started.
   the form a real model sends" is unobserved. When one appears, the console now prints
   `[main] refused plan, as sent: …` if it is refused, and the action log row carries the raw
   names; a run that *succeeds* with a prefix leaves no trace at all, which is worth changing if
-  this is ever chased.
+  this is ever chased. **Update, 2026-10-10 (M20):** a real model has now produced it — once in
+  28 eval calls, on all three steps of an otherwise correct plan (§9, M20). Seen in the eval,
+  which does not run plans; the rule has still never handled one in the running app.
+
+  > **WATCH — the `functions.` prefix (opened 2026-10-10, nothing changed yet).**
+  > **Sighting:** `gpt-5`, `M19_PLAN_SET=verbs`, both connectors on the menu (three more tools than M19's). The
+  > phrase "log this as an issue and let #bugs know", trial 2 of 3, came back as
+  > `functions.readEmail > functions.linear__create_issue > functions.sendMessage`. The other
+  > 27 calls in that run, and the other two trials of the same phrase, had clean names.
+  > **What it means today:** in the app, nothing — `canonicalToolName` strips the prefix and
+  > the plan runs. In the eval it is a false MISMATCH, because the eval compares the names the
+  > model typed. So the eval's pass rate currently mixes two things: wrong plans, and right
+  > plans spelled with a prefix.
+  > **Not known:** whether the larger menu made it more likely (one sighting in one run
+  > cannot say; M19 recorded none in 15 eval calls on the smaller menu), and whether it ever appears on a
+  > single-tool call rather than a plan step.
+  > **Watch for:** (1) the next eval run — count prefixed answers separately from real
+  > misses; (2) a live run — `[main] refused plan, as sent: …` means the rule FAILED on a
+  > real prefix, and a prefixed plan that *succeeds* leaves no trace; (3) any prefix other
+  > than `functions.`, which the rule does not know.
+  > **Deliberately not done:** the eval is unchanged. Making it apply `canonicalToolName`
+  > before comparing would be the fix for the false mismatch, and is a decision — it would
+  > also stop the eval from showing how often the prefix occurs unless it counts them.
 - **A Gemini provider, as its own milestone.** Only `anthropic` and `openai` exist behind
   `LLMClient`. The smallest route is the OpenAI client pointed at Google's OpenAI-compatible
   endpoint, but nothing about it is tested and three things are expected to need work: Gemini

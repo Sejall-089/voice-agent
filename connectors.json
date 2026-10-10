@@ -6,6 +6,14 @@
       "settings": {
         "defaultTeam": "Sejal Gupta"
       }
+    },
+    "github": {
+      "enabled": true,
+      "tools": ["create_issue", "list_issues", "get_issue"],
+      "settings": {
+        "owner": "Sejall-089",
+        "repo": "throwaway_repo"
+      }
     }
   }
 }

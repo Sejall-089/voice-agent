@@ -4,6 +4,7 @@ import { SEPARATOR, buildConnectorTools } from "../src/core/mcp/adapter.ts";
 import { parseConnectorsConfig, selectConnectors } from "../src/core/mcp/config.ts";
 import { linearConnector } from "../src/core/mcp/connectors/linear.ts";
 import { failureText, flattenResult } from "../src/core/mcp/flatten.ts";
+import { CONNECTORS } from "../src/core/mcp/load.ts";
 import { SdkMcpConnection } from "../src/core/mcp/SdkConnection.ts";
 import { baseTier, effectiveTier, looksDangerous, possibleTiers } from "../src/core/mcp/tiers.ts";
 import type { ConnectorDef } from "../src/core/mcp/types.ts";
@@ -297,30 +298,68 @@ describe("linear__search_issues and linear__get_issue", () => {
     expect(server.calls).toEqual([]);
   });
 
-  // Linear's own schemas reject a model-supplied `limit` before the merge is ever reached, so
-  // the test above cannot tell which side wins it. This definition ALLOWS the key, which is the
-  // only arrangement where "fixed wins" is the thing standing between the model and the server.
-  it("lets code-fixed arguments win even over a key the schema allows", async () => {
-    const permissive: ConnectorDef = {
-      ...linearConnector,
-      tools: [
-        {
-          name: "search_issues",
-          remote: "list_issues",
-          description: "d",
-          inputSchema: {
-            type: "object",
-            properties: { query: { type: "string" }, limit: { type: "number" } },
-            additionalProperties: false,
-          },
-          risk: "safe",
-          fixed: () => ({ limit: 5 }),
+  // THE RULE THIS TEST PINS CHANGED IN M20, so the test was rewritten rather than re-run.
+  //
+  // M19's version built a definition whose schema ALLOWED `limit` while code also fixed it, and
+  // asserted the fixed value won the merge — the only arrangement in which merge order was what
+  // stood between the model and the server. It was needed because no real definition could
+  // tell which side won: Linear's schemas reject the key before the merge is reached, and the
+  // mutation "model arguments win" survived every other test.
+  //
+  // M20 removes the question instead of answering it: a key is the model's or code's, never
+  // both, and a definition where one is both does not build. With no shared key the merge has
+  // nothing to decide. (GitHub is why it matters more now — there a fixed key, `method`, is the
+  // whole difference between creating an issue and editing or closing one.)
+  const sharing = (fixed: ToolInput): ConnectorDef => ({
+    ...linearConnector,
+    tools: [
+      {
+        name: "search_issues",
+        remote: "list_issues",
+        description: "d",
+        inputSchema: {
+          type: "object",
+          properties: { query: { type: "string" }, limit: { type: "number" } },
+          additionalProperties: false,
         },
-      ],
-    };
-    const { server, tool } = build({}, permissive);
-    await tool("linear__search_issues").handler({ query: "q", limit: 250 }, deps);
-    expect(server.calls[0]?.arguments).toEqual({ query: "q", limit: 5 });
+        risk: "safe",
+        fixed: () => fixed,
+      },
+    ],
+  });
+
+  it("refuses to build a tool whose fixed key is also one the model may send", () => {
+    expect(() => build({}, sharing({ limit: 5 }))).toThrow(
+      'linear__search_issues: "limit" is fixed in code, so it must not be in inputSchema.',
+    );
+  });
+
+  // The precondition: the same definition builds, and works, once the keys do not overlap — so
+  // the refusal above is about the SHARED key and not about this definition in general.
+  it("builds the same tool once no key is shared, and sends both sides' arguments", async () => {
+    const { server, tool } = build({}, sharing({ fields: ["id", "title", "status", "url"] }));
+    await tool("linear__search_issues").handler({ query: "q", limit: 2 }, deps);
+    expect(server.calls[0]?.arguments).toEqual({
+      query: "q",
+      limit: 2,
+      fields: ["id", "title", "status", "url"],
+    });
+  });
+
+  // Every REAL definition obeys it — checked from the definitions, so a connector added later
+  // is covered without anyone remembering to add it here.
+  it("holds for every pinned tool of every connector this build ships", () => {
+    for (const def of CONNECTORS) {
+      for (const pinned of def.tools) {
+        const settings = Object.fromEntries((pinned.requires ?? []).map((key) => [key, "x"]));
+        const fixedKeys = Object.keys(pinned.fixed?.(settings) ?? {});
+        const modelKeys = Object.keys(pinned.inputSchema.properties);
+        expect(
+          fixedKeys.filter((key) => modelKeys.includes(key)),
+          `${def.id}__${pinned.name}`,
+        ).toEqual([]);
+      }
+    }
   });
 
   it("says so plainly when nothing matched", async () => {
@@ -352,7 +391,7 @@ describe("formatters, against what Linear really sent", () => {
   const format = (name: string, text: string, args: ToolInput = {}): string => {
     const tool = linearConnector.tools.find((candidate) => candidate.name === name);
     if (tool?.format === undefined) throw new Error(`no formatter for ${name}`);
-    return tool.format(text, args);
+    return tool.format(text, args, { defaultTeam: "Engineering" });
   };
 
   it("create → the identifier, the title, and the link on its own line", () => {

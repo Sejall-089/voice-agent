@@ -22,3 +22,7 @@ spotify-recon-out/
 # Recon output — captured Linear MCP responses from scripts/linear-recon.mjs. Never committed:
 # the key is never written, but the bodies hold the titles and descriptions of real issues.
 linear-recon-out/
+
+# Recon output — captured GitHub MCP responses from scripts/github-recon.mjs. Never committed:
+# the token is never written, but the bodies hold the account's login and real issue text.
+github-recon-out/

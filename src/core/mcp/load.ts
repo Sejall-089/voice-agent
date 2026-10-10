@@ -1,13 +1,14 @@
 import type { Tool } from "../types.ts";
 import { buildConnectorTools } from "./adapter.ts";
 import { parseConnectorsConfig, selectConnectors } from "./config.ts";
+import { githubConnector } from "./connectors/github.ts";
 import { linearConnector } from "./connectors/linear.ts";
 import type { ConnectorDef, McpConnection } from "./types.ts";
 
 // Every connector this build knows how to talk to. THE LIST IS THE CLOSED WORLD: a connector
 // that is not here cannot be switched on from connectors.json, whatever that file says. Adding
 // an app is a definition file in ./connectors/ and one entry here — not a new surface.
-export const CONNECTORS: readonly ConnectorDef[] = [linearConnector];
+export const CONNECTORS: readonly ConnectorDef[] = [linearConnector, githubConnector];
 
 export interface LoadOptions {
   // The contents of connectors.json, or null when the file does not exist.
@@ -19,6 +20,10 @@ export interface LoadOptions {
   // object at all. The connection itself opens lazily (SdkMcpConnection): calling this touches
   // no network.
   connect: (def: ConnectorDef, key: string) => McpConnection;
+  // A line for the console, written while a tool RUNS (M20): the server's own text for a
+  // failure the connector did not recognise, which is deliberately shown to nobody. Separate
+  // from `notes` below, which are startup lines. Omitted → those lines are dropped.
+  log?: (line: string) => void;
   definitions?: readonly ConnectorDef[];
 }
 
@@ -46,7 +51,7 @@ export function loadConnectorTools(options: LoadOptions): LoadedConnectors {
   const tools: Tool[] = [];
   for (const entry of selected) {
     const key = (options.readKey(entry.def.keyName) ?? "").trim();
-    for (const tool of buildConnectorTools(entry, options.connect(entry.def, key))) {
+    for (const tool of buildConnectorTools(entry, options.connect(entry.def, key), options.log)) {
       // Two definitions sharing an id would produce the same namespaced name. First one wins,
       // and it is said out loud rather than left to whichever `find` happens to hit.
       if (tools.some((existing) => existing.name === tool.name)) {

@@ -128,6 +128,16 @@ what's playing, so every result says what was **sent**: *"Volume up about 10%"* 
 **22–24 are the first tools that aren't hand-built.** They reach Linear over MCP through a
 generic adapter — see [Connectors](#connectors--linear-over-mcp-m19) below.
 
+…and three in **M20**, for GitHub issues — **each seen working live once; the chain is not**:
+
+| # | Say this | It does |
+|---|---|---|
+| 25 | "open a GitHub issue called …" | **Asks first**, showing the repository, title and whole body → creates it |
+| 26 | "what's open on GitHub" | Up to 5 issues, newest first, with links |
+| 27 | "what does GitHub issue 12 say" | Title, state, link and body |
+
+The repository is the one named in `connectors.json`. The model cannot choose another.
+
 Anything else → an honest refusal, logged as a miss (a ranked backlog of what to build next).
 It never guesses.
 
@@ -372,7 +382,39 @@ and a "success" it can't read is a failure too. A request that times out says th
 may not** have been created, and is never sent twice.
 
 **Not built:** editing or closing issues, comments, labels, priority, assignees; connecting an
-app from the UI; any connector but Linear.
+app from the UI.
+
+### A second connector: GitHub issues (M20 — partly run live)
+
+M20 added GitHub to answer a question: is a new app really "a definition file", or was the
+adapter quietly built around Linear? GitHub's server was chosen because it differs. The answer
+was *nearly* — no new sign-in, no new plumbing, and four places the adapter had to learn
+something:
+
+- **The dangerous half hides behind a value, not a missing argument.** GitHub's `issue_write`
+  creates *or edits and closes*, depending on a `method` argument. The app fixes
+  `method: "create"` in code and never lets the model send it — and now refuses to start if any
+  argument is both fixed by code and offered to the model.
+- **The repository is never the model's choice.** The token can read every public repository
+  on GitHub. `owner` and `repo` come from `connectors.json` on every call, reads included.
+- **GitHub ignores arguments it doesn't recognise**, silently. So if it ever renamed `body`,
+  an issue would be created empty and nothing would complain. The adapter now checks that
+  every argument it sends is one the server still names, before sending.
+- **GitHub's error messages contain API addresses, account IDs and request IDs.** None of that
+  is shown. Failures the app recognises get its own sentence (*"I couldn't find issue #12 in
+  owner/repo"*); anything else is just *"GitHub said no."* — with GitHub's own text written to
+  the console only, so there is something to diagnose from.
+
+Searching issues by words is deliberately **not** offered: GitHub's search tool returned
+nothing in testing and could be steered to other repositories. Listing recent issues took its
+place.
+
+**What a person has seen (10 Oct 2026):** listing issues, reading one, the not-found message,
+and one real create — the dialog came first, named the repository, and the app answered
+`Created #3: M20 live test` with a working link. No test or script is allowed to create an
+issue, so that one create is the evidence. **Not yet seen by anyone:** the Gmail → GitHub →
+Slack chain, which tracker a model picks when both are on the menu, and any of the failure
+messages. `docs/M20-live-checklist.md` has the open boxes.
 
 ---
 
@@ -653,7 +695,29 @@ On startup you'll see one of:
    ```
    or, with no key, `[main] Linear tools disabled - LINEAR_API_KEY not set`.
 
-Two scripts talk to the real workspace, and **both are read-only** — neither can create anything:
+### Setting up GitHub (optional, M20)
+
+1. On GitHub: **Settings → Developer settings → Personal access tokens → Fine-grained tokens →
+   Generate new token.** Under **Repository access** choose **Only select repositories** and
+   pick one repository; under **Permissions → Repository permissions** set **Issues** to
+   **Read and write**. Nothing else is needed.
+2. Put it in `.env`:
+   ```
+   GITHUB_TOKEN=github_pat_…
+   ```
+3. In `connectors.json`, name that repository. This is the only repository the app will read
+   from or create in:
+   ```json
+   "github": {
+     "enabled": true,
+     "tools": ["create_issue", "list_issues", "get_issue"],
+     "settings": { "owner": "your-login", "repo": "your-repo" }
+   }
+   ```
+4. Restart; the `[main] connector tools:` line should now include the three `github__` tools.
+   `npm run github:recon` checks the real server and is read-only.
+
+Two scripts talk to the real Linear workspace, and **both are read-only** — neither can create anything:
 
 ```
 npm run linear:recon                          # what the server offers: tools, schemas, error shapes
@@ -693,6 +757,17 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M20 (a second connector, GitHub issues) is ticked after a partial live pass (10 Oct 2026).**
+A person saw the three tools work, including one real create; the form handoff the server's
+source describes did not fire. It is also tested headless, and its read paths were checked
+against GitHub's real server, read-only. **Not run live:** the Gmail → GitHub → Slack chain,
+the choice between two trackers, and the failure wording. Also not verified: part of the mutation pass
+(nine rules were broken one at a time and each was caught — some of the pinned arguments and
+the transport rules were not); and whether a model picks GitHub when asked to. The plan eval, re-run once with both
+trackers on the menu, matched 27 of 28 against M19's 28 of 28: no call chose a GitHub tool, and
+the one miss was the right plan written with a `functions.` prefix the app strips. See
+`spec.md` §9 and `docs/M20-live-checklist.md`.
 
 **M19 (MCP + Linear) has been run live and is ticked, with named gaps (1214 tests, 63 files).**
 A person saw the Gmail → Linear → Slack chain work end to end, the confirm dialogs for steps 2
@@ -1125,7 +1200,8 @@ above), scrolling to find something off-screen, open-ended agent loops (M17 chai
 plan of up to three existing tools decided in one call — what's still missing is the model
 choosing its next move after seeing each result, plus branching and anything that outlives the
 instruction),
-any MCP connector but Linear (and only three of its tools — no editing, comments or labels),
+any MCP connector but Linear and GitHub issues (and only three tools of each — no editing,
+closing, comments or labels, and no GitHub search),
 local stdio MCP servers, Slack DMs, macOS/Linux, any email app but Gmail-in-Chrome, any page editor
 but Notion-in-Chrome (and only the Chrome tab, not the Notion desktop app), search/navigation
 within either app, and any dictation cleanup/rewrite pass (raw transcript only — see `spec.md`

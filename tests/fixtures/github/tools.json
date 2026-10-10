@@ -1,0 +1,372 @@
+[
+  {
+    "name": "delete_file",
+    "description": "Delete a file from a GitHub repository",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "branch": {
+          "type": "string",
+          "description": "Branch to delete the file from"
+        },
+        "message": {
+          "type": "string",
+          "description": "Commit message"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Repository owner (username or organization)",
+          "x-mcp-header": "owner"
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the file to delete"
+        },
+        "repo": {
+          "type": "string",
+          "description": "Repository name",
+          "x-mcp-header": "repo"
+        }
+      },
+      "required": [
+        "owner",
+        "repo",
+        "path",
+        "message",
+        "branch"
+      ]
+    },
+    "annotations": {
+      "title": "Delete file",
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "issue_read",
+    "description": "Get information about a specific issue in a GitHub repository.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "issue_number": {
+          "type": "number",
+          "description": "The number of the issue"
+        },
+        "method": {
+          "type": "string",
+          "description": "The read operation to perform on a single issue.\nOptions are:\n1. get - Get issue details. Also returns best-effort hierarchy flags (`has_parent`, `has_children`); `parent` and `sub_issues_summary` are optional relationship summaries, and `closed_by_pull_requests` summarizes the pull requests configured to close the issue as `total_count` plus up to 5 `references`.\n2. get_comments - Get issue comments.\n3. get_sub_issues - Get sub-issues (children) of the issue.\n4. get_parent - Get the parent issue, if this issue is a sub-issue of another.\n5. get_labels - Get labels assigned to the issue.\n",
+          "enum": [
+            "get",
+            "get_comments",
+            "get_sub_issues",
+            "get_parent",
+            "get_labels"
+          ]
+        },
+        "owner": {
+          "type": "string",
+          "description": "The owner of the repository",
+          "x-mcp-header": "owner"
+        },
+        "page": {
+          "type": "number",
+          "description": "Page number for pagination (min 1)",
+          "minimum": 1
+        },
+        "perPage": {
+          "type": "number",
+          "description": "Results per page for pagination (min 1, max 100)",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "repo": {
+          "type": "string",
+          "description": "The name of the repository",
+          "x-mcp-header": "repo"
+        }
+      },
+      "required": [
+        "method",
+        "owner",
+        "repo",
+        "issue_number"
+      ]
+    },
+    "annotations": {
+      "title": "Get issue details",
+      "readOnlyHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "issue_write",
+    "description": "Create a new or update an existing issue in a GitHub repository.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assignees": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Usernames to assign to this issue"
+        },
+        "body": {
+          "type": "string",
+          "description": "Issue body content"
+        },
+        "duplicate_of": {
+          "type": "number",
+          "description": "Issue number that this issue is a duplicate of. Required when state_reason is 'duplicate'."
+        },
+        "issue_fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "delete": {
+                "type": "boolean",
+                "description": "Set to true to clear this field's current value on the issue. When false or omitted, this property is ignored. Cannot be true when 'value' or 'field_option_name' is provided."
+              },
+              "field_name": {
+                "type": "string",
+                "description": "Issue field name (case-insensitive). Must match a field returned by list_issue_fields for this repository or its organization."
+              },
+              "field_option_name": {
+                "type": "string",
+                "description": "Option name for single-select fields. Validated against the field's options before the API call. Cannot be combined with 'value' or 'delete: true'."
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ],
+                "description": "Value to set. Use for text, number, and date fields (date as YYYY-MM-DD). For single-select fields, prefer 'field_option_name' so the option is validated before the API call. Cannot be combined with 'field_option_name' or 'delete: true'."
+              }
+            },
+            "required": [
+              "field_name"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Issue field values to set or clear. Each item requires 'field_name' and exactly one of 'value', 'field_option_name', or 'delete: true'."
+        },
+        "issue_number": {
+          "type": "number",
+          "description": "Issue number to update"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Labels to apply to this issue"
+        },
+        "method": {
+          "type": "string",
+          "description": "Write operation to perform on a single issue.\nOptions are:\n- 'create' - creates a new issue.\n- 'update' - updates an existing issue.\n",
+          "enum": [
+            "create",
+            "update"
+          ]
+        },
+        "milestone": {
+          "type": "number",
+          "description": "Milestone number"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Repository owner",
+          "x-mcp-header": "owner"
+        },
+        "parent_issue_number": {
+          "type": "number",
+          "description": "Issue number of the parent issue. Only used when method is 'create' and cannot be combined with issue_fields. The new issue is created and attached to this parent in the same operation.",
+          "minimum": 1
+        },
+        "parent_owner": {
+          "type": "string",
+          "description": "Repository owner of the parent issue. Must be provided with parent_repo. Omit both to use owner and repo. Only used when method is 'create' and parent_issue_number is provided."
+        },
+        "parent_repo": {
+          "type": "string",
+          "description": "Repository name of the parent issue. Must be provided with parent_owner. Omit both to use owner and repo. Only used when method is 'create' and parent_issue_number is provided."
+        },
+        "repo": {
+          "type": "string",
+          "description": "Repository name",
+          "x-mcp-header": "repo"
+        },
+        "state": {
+          "type": "string",
+          "description": "New state",
+          "enum": [
+            "open",
+            "closed"
+          ]
+        },
+        "state_reason": {
+          "type": "string",
+          "description": "Reason for the state change. Ignored unless state is changed.",
+          "enum": [
+            "completed",
+            "not_planned",
+            "duplicate"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "description": "Issue title"
+        },
+        "type": {
+          "description": "Type of this issue. For updates, pass null to remove the current type. Only use if issue types are enabled for this repository. Use list_issue_types to get valid type values for this repository or its owner organization. If the repository doesn't support issue types, omit this parameter.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "owner",
+        "repo"
+      ]
+    },
+    "annotations": {
+      "title": "Create or update issue/pull request",
+      "readOnlyHint": false,
+      "idempotentHint": false
+    },
+    "_meta": {
+      "ui": {
+        "resourceUri": "ui://github-mcp-server/issue-write",
+        "visibility": [
+          "model",
+          "app"
+        ]
+      }
+    }
+  },
+  {
+    "name": "list_issues",
+    "description": "List issues in a GitHub repository. For pagination, use the 'endCursor' from the previous response's 'pageInfo' in the 'after' parameter.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "string",
+          "description": "Cursor for pagination. Use the cursor from the previous response."
+        },
+        "direction": {
+          "type": "string",
+          "description": "Order direction. If provided, the 'orderBy' also needs to be provided.",
+          "enum": [
+            "ASC",
+            "DESC"
+          ]
+        },
+        "field_filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "field_name": {
+                "type": "string",
+                "description": "Name of the custom field (e.g. \"Priority\"). Case-insensitive."
+              },
+              "value": {
+                "type": "string",
+                "description": "Value to filter on. For single-select fields, the option name (e.g. \"P1\"). For dates, YYYY-MM-DD. For numbers, the numeric value as a string. For text, the text value."
+              }
+            },
+            "required": [
+              "field_name",
+              "value"
+            ]
+          },
+          "description": "Filter by custom issue field values. Each entry takes a field_name and a value; the server looks up the field and coerces the value to its type (single-select option name, text, number, or YYYY-MM-DD date)."
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "number",
+              "title",
+              "body",
+              "state",
+              "user",
+              "labels",
+              "assignees",
+              "comments",
+              "created_at",
+              "updated_at",
+              "field_values"
+            ]
+          },
+          "description": "Subset of fields to return for each issue. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body' and 'field_values' in particular drops the largest per-result data."
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filter by labels"
+        },
+        "orderBy": {
+          "type": "string",
+          "description": "Order issues by field. If provided, the 'direction' also needs to be provided.",
+          "enum": [
+            "CREATED_AT",
+            "UPDATED_AT",
+            "COMMENTS"
+          ]
+        },
+        "owner": {
+          "type": "string",
+          "description": "Repository owner",
+          "x-mcp-header": "owner"
+        },
+        "perPage": {
+          "type": "number",
+          "description": "Results per page for pagination (min 1, max 100)",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "repo": {
+          "type": "string",
+          "description": "Repository name",
+          "x-mcp-header": "repo"
+        },
+        "since": {
+          "type": "string",
+          "description": "Filter by date (ISO 8601 timestamp)"
+        },
+        "state": {
+          "type": "string",
+          "description": "Filter by state, by default both open and closed issues are returned when not provided",
+          "enum": [
+            "OPEN",
+            "CLOSED"
+          ]
+        }
+      },
+      "required": [
+        "owner",
+        "repo"
+      ]
+    },
+    "annotations": {
+      "title": "List issues",
+      "readOnlyHint": true,
+      "idempotentHint": false
+    }
+  }
+]

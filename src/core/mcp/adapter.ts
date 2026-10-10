@@ -23,10 +23,11 @@ import type { ConnectorToolDef, McpConnection, RemoteTool } from "./types.ts";
 //      means an argument that is not listed cannot be sent — which, for Linear, is the entire
 //      difference between "create an issue" and "edit any issue" (connectors/linear.ts).
 //   2. MERGE the arguments code fixes (which team, how many results). Fixed wins.
-//   3. CHECK DRIFT against the server's own schema: the remote tool must still exist and must
-//      still accept exactly what is about to be sent. This is the only use the server's schema
-//      is ever put to. A mismatch is refused here, by name, instead of arriving back as a
-//      puzzling argument error from the far side.
+//   3. CHECK DRIFT against the server's own schema: the remote tool must still exist, must
+//      still accept exactly what is about to be sent, and (M20) must NAME every key of it. This
+//      is the only use the server's schema is ever put to. A mismatch is refused here, by name,
+//      instead of arriving back as a puzzling argument error from the far side — or, from a
+//      server that ignores what it does not know, not arriving back at all.
 //
 // The gates run steps 1-3 too (`prepare`), so a confirm dialog is never shown for a call that
 // could not have been made, and what it shows is what will be sent.
@@ -49,9 +50,17 @@ const NAME_SHAPE = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 // schema we cannot compile is reported as drift, not thrown.
 const ajv = new Ajv2020({ strict: false, validateFormats: false, allErrors: false });
 
+// How much of a server's unrecognised failure text goes to the console. Longer than what a
+// person is shown (failure.ts) because its whole purpose is diagnosis; still bounded, because
+// it is text from somewhere else.
+export const MAX_LOGGED_FAILURE = 1000;
+
 export function buildConnectorTools(
   selected: SelectedConnector,
   connection: McpConnection,
+  // Where a line for the CONSOLE goes — never the screen, never speech. /core does not touch
+  // `console`; main.ts hands this in (via core/mcp/load.ts). Omitted → nothing is logged.
+  log: (line: string) => void = () => undefined,
 ): Tool[] {
   const { def, settings } = selected;
   if (!ID_SHAPE.test(def.id)) {
@@ -70,6 +79,14 @@ export function buildConnectorTools(
     if (tool.inputSchema.additionalProperties !== false) {
       // A definition bug, caught at startup rather than discovered as an argument that leaked.
       throw new Error(`${name}: inputSchema must set additionalProperties to false.`);
+    }
+    // A key is the model's or code's, never both (M20). With no overlap the merge in `prepare`
+    // has nothing to decide, so no ordering of it can hand the model a key code meant to fix.
+    const shared = Object.keys(tool.fixed?.(settings) ?? {}).find((key) =>
+      Object.hasOwn(tool.inputSchema.properties, key),
+    );
+    if (shared !== undefined) {
+      throw new Error(`${name}: "${shared}" is fixed in code, so it must not be in inputSchema.`);
     }
     const validateOwn = ajv.compile(tool.inputSchema);
 
@@ -105,6 +122,19 @@ export function buildConnectorTools(
           def.label,
           `"${tool.remote}" no longer accepts what I send: ${explain(validateRemote.errors)}`,
         );
+      }
+      // And every key about to be sent must be one the server NAMES (M20). The check above is
+      // only as strict as the server's schema, and recon found GitHub's sets no
+      // `additionalProperties` and its server silently ignores a key it does not know — so a
+      // renamed `body` would validate, be dropped, and create an issue with nothing in it. A
+      // schema with no `properties` at all names nothing, and is refused the same way.
+      const named = remote.inputSchema["properties"];
+      const unnamed =
+        typeof named === "object" && named !== null
+          ? Object.keys(final).find((key) => !Object.hasOwn(named, key))
+          : Object.keys(final)[0];
+      if (unnamed !== undefined) {
+        throw connectorError("drift", def.label, `"${tool.remote}" no longer takes "${unnamed}"`);
       }
       return final;
     };
@@ -155,14 +185,26 @@ export function buildConnectorTools(
         const text = flattenResult(result);
 
         if (result.isError) {
-          throw connectorError("tool-failed", def.label, clip(failureText(text)));
+          // A connector with its own wording never shows the server's (types.ts, `failure`).
+          if (tool.failure === undefined) {
+            throw connectorError("tool-failed", def.label, clip(failureText(text)));
+          }
+          const said = ownWords(() => tool.failure?.(text, input, settings) ?? null);
+          if (said.length === 0) {
+            // Not one the connector recognises, so the person is told only "<app> said no." —
+            // and without this line the server's reason would exist nowhere at all. CONSOLE
+            // ONLY: it is not in the error, so it cannot reach the screen, speech, the action
+            // log or a later chain step. Flattened to one line so it cannot forge another.
+            log(`${name} failed and I did not recognise why. ${def.label} said: ${forLog(text)}`);
+          }
+          throw connectorError("tool-failed", def.label, said);
         }
         if (text.trim().length === 0) {
           throw connectorError("bad-result", def.label, "it sent nothing back");
         }
         if (tool.format === undefined) return text;
         try {
-          return tool.format(text, input);
+          return tool.format(text, input, settings);
         } catch (error) {
           // The formatter's own words ("no `url`") — OURS, not the server's, so safe to show.
           const why = error instanceof Error ? error.message : String(error);
@@ -171,6 +213,23 @@ export function buildConnectorTools(
       },
     };
   });
+}
+
+// A connector's own sentence for a failure, or nothing. A `failure` hook that throws must not
+// turn "the server said no" into a crash, and must not fall back to the server's text either —
+// not showing that text is the reason the hook exists.
+function ownWords(explainFailure: () => string | null): string {
+  try {
+    return explainFailure() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function forLog(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length === 0) return "(nothing)";
+  return flat.length > MAX_LOGGED_FAILURE ? `${flat.slice(0, MAX_LOGGED_FAILURE)}…` : flat;
 }
 
 // The generic confirm text for a tool with no `describe` of its own: the question, then every

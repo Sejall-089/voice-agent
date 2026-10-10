@@ -357,8 +357,16 @@ describe("registry invariants", () => {
     // The three Linear tools join it in M19. `create_issue` is dangerous outright. The two
     // reads are `safe` in code but CAN be raised all the way by a server hint (core/mcp/tiers.ts),
     // and "can ever be" is still the question.
+    //
+    // The three GitHub tools join it in M20, for the same two reasons. Worth knowing which is
+    // which: GitHub's server does NOT hint that its write is destructive (recon), so
+    // `github__create_issue` is on this list only because its definition declares it —
+    // tests/mcpGithub.test.ts pins that against the server's real, silent hints.
     expect(gated.sort()).toEqual([
       "createEvent",
+      "github__create_issue",
+      "github__get_issue",
+      "github__list_issues",
       "linear__create_issue",
       "linear__get_issue",
       "linear__search_issues",
@@ -379,6 +387,8 @@ describe("registry invariants", () => {
 
     expect(eitherWay.map((tool) => tool.name).sort()).toEqual([
       "createEvent",
+      "github__get_issue",
+      "github__list_issues",
       "linear__get_issue",
       "linear__search_issues",
       "moveEvent",

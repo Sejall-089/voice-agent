@@ -24,8 +24,8 @@ import { createRunInstruction } from "./runInstruction.ts";
 import { createOnInstructionHotkey } from "./instructionHotkey.ts";
 import { Planner } from "../core/planner.ts";
 import { buildRegistry } from "../core/registry.ts";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { loadConnectorTools } from "../core/mcp/load.ts";
+import { bearerHttpTransport } from "../core/mcp/transport.ts";
 import { SdkMcpConnection } from "../core/mcp/SdkConnection.ts";
 import { createLLMClient } from "../core/llm/factory.ts";
 import { createDatabase } from "../core/memory/db.ts";
@@ -608,8 +608,8 @@ function createCalendar(): CalendarSurface | null {
 //
 // The key is read in composition and handed to the transport; /core never sees process.env, and
 // neither the key nor the Authorization header is ever logged (spec section 10). Everything
-// that decides anything is in core/mcp/ and tested there; this is the file read and the
-// transport, which is all that belongs in this file (CLAUDE.md).
+// that decides anything is in core/mcp/ and tested there - since M20 that includes the
+// transport itself (core/mcp/transport.ts). What is left here is the file read (CLAUDE.md).
 function createConnectorTools(): Tool[] {
   let configText: string | null = null;
   try {
@@ -621,14 +621,14 @@ function createConnectorTools(): Tool[] {
   const loaded = loadConnectorTools({
     configText,
     readKey: (keyName) => process.env[keyName],
+    // Console only. The one thing sent here is a server's text for a failure its connector did
+    // not recognise - never a key, and never anything the user is shown or told.
+    log: (line) => console.log(`[main] ${line}`),
     connect: (def, key) =>
       new SdkMcpConnection({
         app: def.label,
         keyName: def.keyName,
-        transport: () =>
-          new StreamableHTTPClientTransport(new URL(def.url), {
-            requestInit: { headers: { Authorization: `Bearer ${key}` } },
-          }),
+        transport: bearerHttpTransport(def, key),
       }),
   });
   for (const note of loaded.notes) console.log(`[main] ${note}`);

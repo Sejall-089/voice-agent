@@ -138,7 +138,8 @@ knows it's on Windows.
 - **Connectors (M19)** — the generic counterpart to the three surfaces above. Each surface knows
   one app and was a milestone; a connector is one adapter (`core/mcp/adapter.ts`) that knows *no*
   app, plus a small definition per app pinning which remote tools this build will call. Linear is
-  the first. What comes out of the adapter is an ordinary registry `Tool`, so the planner, the
+  the first; GitHub issues is the second (M20; its chain is not yet run live), added to find what the
+  adapter had assumed about Linear — see spec.md §6e, "The second connector". What comes out of the adapter is an ordinary registry `Tool`, so the planner, the
   gates and the chain machinery cannot tell a connector tool from a hand-built one — see §4f.
 - **LLM / Slack / Chrome / Calendar / UIA / OS** — rented reasoning, the external actions, and
   the things the shell's hands touch. UIA is the only one gated behind an explicit opt-in rather

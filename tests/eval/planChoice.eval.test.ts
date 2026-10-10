@@ -71,7 +71,10 @@ const connectors = loadConnectorTools({
         {
           enabled: true,
           tools: def.tools.map((tool) => tool.name),
-          settings: { defaultTeam: "Engineering" },
+          // Every setting any connector's tools require. Since M20 that includes GitHub's
+          // `owner` and `repo`: without them its three tools are left off the menu, and this
+          // eval would be measuring a menu the app no longer offers.
+          settings: { defaultTeam: "Engineering", owner: "acme", repo: "tracker" },
         },
       ]),
     ),
@@ -392,6 +395,7 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
       [
         "",
         "  PLAN CHOICE — what the real model actually answered",
+        `  connector tools on the menu: ${connectors.map((tool) => tool.name).join(", ")}`,
         ...results.map(
           (r) =>
             `  ${r.chosen === r.expected ? "ok      " : "MISMATCH"}  [${r.seen}] "${r.phrase}"\n            -> ${r.chosen}${r.note}`,

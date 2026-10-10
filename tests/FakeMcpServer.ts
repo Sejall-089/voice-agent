@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+  McpHarness,
+  failed,
+  ok,
+  type McpHarnessOptions,
+  type RemoteToolEntry,
+  type ToolResult,
+} from "./fakes/McpHarness.ts";
 import {
   BAD_KEY_MESSAGE,
   BAD_KEY_STATUS,
@@ -15,11 +15,9 @@ import {
 } from "./fixtures/linear/captured.ts";
 
 // A Linear-shaped MCP server that exists only in memory (M19) — the role FakeGmail, FakeNotion
-// and FakeCalendar play, with one difference that matters: THE PROTOCOL IS NOT FAKED. This is
-// the SDK's real `Server` on the SDK's real in-memory transport, talking to the real `Client`
-// inside `SdkMcpConnection`. Framing, capability negotiation, request ids, timeouts and error
-// codes are all the genuine article; only the thing with consequences — a real workspace — is
-// swapped out.
+// and FakeCalendar play. The protocol half is real and lives in fakes/McpHarness.ts (split out
+// in M20, when GitHub needed a fake of its own); what is here is LINEAR'S BEHAVIOUR and nothing
+// else.
 //
 // THE RULES BELOW ARE WRITTEN FROM THE RECON CAPTURES, NOT FROM THE ADAPTER (CLAUDE.md: "a fake
 // must never be more lenient than the real thing", and "write the fake's rules independently of
@@ -36,15 +34,6 @@ import {
 // What it does NOT model: search matching. Recon never established how `query` matches (one
 // probe, "a", matched everything), so `list_issues` returns every configured issue and records
 // the query it was sent. Inventing a matching rule here would be exactly M13's FakeCalendar bug.
-//
-// ASYNC, WITH A REAL DELAY WHEN ASKED (CLAUDE.md, M16.9): `delayMs` makes every tool call
-// genuinely take time, so an ordering test against this proves ordering and not call-sequence.
-
-interface RemoteToolEntry {
-  name: string;
-  inputSchema: { properties?: Record<string, unknown> };
-  [key: string]: unknown;
-}
 
 export const LINEAR_TOOLS = JSON.parse(
   readFileSync(new URL("./fixtures/linear/tools.json", import.meta.url), "utf8"),
@@ -59,97 +48,46 @@ export interface FakeIssue {
   url: string;
 }
 
-export interface FakeMcpServerOptions {
-  // What `tools/list` answers. Defaults to the captured Linear entries.
-  tools?: RemoteToolEntry[];
+export interface FakeMcpServerOptions extends McpHarnessOptions {
   issues?: FakeIssue[];
   // The teams that exist. A create naming any other is refused in Linear's words.
   teams?: string[];
-  // Every tool call waits this long before answering.
-  delayMs?: number;
-  // The named tool THROWS server-side (→ McpError -32603 at the client).
-  throwOn?: string;
-  // The named tool never answers at all (→ the client's own timeout).
-  hangOn?: string;
-  // The named tool answers "success" with this text instead of a real result — a server that
-  // changed its result shape, or exited 0 with nothing.
-  garble?: { tool: string; text: string };
-  // connect() is refused the way a bad key is: the REAL error type, code and message.
-  rejectKey?: boolean;
-  timeline?: string[];
 }
 
-export class FakeMcpServer {
-  public readonly calls: { name: string; arguments: Record<string, unknown> }[] = [];
+export class FakeMcpServer extends McpHarness {
   public readonly created: FakeIssue[] = [];
   public readonly updated: { id: string; arguments: Record<string, unknown> }[] = [];
-  public connections = 0;
-  public listCalls = 0;
+
+  protected readonly serverName = "Fake Linear MCP";
 
   private readonly issues: FakeIssue[];
   private readonly teams: string[];
-  private readonly servers: Server[] = [];
 
-  constructor(private readonly options: FakeMcpServerOptions = {}) {
+  constructor(options: FakeMcpServerOptions = {}) {
+    super(options);
     this.issues = [...(options.issues ?? [])];
     this.teams = options.teams ?? ["Engineering"];
   }
 
-  // Hand this to `SdkMcpConnection` as its `transport` option. A fresh linked pair — and a
-  // fresh Server on the far end — per connection attempt, exactly as a real reconnect would get.
-  readonly transport = (): Transport => {
-    if (this.options.rejectKey === true) {
-      const [client] = InMemoryTransport.createLinkedPair();
-      client.start = () =>
-        Promise.reject(new StreamableHTTPError(BAD_KEY_STATUS, BAD_KEY_MESSAGE));
-      return client;
-    }
-    this.connections += 1;
-    const [client, server] = InMemoryTransport.createLinkedPair();
-    void this.serve(server);
-    return client;
-  };
-
-  // Drop every live connection from the server's side, as a restart would.
-  async dropConnections(): Promise<void> {
-    await Promise.all(this.servers.splice(0).map((server) => server.close()));
+  protected capturedTools(): RemoteToolEntry[] {
+    return LINEAR_TOOLS;
   }
 
-  private async serve(transport: Transport): Promise<void> {
-    const server = new Server(
-      { name: "Fake Linear MCP", version: "0" },
-      { capabilities: { tools: {} } },
-    );
-    server.setRequestHandler(ListToolsRequestSchema, () => {
-      this.listCalls += 1;
-      return Promise.resolve({ tools: this.options.tools ?? LINEAR_TOOLS });
-    });
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const name = request.params.name;
-      const args = request.params.arguments ?? {};
-      this.calls.push({ name, arguments: args });
-      this.options.timeline?.push(`mcp:${name}`);
+  protected badKey(): { status: number; message: string } {
+    return { status: BAD_KEY_STATUS, message: BAD_KEY_MESSAGE };
+  }
 
-      if (this.options.hangOn === name) await new Promise(() => undefined);
-      if (this.options.delayMs !== undefined) {
-        await new Promise((resolve) => setTimeout(resolve, this.options.delayMs));
-      }
-      if (this.options.throwOn === name) throw new Error("upstream exploded");
-      if (this.options.garble?.tool === name) return ok(this.options.garble.text);
-
-      const unknown = this.unknownKey(name, args);
-      if (unknown !== null) {
-        return failed(
-          `Input validation error: Invalid arguments for tool ${name}: Unrecognized key: "${unknown}"`,
-        );
-      }
-      if (name === "save_issue") return this.saveIssue(args);
-      if (name === "list_issues") return this.listIssues();
-      if (name === "get_issue") return this.getIssue(args);
-      return failed(`Unknown tool: ${name}`);
-    });
-    this.servers.push(server);
-    await server.connect(transport);
+  protected handle(name: string, args: Record<string, unknown>): ToolResult {
+    const unknown = this.unknownKey(name, args);
+    if (unknown !== null) {
+      return failed(
+        `Input validation error: Invalid arguments for tool ${name}: Unrecognized key: "${unknown}"`,
+      );
+    }
+    if (name === "save_issue") return this.saveIssue(args);
+    if (name === "list_issues") return this.listIssues();
+    if (name === "get_issue") return this.getIssue(args);
+    return failed(`Unknown tool: ${name}`);
   }
 
   // Strictness taken from the SERVER's captured schema (additionalProperties: false).
@@ -230,21 +168,6 @@ export class FakeMcpServer {
       }),
     );
   }
-}
-
-interface ToolResult {
-  // The SDK's result type is an open record.
-  [key: string]: unknown;
-  content: { type: "text"; text: string }[];
-  isError?: boolean;
-}
-
-function ok(text: string): ToolResult {
-  return { content: [{ type: "text", text }] };
-}
-
-function failed(text: string): ToolResult {
-  return { content: [{ type: "text", text }], isError: true };
 }
 
 function slug(title: string): string {

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseConnectorsConfig, selectConnectors } from "../src/core/mcp/config.ts";
 import { linearConnector } from "../src/core/mcp/connectors/linear.ts";
+import { CONNECTORS } from "../src/core/mcp/load.ts";
 
 const ALL = JSON.stringify({
   connectors: {
@@ -140,19 +141,25 @@ describe("selectConnectors", () => {
 describe("the committed connectors.json", () => {
   const text = readFileSync(new URL("../connectors.json", import.meta.url), "utf8");
 
-  it("parses cleanly and enables Linear's three tools", () => {
+  // Against EVERY definition the build ships (M20 — this read `[linearConnector]` while there
+  // was only one, and would have called a second connector's entry unknown). An empty `notes`
+  // is the assertion that matters: every entry in the file has a definition, every tool it
+  // lists is pinned, and every setting a listed tool requires is present.
+  it("parses cleanly and enables each connector's three tools", () => {
     const parsed = parseConnectorsConfig(text);
     expect(parsed.notes).toEqual([]);
-    const selection = selectConnectors(parsed, [linearConnector], withKey);
+    const selection = selectConnectors(parsed, CONNECTORS, withKey);
     expect(selection.notes).toEqual([]);
-    expect(selection.selected[0]?.tools.map((tool) => tool.name)).toEqual([
-      "create_issue",
-      "search_issues",
-      "get_issue",
-    ]);
+    const enabled = Object.fromEntries(
+      selection.selected.map((entry) => [entry.def.id, entry.tools.map((tool) => tool.name)]),
+    );
+    expect(enabled).toEqual({
+      linear: ["create_issue", "search_issues", "get_issue"],
+      github: ["create_issue", "list_issues", "get_issue"],
+    });
   });
 
   it("holds no secret", () => {
-    expect(text).not.toMatch(/lin_api_|api[_-]?key|token|secret/i);
+    expect(text).not.toMatch(/lin_api_|github_pat_|ghp_|api[_-]?key|token|secret/i);
   });
 });

@@ -14,6 +14,7 @@
     "spotify:connect": "node scripts/spotify-connect.mjs",
     "spotify:recon": "node scripts/spotify-recon.mjs",
     "linear:recon": "node scripts/linear-recon.mjs",
+    "github:recon": "node scripts/github-recon.mjs",
     "eval": "vitest run tests/eval --reporter=verbose",
     "preeval": "npm run rebuild:node",
     "rebuild:node": "npm rebuild better-sqlite3",
