@@ -4,6 +4,7 @@ import { Planner } from "../src/core/planner.ts";
 import { buildRegistry } from "../src/core/registry.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { InMemoryChainState } from "../src/core/chainState.ts";
+import { renderRequest } from "../src/core/llm/prompt.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
 import { loadConnectorTools } from "../src/core/mcp/load.ts";
@@ -80,6 +81,8 @@ interface HarnessOptions {
   holdAsk?: boolean;
   confirms?: boolean[];
   facts?: Record<string, string>;
+  // Share one action log between two harnesses — two different model answers, one history.
+  log?: InMemoryActionLog;
 }
 
 function harness(choice: ToolChoice, options: HarnessOptions = {}) {
@@ -128,7 +131,7 @@ function harness(choice: ToolChoice, options: HarnessOptions = {}) {
     shell.actions.flatMap((action) => (action.kind === "notify" ? [action.payload] : []));
   const sender = new FakeSender();
   const gmail = new FakeGmail({ openEmail: BUG_EMAIL, timeline });
-  const log = new InMemoryActionLog();
+  const log = options.log ?? new InMemoryActionLog();
   const chain = new InMemoryChainState();
   const planner = new Planner(
     llm,
@@ -493,6 +496,132 @@ describe("what is NOT asked about", () => {
     expect(outcome.status).toBe("refused");
     expect(h.sender.calls).toEqual([]);
     expect(h.facts()).toEqual([]);
+  });
+});
+
+// LIVE BUG (M21). A question was dismissed; the run was logged as refused, in the pre-flight's
+// words: "... teach me with: remember the bugs channel is <what it is>." The NEXT planning call
+// was shown that row as "the previous turn" — and the real model, reading it, stopped writing
+// the plan and answered in prose with its own "what is the bugs channel?" (5 of 5 trials, and
+// reproduced in a real window by scripts/ask-recon/dismissed-then-again.ts). The planner showed
+// that prose as an ordinary result: something that looks like a question and is not one.
+//
+// So that one kind of row is not shown to the model. The row itself is untouched.
+//
+// "The model's input" is asserted on the RENDERED prompt — `renderRequest`, the function both
+// real clients build their request with — and not only on the object the fake was handed: what
+// has to be absent is the text, wherever it might come from.
+describe("a refused unknown reference is not shown to the next planning call", () => {
+  const promptFor = (h: ReturnType<typeof harness>, instruction: string): string =>
+    renderRequest(instruction, CONTEXT, h.llm.lastPreviousTurnOffered, 0, "UTC");
+
+  it.each([
+    { label: "the question was dismissed (Escape, timeout, or a busy bar)", first: [null] },
+    { label: "the question was answered badly, twice", first: ["the dev channel", ""] },
+  ])("after $label, the same instruction plans again and reaches the question", async ({ first }) => {
+    const h = harness(plan(BUG_CHAIN), { asks: [...first, "#bugs"] });
+
+    const refused = await h.planner.run(INSTRUCTION);
+    expect(refused.status).toBe("refused");
+    // THE LOG ROW IS UNCHANGED: still there, still the last row, still in these words.
+    expect(h.log.entries).toHaveLength(1);
+    expect(h.log.getLast()).toMatchObject({ status: "refused", tool: null, result: PLAIN_REFUSAL });
+
+    const again = await h.planner.run(INSTRUCTION);
+
+    // What the model was given for the second call: no previous turn, and none of its words.
+    expect(h.llm.lastPreviousTurnOffered).toBeNull();
+    const prompt = promptFor(h, INSTRUCTION);
+    expect(prompt).not.toContain("teach me with");
+    expect(prompt).not.toContain("don't know what that refers to");
+    expect(prompt).not.toContain("Previous turn");
+    expect(prompt).toContain(`Instruction: ${INSTRUCTION}`);
+    // And the plan it produced got as far as a real question, which this time was answered.
+    expect(h.shell.questions.at(-1)).toBe(QUESTION);
+    expect(h.shell.questions).toHaveLength(first.length + 1);
+    expect(again.status).toBe("ok");
+    expect(h.sender.calls[0]?.channel).toBe("#bugs");
+  });
+
+  it("hides it for any tool's unknown reference, not only a channel's", async () => {
+    // `openTarget` is never asked about, so this refusal involves no question at all — it is
+    // the same pre-flight sentence, and would steer the next call the same way.
+    const log = new InMemoryActionLog();
+    const first = harness(plan([step("openTarget", { target: "my upwork" }), step("summarize", {})]), { log });
+    await first.planner.run("open my upwork and summarize this");
+    expect(log.getLast()?.result).toContain('needs "my upwork"');
+
+    const second = harness(plan(BUG_CHAIN), { log, facts: { "bugs channel": "#bugs" } });
+    await second.planner.run(INSTRUCTION);
+
+    expect(second.llm.lastPreviousTurnOffered).toBeNull();
+  });
+
+  // EVERY OTHER TURN IS STILL SHOWN. Each case below leaves a different kind of last row and
+  // checks the next call is handed exactly that row, and that its words reach the prompt.
+  describe("and nothing else is hidden", () => {
+    const next = async (log: InMemoryActionLog): Promise<ReturnType<typeof harness>> => {
+      const h = harness(plan(BUG_CHAIN), { log, facts: { "bugs channel": "#bugs" } });
+      await h.planner.run(INSTRUCTION);
+      return h;
+    };
+
+    it("a plan refused for naming a tool that does not exist", async () => {
+      const log = new InMemoryActionLog();
+      await harness(plan([step("readEmail", {}), step("teleport", {})]), { log }).planner.run("read and teleport");
+      const row = log.getLast();
+      expect(row).toMatchObject({ status: "refused", tool: null });
+      expect(row?.result).toContain(`a tool I don't have ("teleport")`);
+
+      const h = await next(log);
+
+      expect(h.llm.lastPreviousTurnOffered).toBe(row);
+      expect(promptFor(h, INSTRUCTION)).toContain(`a tool I don't have`);
+    });
+
+    it("a plan refused for leaving the channel empty", async () => {
+      // Also a pre-flight refusal, and also about a reference argument — but there is no
+      // unknown reference in it, and no "teach me with". It stays.
+      const log = new InMemoryActionLog();
+      await harness(plan([step("summarize", {}), step("sendMessage", { channel: "", notes: "x" })]), { log }).planner.run("x");
+      const row = log.getLast();
+      expect(row?.result).toContain('left "channel" empty');
+
+      const h = await next(log);
+
+      expect(h.llm.lastPreviousTurnOffered).toBe(row);
+    });
+
+    it("a lone sendMessage refused by the tool itself, though it too says 'teach me with'", async () => {
+      // Deliberately still shown: the rule is about the PRE-FLIGHT's refusal of a plan. This
+      // one is a single tool's own refusal (it names the tool), and what the model makes of it
+      // is the prompt's business, not this filter's.
+      const log = new InMemoryActionLog();
+      await harness(
+        { kind: "tool", name: "sendMessage", input: { channel: "the bugs channel", notes: "hi" } },
+        { log },
+      ).planner.run("tell the bugs channel hi");
+      const row = log.getLast();
+      expect(row).toMatchObject({ status: "refused", tool: "sendMessage" });
+      expect(row?.result).toContain("teach me with");
+
+      const h = await next(log);
+
+      expect(h.llm.lastPreviousTurnOffered).toBe(row);
+      expect(promptFor(h, INSTRUCTION)).toContain("teach me with");
+    });
+
+    it("an ordinary successful turn", async () => {
+      const log = new InMemoryActionLog();
+      const first = harness(plan(BUG_CHAIN), { log, facts: { "bugs channel": "#bugs" } });
+      await first.planner.run(INSTRUCTION);
+      const row = log.getLast();
+      expect(row).toMatchObject({ status: "ok", tool: "sendMessage" });
+
+      const h = await next(log);
+
+      expect(h.llm.lastPreviousTurnOffered).toBe(row);
+    });
   });
 });
 

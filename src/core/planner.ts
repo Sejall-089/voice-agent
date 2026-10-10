@@ -17,6 +17,7 @@ import {
   MAX_QUESTIONS_PER_CHAIN,
   SAVED_HOLD_MS,
   canonicalToolName,
+  isUnknownReferenceRefusal,
   preflightReferences,
   previewHoldRemaining,
   previewPlan,
@@ -160,7 +161,15 @@ export class Planner {
     // 2. LLM picks a tool (or declines). The previous turn — the planner's one turn of
     //    state — goes along too, so a bare correction ("no, I meant...") has something to
     //    resolve against instead of routing on the current instruction alone.
-    const previousTurn = this.log.getLast();
+    //
+    //    ONE KIND OF TURN IS LEFT OUT: a plan the pre-flight refused for an unknown reference
+    //    (core/chain.ts, `isUnknownReferenceRefusal`). Its words — "teach me with: remember the
+    //    bugs channel is…" — made the model answer the NEXT instruction with a question of its
+    //    own in prose instead of a plan, so the user was shown something that looked like a
+    //    question and was not one. The row stays in the log; it is only not handed to the model.
+    //    Nothing is substituted for it: the turn before would be a staler context still.
+    const last = this.log.getLast();
+    const previousTurn = last !== null && isUnknownReferenceRefusal(last) ? null : last;
     const choice = await this.llm.chooseTool(
       instruction,
       context,

@@ -1050,6 +1050,19 @@ plan and a lone `sendMessage` are refused exactly as before, in the same words.
 Everything happens before the plan is previewed, before any dialog, and before `chain.begin()`:
 while the question is open it is `isAskPending()` that holds the hotkeys, not the chain.
 
+**The refusal is not shown to the next planning call (live fix, 2026-10-10).** The planner
+feeds the last action-log row to the model as "the previous turn". After an unanswered
+question that row was the pre-flight's refusal, and its words ("teach me with: remember the
+bugs channel is…") made the real model answer the *next* instruction in prose with a question
+of its own instead of writing the plan — 5 of 5 trials. The planner shows that prose as an
+ordinary result: it looks like a question and nothing is waiting on it, so the instruction
+hotkey (correctly) opens a fresh bar over it. That was reported live as "the hotkey dismissed
+the question"; the hotkey guard was not involved. So `decide` now leaves out a last row that
+`isUnknownReferenceRefusal` (`core/chain.ts`) recognises — refused, no tool, carrying the
+pre-flight's unknown-reference clause — and passes no previous turn instead. The log row itself
+is unchanged. Every other row is shown as before, **including a lone `sendMessage`'s own
+"teach me with" refusal**, which has a tool name and is a different row.
+
 Consequences worth knowing: answers already given are **kept** when the plan is then refused
 for a later reference (a three-channel plan saves two facts and refuses on the third); the save
 writes no action-log row of its own; and neither the question nor the "Saved" line is spoken.

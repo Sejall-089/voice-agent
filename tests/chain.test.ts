@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MAX_STEPS,
   MIN_PREVIEW_HOLD_MS,
+  isUnknownReferenceRefusal,
   preflightReferences,
   previewHoldRemaining,
   previewPlan,
@@ -470,6 +471,51 @@ describe("preflightReferences", () => {
     });
     // ...and the same tool WITHOUT the opt-out is refused, so the line above is the flag's doing.
     expect(preflightReferences(plan, [tool({})], NOTHING_KNOWN).ok).toBe(false);
+  });
+
+  // The recogniser the planner uses to keep one kind of row out of the next planning prompt.
+  // Checked against LITERAL rows — the sentences as they sit in a real action log — and not only
+  // against what the code under test writes, which would prove it agrees with itself.
+  describe("isUnknownReferenceRefusal", () => {
+    const row = (status: "refused" | "ok" | "error" | "no_tool" | "cancelled", tool: string | null, result: string | null) => ({
+      status,
+      tool,
+      result,
+    });
+    // Copied from the app's own log (row 406, 2026-10-10).
+    const LOGGED =
+      'Step 3 of my plan needs "the bugs channel", and I don\'t know what that refers to yet, so I ' +
+      "didn't start it — teach me with: remember the bugs channel is <what it is>.";
+
+    it("recognises the row a real log holds", () => {
+      expect(isUnknownReferenceRefusal(row("refused", null, LOGGED))).toBe(true);
+    });
+
+    it("recognises what the pre-flight writes today, for any tool and any step", () => {
+      for (const plan of [
+        [step("summarize"), send("the bugs channel")],
+        [step("openTarget", { target: "my upwork" }), step("summarize")],
+      ]) {
+        const check = preflightReferences(plan, REGISTRY, NOTHING_KNOWN);
+        expect(check.ok).toBe(false);
+        if (check.ok) return;
+        expect(isUnknownReferenceRefusal(row("refused", null, check.reason))).toBe(true);
+      }
+    });
+
+    it.each([
+      {
+        label: "a tool's own refusal, though it also says 'teach me with'",
+        entry: row("refused", "sendMessage", 'I don\'t know which channel "the bugs channel" means — teach me with: remember the bugs channel is #your-channel.'),
+      },
+      { label: "the same words on a turn that was not refused", entry: row("ok", null, LOGGED) },
+      { label: "a plan refused for an unknown tool", entry: row("refused", null, 'My plan for that used a tool I don\'t have ("teleport"), so I didn\'t start it.') },
+      { label: "a plan refused for an empty argument", entry: row("refused", null, 'Step 2 of my plan left "channel" empty, so I didn\'t start it.') },
+      { label: "a plan refused for being too long", entry: row("refused", null, "That works out as 4 steps, and I only run up to 3 in one go. Try it as separate instructions.") },
+      { label: "a miss, which has no result at all", entry: row("no_tool", null, null) },
+    ])("does not match $label", ({ entry }) => {
+      expect(isUnknownReferenceRefusal(entry)).toBe(false);
+    });
   });
 
   // `openTarget` declares two arguments and needs EITHER. The list is read as alternatives, or a

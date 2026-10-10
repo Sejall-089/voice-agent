@@ -1,6 +1,13 @@
 import { toSpokenLine } from "./speech.ts";
 import { checkReference } from "./memory/checkReference.ts";
-import type { Memory, PlannedStep, Tool, ToolInput, ToolSchema } from "./types.ts";
+import type {
+  ActionLogEntry,
+  Memory,
+  PlannedStep,
+  Tool,
+  ToolInput,
+  ToolSchema,
+} from "./types.ts";
 
 // The pure half of a chained run (M17): is this plan runnable, what does a step's arguments
 // actually resolve to, and what does the user get told about it.
@@ -238,13 +245,41 @@ export function preflightReferences(
     return {
       ok: false,
       reason:
-        `${where} needs "${unknown.said}", and I don't know what that refers to yet, so I ` +
+        `${where} needs "${unknown.said}", ${UNKNOWN_REFERENCE}, so I ` +
         `didn't start it — teach me with: remember ${unknown.said} is <what it is>.`,
       unknown: { step: index, ...unknown },
     };
   }
 
   return { ok: true };
+}
+
+// The clause that makes a pre-flight refusal an UNKNOWN-REFERENCE refusal. One constant, used to
+// write the sentence above and to recognise it below, so the two cannot drift apart.
+const UNKNOWN_REFERENCE = "and I don't know what that refers to yet";
+
+// Was this turn a plan the pre-flight refused because it named something memory could not place?
+//
+// The planner asks this about the last action-log row before showing it to the model as "the
+// previous turn" (core/planner.ts, `decide`), and leaves such a row out. Found live: shown
+// "... teach me with: remember the bugs channel is <what it is>", the model stopped writing the
+// plan and replied in prose with its own "what is the bugs channel?" — which the app displays as
+// a result, not as a question anything is waiting on.
+//
+// RECOGNISED BY ITS WORDS, because the row is all there is: the log is deliberately left exactly
+// as it was (it is the record of what the user was told), and it has no column for "why". Three
+// things must all hold — a refused turn, with no tool (a plan-level refusal, never one tool's
+// own), carrying the clause this file writes. A lone `sendMessage` refusing in its own words is
+// a different row and is still shown.
+export function isUnknownReferenceRefusal(
+  entry: Pick<ActionLogEntry, "status" | "tool" | "result">,
+): boolean {
+  return (
+    entry.status === "refused" &&
+    entry.tool === null &&
+    entry.result !== null &&
+    entry.result.includes(UNKNOWN_REFERENCE)
+  );
 }
 
 // Substitute the results of steps that have ALREADY RUN into this step's arguments.
