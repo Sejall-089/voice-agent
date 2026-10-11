@@ -16,7 +16,7 @@ describe("bot-mode pre-flight: a channel Slack does not have refuses the plan be
 
     expect(outcome.status).toBe("refused");
     expect(outcome.chain).toEqual({ completed: 0, total: 3 });
-    expect(outcome.result).toBe(notFound("#bug", " Did you mean #bug-reports?"));
+    expect(outcome.result).toBe(notFound("#bug", " Similar channels: #bug-reports."));
     h.nothingRan();
     expect(h.shell.questions).toEqual([]);
     expect(h.directory.calls).toEqual(["#bug"]);
@@ -47,7 +47,7 @@ describe("bot-mode pre-flight: a channel Slack does not have refuses the plan be
     const outcome = await h.planner.run(INSTRUCTION);
 
     expect(outcome.status).toBe("refused");
-    expect(outcome.result).toBe(notFound("#bug", " Did you mean #bug-reports?"));
+    expect(outcome.result).toBe(notFound("#bug", " Similar channels: #bug-reports."));
     h.nothingRan();
     expect(h.facts()).toEqual(before);
     expect(h.events.filter((e) => e.startsWith("write:"))).toEqual([]);

@@ -8,14 +8,14 @@ import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 // sender AND a channel directory — and the fact is about a channel: its value starts with "#", or
 // its subject ends in "channel" ("bugs channel"). Then it must be a channel Slack has, and what is
 // saved is Slack's own "#name". A channel Slack does not have, or a Slack that cannot be asked,
-// is refused with the same words a send uses, and NOTHING is written.
+// is refused in the send's wording (but ending "so nothing was saved."), and NOTHING is written.
 async function channelFactValue(subject: string, value: string, deps: ToolDeps): Promise<string> {
   const directory = deps.sender.mode === "bot" ? deps.channelDirectory : undefined;
   if (directory === undefined) return value;
   if (!value.startsWith("#") && !/\bchannel$/.test(subject)) return value;
 
   const lookup = await directory.resolve(value);
-  if (!lookup.ok) throw new UnresolvedReferenceError(slackRefusalText(lookup, value));
+  if (!lookup.ok) throw new UnresolvedReferenceError(slackRefusalText(lookup, value, "saved"));
   return `#${lookup.channel.name}`;
 }
 

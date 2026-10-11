@@ -218,9 +218,9 @@ function expectRefusedBeforeDialog(s: ReturnType<typeof session>, outcome: { sta
 describe("bot mode — a channel Slack does not have is refused before the dialog", () => {
   it.each([
     { typed: "#zzz", shown: "#zzz", tail: "" },
-    { typed: "soc", shown: "#soc", tail: " Did you mean #social?" },
-    { typed: "dev", shown: "#dev", tail: " Did you mean #dev-help or #devops?" },
-    { typed: "#hel", shown: "#hel", tail: " Did you mean #help, #help-desk, or #helpdesk?" },
+    { typed: "soc", shown: "#soc", tail: " Similar channels: #social." },
+    { typed: "dev", shown: "#dev", tail: " Similar channels: #dev-help, #devops." },
+    { typed: "#hel", shown: "#hel", tail: " Similar channels: #help, #help-desk, #helpdesk." },
   ])("$typed → '$tail'", async ({ typed, shown, tail }) => {
     const s = session();
     const outcome = await s.turn(send(typed), "send these");

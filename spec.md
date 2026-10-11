@@ -1210,12 +1210,13 @@ sent in the request body and still recorded in the action log, as what was asked
 `tests/sendMessage.test.ts` holds a guard that collects every confirm and result text and
 fails if the asked channel appears anywhere but that note.
 
-**Channel names only gain meaning with one webhook per channel, which is the next milestone.**
-Until then "the bugs channel" → `#bugs` is a fact the app can store and repeat but cannot act
-on: every message goes wherever the single webhook points. For that reason the pre-flight
-question ("which channel do you mean by…?") and the "Saved: …" line are **deliberately left
-as they are for now** — they are about the name, and will be about the destination once a name
-can select a webhook. A literal channel that does not exist is likewise still accepted.
+**In webhook mode, channel names still do not choose where a message goes.** "The bugs
+channel" → `#bugs` is a fact the app can store and repeat but cannot act on: every message goes
+wherever the single webhook points, the pre-flight question and the "Saved: …" line are about
+the name only, and a literal channel that does not exist is still accepted. All of this is
+unchanged by M22. **M22 made channel names real in a different way than first planned:** not
+one webhook per channel, but a Slack **bot token** (§6f). In bot mode the name you give is the
+channel posted to, checked against Slack's own channel list before any dialog.
 
 #### Asking instead of refusing (added 2026-10-10)
 
@@ -1244,6 +1245,12 @@ plan and a lone `sendMessage` are refused exactly as before, in the same words.
 - **The plan is not rewritten.** The step still says "the bugs channel"; `runStep` resolves it
   as it resolves anything. The model is not consulted again, and the answer comes only from
   `askUser` — never from the clipboard, an email or a step's result.
+- **Bot mode (M22) adds three things, and webhook mode none of them** (§6f): before asking,
+  `ReferenceQuestion.lookup` tries "the X channel" as `#X` in Slack, exactly, and uses it without
+  saving it; `accept(answer, reference, deps)` became async and returns `accepted` / `rejected`
+  (ask again, optionally with the tool's own wording) / `refused` (stop, save nothing), so an
+  answer is checked against Slack **before** `memory.write` and saved as Slack's own `#name`;
+  and once every reference is settled, each step's `Tool.preflight` runs on the plan as written.
 
 Everything happens before the plan is previewed, before any dialog, and before `chain.begin()`:
 while the question is open it is `isAskPending()` that holds the hotkeys, not the chain.
@@ -2326,6 +2333,168 @@ above — no editing, closing, commenting, labels, pull requests or files, and n
 
 ---
 
+## 6f. Slack bot-token mode (M22)
+
+**Why.** A Slack app webhook posts to the one channel it was created for, whatever channel it
+is handed. Through M21 the app could only be honest about that ("Send via your Slack webhook?
+(You asked for #help…)"); it could not send where it was asked. M22 adds a second way to post:
+a **bot token**. With it, the channel you name is the channel posted to — and a name Slack does
+not have is refused before anything is asked or sent.
+
+### Mode selection (`core/senders/slackMode.ts`)
+
+| `.env` | Mode | Startup line |
+|---|---|---|
+| `SLACK_BOT_TOKEN` set (non-blank) | **bot** | `[main] Slack: bot mode (SLACK_BOT_TOKEN)` |
+| both `SLACK_BOT_TOKEN` and `SLACK_WEBHOOK_URL` set | **bot wins**; the webhook is ignored | the bot line, plus a warning naming both variables |
+| `SLACK_BOT_TOKEN` present but blank | **webhook**, with a warning that it is being ignored | `[main] Slack: webhook mode (SLACK_WEBHOOK_URL)` |
+| only `SLACK_WEBHOOK_URL` | **webhook** | as above |
+| neither | webhook, able to send nothing | `[main] Slack: webhook mode - SLACK_WEBHOOK_URL not set, nothing can be sent` |
+
+The token is trimmed. Startup lines name variables only — never a value or any part of one.
+In code, **bot mode is `sender.mode === "bot"`** (with a channel directory present, for every
+check added in prompt 5); a sender that says nothing is a webhook, so every M21 path is reached
+exactly as before.
+
+**Webhook mode is M21, unchanged:** the webhook posts to its own channel, the dialog says "Send
+via your Slack webhook?" with the "(You asked for …)" note, a remembered or answered channel is
+saved as typed, a literal channel that does not exist is accepted, and nothing in this section
+runs. The M21 tests pin it, and `tests/m22.webhookUnchanged.test.ts` shows none of the bot-mode
+checks touching Slack in webhook mode.
+
+### Setup
+
+1. Create a Slack app with a **bot user**, and give it these bot token scopes:
+   `chat:write`, `chat:write.public`, `channels:read`, `groups:read`. Install it to the workspace.
+2. Put the bot token in `.env`, **quoted**: `SLACK_BOT_TOKEN="xoxb-…"`. (Quoting is not
+   required for a token, but it is the safe habit after M21's `#` lesson; the real `.env` parser
+   reads quoted, single-quoted and unquoted forms the same — `tests/slackMode.test.ts`.)
+3. Restart the app; the startup line says which mode it is in.
+4. To post in a **private** channel, add the bot to it (`/invite @your-bot`). Public channels
+   need nothing (`chat:write.public`).
+5. **If the token is ever exposed** — pasted, logged, committed, shown — revoke it by
+   reinstalling the app (or rotating the token) and put the new one in `.env`.
+
+### The channel directory (`core/senders/SlackChannelDirectory.ts`)
+
+Where channel IDs come from. `conversations.list` (public and private, unarchived, 200 a page,
+every page followed by `next_cursor`, capped at 50 pages), token in the `Authorization` header
+and nowhere else.
+
+- **Which channels:** every public channel, and **only the private channels the bot is a member
+  of** — measured by recon (`scripts/slack-recon.mjs`): with two private channels and the bot in
+  one, only that one was listed.
+- **Matching is exact**, after trimming, one leading `#`, lower-casing and NFC: `#Help`, `help`
+  and ` #help ` are one name. A typed Slack ID (`C0123…`) is just a name that matches nothing; an
+  ID only ever comes from the list. Two channels with one name are refused as ambiguous.
+- **Cache:** filled on first use and trusted for **10 minutes**; past that it is refreshed
+  before being answered from, and a failed refresh is a failure — nothing stale is served. A
+  name missing from a fresh list triggers **one refresh**, at most once every **30 seconds**, so
+  a channel created a minute ago works with no setup and a repeated typo does not hammer Slack.
+  Concurrent lookups share one request.
+- **Suggestions:** up to three real names — prefix, then substring, then within a small edit
+  distance — shown, never used.
+- **Failures are fixed codes**, never text: `no_token`, `auth`, `network`, `timeout`,
+  `rate_limited`, `slack_error`, `bad_response`, `ambiguous`. Recon found every Slack failure is
+  HTTP 200 with `ok: false` and a code (`invalid_auth`, `not_authed`). `resolve()` never rejects.
+  8s per request, 20s per refresh, no retries.
+
+### Sending (`core/senders/SlackBotSender.ts`)
+
+`chat.postMessage` with **the directory's ID, never a name** — the sender looks the name up again
+itself, so nothing the model wrote or an email contained is ever posted to directly. The text is
+**escaped** (`&`, `<`, `>` → `&amp;`, `&lt;`, `&gt;`) so a message cannot trigger `<!channel>`,
+`<!here>` or a mention, and Slack shows it as written. One request per send (10s timeout),
+**never retried**.
+
+**Every failure says whether it might be in the channel** (`SendResult.outcome`):
+
+- `not_sent` — Slack refused outright (`ok: false`: `channel_not_found`, `not_in_channel`,
+  `is_archived`, a token error, `ratelimited`, a text error) or HTTP 429. Safe to try again.
+- `maybe_sent` — a timeout, a network error, a 5xx or other non-2xx, or a 200 that cannot be
+  read. The user is told it **may have been sent** and to check Slack before trying again.
+
+Leak rule, for the directory and the sender alike: the token, URL, headers, response bodies and
+any error's `.message` never reach a result, an exception, a log line or the action log.
+(M22 also fixed the two older places that did put `error.message` into what the user sees —
+`SlackSender` and `GoogleCalendar`.)
+
+### What the user sees (`core/tools/sendMessage.ts`)
+
+All bot-mode refusals happen **before any dialog**, and are worded in one place
+(`slackRefusalText`):
+
+| Case | Text |
+|---|---|
+| Dialog | `Send to #help?` — Slack's own name for the channel, never the words typed — then the whole message after a blank line |
+| Sent | `Sent to #help.` then the message |
+| Refused by Slack | `Could not send to #help: <the sender's fixed reason>` |
+| Unknown outcome | `Could not confirm the message to #help. It may have been sent. Check Slack before trying again.` |
+| Not found | `I couldn't find a Slack channel called #hepl. I can post to public channels and to private channels the bot has been added to. Similar channels: #help.` |
+| Slack unreachable | `I couldn't reach Slack to check the channel, so nothing was sent.` (also: token rejected, rate limited, ambiguous) |
+| Bot mode, no directory | `I couldn't check Slack channels, so nothing was sent.` (fail closed) |
+
+Suggestions are a **statement**, not "Did you mean …?": a refusal ending in a question read as
+a question nothing was waiting for, to the user and to the model, which is shown the refusal as
+the previous turn (`tests/eval/unknownReference.eval.test.ts`, bot-mode case: 5/5 planned a
+send, none answered in prose). The only questions the app asks are its own (`askUser`) and the
+dialog titles.
+
+### Where a channel is checked
+
+- **Lone send:** in `prepare`, before the formatter is paid for; again in the dialog and the
+  handler (the cache makes repeats cheap).
+- **Chain:** in the **pre-flight**, before step 1 (`Tool.preflight`, run inside
+  `settleReferences`, on the plan as written). A channel Slack does not have, or a Slack that
+  cannot be asked, refuses the **whole plan** — no email read, no issue created. A channel taken
+  from an earlier step (`{stepN}`, anywhere in the channel) is refused outright: "In bot mode I
+  need you to name the Slack channel yourself, not take it from an earlier step, so nothing was
+  done." The placeholder is visible only there; by the time the step runs it has been filled in.
+- **"the help channel":** memory first, always. On a memory **miss**, a leading the/my/our and a
+  trailing "channel" are dropped and Slack is asked once for an **exact** match. Found: used —
+  the dialog still names it — and **never saved**. Not found: exactly what M21 did (the lone
+  send's "teach me" refusal; the chain's question). A near match is never taken.
+- **A remembered channel** is checked in Slack every time it is used; one Slack no longer has is
+  refused with similar channels, and is not forgotten.
+- **The answer to "which channel do you mean?"** is checked in Slack before it is saved, and
+  saved as Slack's own `#name`. Not found: asked again with similar channels, within the same
+  budget of two questions; unreachable: the plan is refused and nothing is saved.
+- **`remember`:** a fact whose value starts with `#`, or whose subject ends in "channel", is
+  checked in Slack and saved as `#name`; not found or unreachable refuses and writes nothing
+  (the unreachable texts end "so nothing was saved."). Other facts are untouched.
+
+### Known limits (M22)
+
+- **Private channels the bot has not been added to are refused as not found** (confirmed by
+  recon). The refusal says so: "…and to private channels the bot has been added to."
+- **A channel deleted and recreated with the same name while a dialog is open could receive the
+  message.** The handler re-checks the channel by NAME after the dialog; the ID approved is not
+  carried to the send.
+- **"our help channel" is treated as a literal name**, not a phrase: only "my …" and "the …" are
+  references (`isVagueReference`, unchanged), so it is looked up as typed and not found.
+- **Renamed channels are refused**, with similar channels. Names are stored (memory holds
+  `#name`) and resolved to an ID at send time.
+- **The webhook fetch has no timeout** (webhook mode only).
+- **A failure after an irreversible step can still orphan an issue.** A bot-mode channel is now
+  checked before step 1, but the post can still fail or time out at the send step, after the
+  issue exists.
+- **A timeout or network error on the post is reported as "may have been sent"** — including
+  when offline with a warm cache, where nothing can actually have been sent.
+- **The 429 and 500 shapes were never captured live**; the fakes use the documented shapes.
+- **Model prose that looks like a question can still confuse the next turn** in rare cases;
+  the "Similar channels" wording removes one trigger, not every one.
+- **In a plan, bot mode refuses `sendMessage` only for a `{stepN}` channel.** A literal or
+  remembered channel in a plan sends, after the pre-flight has checked it.
+
+### Tests and evidence
+
+Recon: `scripts/slack-recon.mjs` (read-only: `auth.test`, `conversations.list`; writes no
+files). Fakes: `tests/fakeSlackFetch.ts` (scripted Slack, including a network error that quotes
+the token and URL), `tests/FakeChannelDirectory.ts` (independent matching, async, checked
+against the real class). Mutation passes were run on the directory (prompt 3), the sender and
+mode selection (prompt 4) and the pre-flight / ask / remember logic (prompt 5); every survivor
+got a test that kills it. **Not yet run live** — `docs/m22-live-checklist.md`.
+
 ## 7. Memory engine (core/memory/)
 
 Local SQLite via better-sqlite3. This is the v0 stand-in for / seed of the personal
@@ -2862,6 +3031,7 @@ Post-v0:
         milestone ("B"). Today `#help` exists in Slack, "the bugs channel" can be taught as
         `#help`, and the message still goes to `#social`, because one webhook posts to one
         channel. The texts are now honest about that; the behaviour is unchanged.
+        *(Addressed by M22 — as a bot token, not one webhook per channel. See §6f.)*
       - **A prose reply from the model can still look like a question nothing is waiting
         on.** Fix 1 removes one trigger and the prompt rule a second; a prose reply is still
         displayed as an ordinary result.
@@ -2878,6 +3048,25 @@ Post-v0:
 
       **What was learned** is in `CLAUDE.md` ("M21"): seven rules, each from one of the
       findings above.
+- [ ] **M22 — Slack bot-token mode: a message goes to the channel you name, and a new channel
+      needs no setup.** **Code-complete; NOT run live** — `docs/m22-live-checklist.md`. 2112
+      tests green, 75 skipped (the opt-in real-model evals).
+
+      **What changed.** With `SLACK_BOT_TOKEN` set, the app posts with a bot token instead of
+      the webhook, to the channel ID Slack's own channel list gives for the name asked for. A
+      name Slack does not have is refused before any dialog, with similar channels; a Slack
+      that cannot be asked refuses rather than guesses; a chain is checked before step 1, and a
+      channel taken from an earlier step is refused there. "the help channel" finds `#help` in
+      Slack on a memory miss without saving it; answers and `remember` channel facts are checked
+      in Slack and saved as `#name`. Every failure of a post says whether it may have gone
+      through, and a post is never retried. Webhook mode is M21, unchanged. Full description,
+      setup and known limits: **§6f**.
+
+      **How it was built** (six prompts): recon (`scripts/slack-recon.mjs`, read-only) before
+      any fixture; the directory and a scripted Slack; the bot sender, mode selection and a fix
+      for two old places that put `error.message` in front of the user; bot-mode wording in
+      `sendMessage`; the pre-flight, ask flow, `remember` and "the X channel"; then wording and
+      docs. A mutation pass after each code prompt; every surviving mutation got a test.
 
 **v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
@@ -3437,13 +3626,13 @@ of it. None of it is started.
   placeholder (unknowable until that step runs); a LITERAL channel that does not exist
   (`#typo` — there is no list of real channels, and a webhook may ignore `channel` anyway);
   and any tool that does not declare `referenceArgs`.
-- **M22 (planned): one Slack webhook per channel. NOT DONE.** So that a channel name really
-  decides where a message goes, and a typo is refused for real. Today one webhook posts to one
-  channel whatever channel is named (M21: `#help` was answered, the message landed in
-  `#social`), "known channel" means only "resolves in memory or is a literal", and `#typo` is
-  accepted and remembered as typed. With a webhook per channel the set of real channels is the
-  set of configured webhooks: a name with no webhook can be refused before anything is sent,
-  and the confirm can name the destination without the "(You asked for…)" note.
+- **M22: a channel name decides where a message goes — BUILT, as a Slack bot token rather than
+  one webhook per channel; NOT YET RUN LIVE.** In bot mode the channel named is the channel
+  posted to, checked against Slack's own channel list (public channels, and private ones the
+  bot is in) before any dialog; `#typo` is refused with similar channels, and an answer or a
+  `remember` is checked and saved as Slack's `#name`. Webhook mode is unchanged: one webhook
+  still posts to one channel whatever is named. See §6f; live checklist
+  `docs/m22-live-checklist.md`.
 - **A "forget this fact" command. NOT DONE.** The app can remember and correct a fact but
   cannot drop one. The M21 live pass needed "the bugs channel" forgotten several times, and it
   was done by hand each time — deactivating the row in `memory.db`. Saying "forget the bugs

@@ -50,7 +50,7 @@ describe("bot-mode ask flow: an answer Slack does not have", () => {
 
     expect(h.shell.questions).toEqual([
       QUESTION,
-      `${notFound("#bug", " Did you mean #bug-reports?")} Which channel do you mean by 'the bugs channel'?`,
+      `${notFound("#bug", " Similar channels: #bug-reports.")} Which channel do you mean by 'the bugs channel'?`,
     ]);
     expect(outcome.status).toBe("ok");
     expect(h.facts()).toEqual([{ subject: "bugs channel", value: "#bug-reports", active: 1 }]);

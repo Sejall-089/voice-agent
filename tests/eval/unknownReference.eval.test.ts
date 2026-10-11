@@ -43,7 +43,7 @@ import type { ActionLogEntry, CapturedContext, ToolChoice } from "../../src/core
 //                     fits…"). One of them names "my meeting" — a "my…" phrase — on purpose:
 //                     the rule is about what a NAME means, never about a detail that is missing.
 //
-// COST: 6 cases x TRIALS (default 5) = 30 `chooseTool` calls.
+// COST: 7 cases x TRIALS (default 5) = 35 `chooseTool` calls.
 //
 // MEASURED 2026-10-10, LLM_PROVIDER=openai, 5 trials each (the count is trials that gave the
 // expected answer). "Before" is the prompt without the rule, same cases, same day:
@@ -106,6 +106,19 @@ const TOOL_REFUSAL: ActionLogEntry = {
   status: "refused",
 };
 
+// M22 prompt 6: the row bot mode leaves when a channel is not in Slack — the exact text
+// `slackRefusalText` builds (tests/m22.texts.test.ts pins it).
+const BOT_NOT_FOUND_REFUSAL: ActionLogEntry = {
+  ts: "2026-10-11T10:00:00.000Z",
+  instruction: "tell #bug the deploy is done",
+  tool: "sendMessage",
+  arguments: { channel: "#bug", notes: "the deploy is done" },
+  result:
+    "I couldn't find a Slack channel called #bug. I can post to public channels and to private " +
+    "channels the bot has been added to. Similar channels: #bug-reports.",
+  status: "refused",
+};
+
 type Verdict = { ok: boolean; saw: string };
 
 const describeChoice = (choice: ToolChoice): string => {
@@ -131,7 +144,7 @@ const asks = (choice: ToolChoice): boolean =>
   choice.kind === "none" && choice.text !== null && choice.text.includes("?");
 
 interface Case {
-  group: "the rule" | "no regression" | "still asks";
+  group: "the rule" | "no regression" | "still asks" | "bot mode";
   name: string;
   instruction: string;
   context: CapturedContext;
@@ -198,6 +211,20 @@ const CASES: Case[] = [
     previous: null,
     expected: "a clarifying question in prose (when / what)",
     passes: asks,
+  },
+  // M22 prompt 6. Bot mode's not-found refusal names similar channels as a STATEMENT ("Similar
+  // channels: #bug-reports.") rather than "Did you mean …?", so that, shown as the previous turn,
+  // it does not read as a question waiting for an answer. Passing means the next instruction is
+  // planned as a send — not answered in prose about which channel was meant.
+  // Measured 2026-10-11, LLM_PROVIDER=openai, 5 trials: 5/5, each `sendMessage` to "the bugs channel".
+  {
+    group: "bot mode",
+    name: "lone send, with the bot-mode 'Similar channels' refusal as the previous turn",
+    instruction: "tell the bugs channel the deploy is done",
+    context: NOTHING,
+    previous: BOT_NOT_FOUND_REFUSAL,
+    expected: "sendMessage (a tool call, not prose asking which channel was meant)",
+    passes: (choice) => choice.kind === "tool" && choice.name === "sendMessage",
   },
 ];
 

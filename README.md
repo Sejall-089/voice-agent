@@ -490,7 +490,8 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `LLM_PROVIDER` | Which client `createLLMClient()` builds — `anthropic` or `openai`. Required; an unset or unrecognized value fails loudly at startup rather than guessing. |
 | `ANTHROPIC_API_KEY` | Only if `LLM_PROVIDER=anthropic` |
 | `OPENAI_API_KEY` | Only if `LLM_PROVIDER=openai` |
-| `SLACK_WEBHOOK_URL` | Task 5 only (`sendMessage`) |
+| `SLACK_BOT_TOKEN` | Optional (M22). A Slack **bot token**, written with quotes: `SLACK_BOT_TOKEN="xoxb-…"`. When set, messages go to **the channel you name** (bot mode) and the webhook below is ignored. See "Setting up Slack" below. A **secret**: never logged, never in an error. |
+| `SLACK_WEBHOOK_URL` | Task 5 (`sendMessage`) in **webhook mode** — when `SLACK_BOT_TOKEN` is not set |
 | `SLACK_WEBHOOK_CHANNEL` | Optional. The channel that webhook was created for, written **with quotes**: `SLACK_WEBHOOK_CHANNEL="#social"`. Unquoted, a value starting with `#` is read by `.env` as a comment and becomes empty; the app logs a warning at startup when the variable is present but blank. A Slack app webhook posts to that one channel **whatever channel you name**, so this is only a label: with it the confirm and result say "Send to #social via your Slack webhook?", without it "Send via your Slack webhook?". The channel you asked for is shown as a note, never as the destination. |
 | `WHISPER_EXE_PATH` · `WHISPER_MODEL_PATH` · `WHISPER_LANGUAGE` | Voice **and** dictation (M12). Optional — leave them blank and neither the bar's microphone nor the dictation hotkey ever activate; typed commands work exactly as before. |
 | `HOTKEY` | Optional. Pins the instruction-bar combo instead of letting the app pick the first free one. |
@@ -504,13 +505,69 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
   of a comment, so `SLACK_WEBHOOK_CHANNEL=#social` is an *empty* value. Write
   `SLACK_WEBHOOK_CHANNEL="#social"`. The app warns at startup if that variable is present but
   blank.
-- **The Slack channel you name is not where a message goes.** A Slack app webhook posts to the
-  one channel it was created for. `SLACK_WEBHOOK_CHANNEL` only tells the app what to *call*
-  that channel, so its dialog can say "Send to #social via your Slack webhook?". Sending to a
-  channel by name needs one webhook per channel, which isn't built yet.
+- **With a webhook, the Slack channel you name is not where a message goes.** A Slack app
+  webhook posts to the one channel it was created for. `SLACK_WEBHOOK_CHANNEL` only tells the
+  app what to *call* that channel, so its dialog can say "Send to #social via your Slack
+  webhook?". To send to a channel **by name**, use a bot token instead (M22, below).
 
 Restart after changing `.env`, and after pulling new code: the main process is built once at
 startup.
+
+### Setting up Slack (bot token — optional, M22)
+
+Without this, Slack works as before through `SLACK_WEBHOOK_URL`: one webhook, one channel. With
+a bot token, "send these notes to #help" posts in `#help`, and a channel created five minutes
+ago works with no setup.
+
+1. Create a Slack app with a bot user. Bot token scopes: `chat:write`, `chat:write.public`,
+   `channels:read`, `groups:read`. Install it to your workspace.
+2. Put the token in `.env`, quoted: `SLACK_BOT_TOKEN="xoxb-…"`. Restart. The console says
+   `[main] Slack: bot mode (SLACK_BOT_TOKEN)` — and never prints the token.
+3. Private channels: add the bot (`/invite @your-bot`). Public ones need nothing.
+4. **If the token is ever exposed** — pasted somewhere, shown on screen, committed — reinstall
+   the app (or rotate the token) and put the new one in `.env`.
+
+If both `SLACK_BOT_TOKEN` and `SLACK_WEBHOOK_URL` are set, the bot wins and the app says so at
+startup. A `SLACK_BOT_TOKEN=` line with nothing after it falls back to the webhook, with a
+warning.
+
+**What bot mode does:**
+
+- **The dialog names the real channel** — "Send to #help?", in Slack's own spelling of the
+  name, whatever you typed (`HELP`, `#help`, ` help `).
+- **A channel Slack doesn't have is refused before any dialog**: "I couldn't find a Slack
+  channel called #hepl. I can post to public channels and to private channels the bot has been
+  added to. Similar channels: #help." Nothing is formatted, asked or sent.
+- **If Slack can't be reached, nothing is sent** — it refuses rather than guesses.
+- **"the help channel"** works with no setup when Slack has a channel called exactly `help` and
+  you haven't taught the app something else. It isn't saved; a remembered fact always wins.
+- **`remember the bugs channel is #help`** checks `#help` exists and saves it as Slack names it;
+  a channel Slack doesn't have is refused and nothing is saved. The "which channel do you mean?"
+  question checks your answer the same way.
+- **In a chain**, the channel is checked before step 1, so a bad channel never leaves an issue
+  filed with nobody told. A channel taken from an earlier step's result (an email's words, say)
+  is refused outright: name the channel yourself.
+- **The message is sent as plain text**: `<!channel>`, `<!here>` and `@` mentions in it ping
+  nobody.
+- **A post is never retried.** If Slack says no, you're told why and nothing was posted. If the
+  answer never comes (a timeout, a dropped connection), you're told it **may have been sent** —
+  check Slack before trying again.
+
+**Known limits** (full list in `spec.md` §6f):
+
+- Private channels the bot hasn't been added to are refused as not found.
+- A channel deleted and recreated with the same name while the dialog is open could receive the
+  message (the send re-checks the name, not the ID you approved).
+- "our help channel" is treated as a channel literally called that — only "my …" and "the …" are
+  phrases.
+- A renamed channel is refused, with similar channels: names are stored, IDs looked up at send
+  time.
+- A failure at the send step of a chain can still leave an issue filed with nobody told — the
+  channel is checked first, but the post itself can still fail or time out.
+- A timeout or network error on the post is reported as "may have been sent", even when you're
+  offline and it can't have been.
+- The webhook (webhook mode) has no timeout.
+- Not yet run live against a real workspace end to end: `docs/m22-live-checklist.md`.
 
 ### Setting up the Gmail reply tools (optional)
 
@@ -777,7 +834,8 @@ npx vite-node scripts/linear-live-check.ts    # this app's own adapter, search a
 
 The bug-report chain also needs the Gmail tools (`CHROME_DEBUG_URL`) and `SLACK_WEBHOOK_URL`.
 Point the webhook at a **test channel** the first time. A webhook posts to the one channel it
-was created for, so "tell the team" means that channel — it can't DM a person.
+was created for, so "tell the team" means that channel — it can't DM a person. (With a bot
+token, M22, name a test channel instead: the message goes to the channel you name.)
 
 ## Watching the memory story
 
@@ -808,6 +866,12 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M22 (Slack bot-token mode) is code-complete and NOT run live yet.** Messages go to the
+channel you name, checked against Slack's own channel list before any dialog; webhook mode is
+unchanged. Tested headless against a scripted Slack whose shapes come from a read-only recon of
+the real API, with a mutation pass on each layer. What a person still has to watch is in
+`docs/m22-live-checklist.md`; the design and its known limits are in `spec.md` §6f.
 
 **M20 (a second connector, GitHub issues) is ticked after a partial live pass (10 Oct 2026).**
 A person saw the three tools work, including one real create; the form handoff the server's

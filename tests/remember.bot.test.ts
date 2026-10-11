@@ -41,7 +41,7 @@ describe("bot-mode remember: channel facts are checked and canonical", () => {
     const outcome = await h.planner.run("remember the bugs channel is #bug");
 
     expect(outcome.status).toBe("refused");
-    expect(h.shell.results).toEqual([notFound("#bug", " Did you mean #bug-reports?")]);
+    expect(h.shell.results).toEqual([notFound("#bug", " Similar channels: #bug-reports.")]);
     expect(h.facts()).toEqual([]);
     expect(h.events.filter((e) => e.startsWith("write:"))).toEqual([]);
   });
@@ -52,7 +52,8 @@ describe("bot-mode remember: channel facts are checked and canonical", () => {
       const h = harness(remember("team", "#help"), { failOn: { 0: failure } });
       const outcome = await h.planner.run("remember the team is #help");
       expect(outcome.status).toBe("refused");
-      expect(h.shell.results).toEqual([UNAVAILABLE[failure]]);
+      // remember's refusals say what did not happen to a FACT (prompt 6): "saved", not "sent".
+      expect(h.shell.results).toEqual([UNAVAILABLE[failure].replace(/so nothing was sent\.$/, "so nothing was saved.")]);
       expect(h.facts()).toEqual([]);
     },
   );

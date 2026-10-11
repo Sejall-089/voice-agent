@@ -195,40 +195,47 @@ function hashed(channel: string): string {
   return `#${trimmed.startsWith("#") ? trimmed.slice(1) : trimmed}`;
 }
 
-function didYouMean(suggestions: readonly string[]): string {
+// The closest real names, as a STATEMENT, not a question (M22 prompt 6). A refusal ending in
+// "Did you mean …?" read as a question waiting for an answer — to the user, and to the model, which
+// is shown the refusal as the previous turn — when nothing was waiting. Only the app's own
+// question (`askUser`) may ask anything.
+function similarChannels(suggestions: readonly string[]): string {
   const names = suggestions.slice(0, 3).map((name) => `#${name}`);
-  if (names.length === 0) return "";
-  if (names.length === 1) return ` Did you mean ${names[0]}?`;
-  if (names.length === 2) return ` Did you mean ${names[0]} or ${names[1]}?`;
-  return ` Did you mean ${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}?`;
+  return names.length === 0 ? "" : ` Similar channels: ${names.join(", ")}.`;
 }
 
 // THE ONE PLACE these refusals are worded (M22), for every caller: a send's checks, a chain's
 // pre-flight, the answer to "which channel do you mean?", and `remember`. `typed` is the channel as
-// it was given; the lookup is the directory's answer for it.
+// it was given; the lookup is the directory's answer for it. `nothing` is what did not happen:
+// "sent" for a send (the default, and every send path's words), "saved" for `remember`.
 //
 // One fixed sentence per outcome. Nothing Slack or an HTTP client said reaches it — the directory
 // hands over a code and names, never text.
-export function slackRefusalText(lookup: Exclude<ChannelLookup, { ok: true }>, typed: string): string {
+export function slackRefusalText(
+  lookup: Exclude<ChannelLookup, { ok: true }>,
+  typed: string,
+  nothing: "sent" | "saved" = "sent",
+): string {
   if (lookup.reason === "not_found") {
     return (
       `I couldn't find a Slack channel called ${hashed(typed)}. I can post to public channels and ` +
-      `to private channels the bot has been added to.${didYouMean(lookup.suggestions)}`
+      `to private channels the bot has been added to.${similarChannels(lookup.suggestions)}`
     );
   }
+  const tail = `so nothing was ${nothing}.`;
   switch (lookup.failure) {
     case "no_token":
     case "auth":
-      return "Slack rejected the bot token, so nothing was sent.";
+      return `Slack rejected the bot token, ${tail}`;
     case "network":
     case "timeout":
     case "slack_error":
     case "bad_response":
-      return "I couldn't reach Slack to check the channel, so nothing was sent.";
+      return `I couldn't reach Slack to check the channel, ${tail}`;
     case "rate_limited":
-      return "Slack is rate limiting me, so nothing was sent.";
+      return `Slack is rate limiting me, ${tail}`;
     case "ambiguous":
-      return `More than one Slack channel is called ${hashed(typed)}, so nothing was sent.`;
+      return `More than one Slack channel is called ${hashed(typed)}, ${tail}`;
   }
 }
 
