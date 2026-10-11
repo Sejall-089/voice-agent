@@ -111,6 +111,54 @@ export interface MessageSender {
   readonly postsTo?: string | null;
 }
 
+// --- Which Slack channels exist (M22), behind an interface like MessageSender ---
+
+// A Slack conversation ID ("C0123456789"), as Slack's own channel list reported it.
+//
+// BRANDED, for the reason `ScreenRect` is (below): a channel NAME and a channel ID are both
+// strings, and the expected bug of this milestone is passing one where the other belongs — a
+// name the model wrote reaching the send call as if it were an ID. The phantom field cannot be
+// produced by a literal, so the only way to hold a `ChannelId` is to have been handed one by a
+// `ChannelDirectory`, which takes it from the list and never from its input.
+declare const CHANNEL_ID_BRAND: unique symbol;
+
+export type ChannelId = string & { readonly [CHANNEL_ID_BRAND]: "ChannelId" };
+
+export interface ChannelInfo {
+  id: ChannelId;
+  // Slack's own name for it, without the "#": what the user is shown.
+  name: string;
+  isPrivate: boolean;
+}
+
+// Why the directory could not answer. A FIXED SET OF CODES, never free text: a failure here is
+// worded by whoever shows it, and nothing an HTTP client or Slack wrote can ride along — an
+// error message is allowed to quote the request it failed to send, token included.
+export type DirectoryFailure =
+  | "no_token" // no bot token configured; nothing was asked
+  | "auth" // Slack rejected the token
+  | "network" // the request did not get an answer: DNS, connection, TLS
+  | "timeout" // a request, or the whole refresh, ran out of time
+  | "rate_limited"
+  | "slack_error" // Slack answered with a failure this code does not single out
+  | "bad_response" // an answer that could not be read, or a list that never ended
+  | "ambiguous"; // two channels share the name asked for; neither is picked
+
+export type ChannelLookup =
+  | { ok: true; channel: ChannelInfo }
+  // Slack answered and has no channel by that name. `suggestions` are NAMES, at most three,
+  // never IDs.
+  | { ok: false; reason: "not_found"; suggestions: string[] }
+  // The question could not be answered. Never "not found": not knowing is not the same fact.
+  | { ok: false; reason: "unavailable"; failure: DirectoryFailure };
+
+export interface ChannelDirectory {
+  // The channel this name means, exactly — "#help", "help" and "HELP" are one name. NEVER
+  // REJECTS: every failure is a returned `unavailable`, so a caller cannot mistake an exception
+  // for an answer or let one escape with a message nobody vetted.
+  resolve(input: string): Promise<ChannelLookup>;
+}
+
 // --- Speech to text, behind an interface like LLMClient / MessageSender (M7) ---
 
 // A captured recording, already in the one format the transcriber wants: 16 kHz mono
