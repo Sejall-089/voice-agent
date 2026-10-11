@@ -39,6 +39,7 @@ import type {
   ActionStatus,
   CalendarSurface,
   CapturedContext,
+  ChannelDirectory,
   GmailSurface,
   LLMClient,
   Memory,
@@ -131,6 +132,10 @@ export class Planner {
     // planner and to both guards, which is the only way a handler outside this class can know
     // that a `run()` is partway through a sequence. See core/chainState.ts.
     private readonly chain: ChainState = new InMemoryChainState(),
+    // M22. Slack's channel list, in bot mode only — main.ts passes it when SLACK_BOT_TOKEN is set,
+    // and nothing otherwise. Handed to tools as `channelDirectory` in both ToolDeps and
+    // PrepareDeps, and ONLY when present: a planner built without it hands out neither key.
+    private readonly channelDirectory?: ChannelDirectory,
   ) {}
 
   async run(instruction: string): Promise<PlannerOutcome> {
@@ -274,6 +279,7 @@ export class Planner {
       sleep: this.sleep,
       tier: null,
       chained: step.chained,
+      ...(this.channelDirectory === undefined ? {} : { channelDirectory: this.channelDirectory }),
     };
 
     // 5a. Let the tool settle what this call will actually do (M21, `Tool.prepare`).
@@ -300,6 +306,9 @@ export class Planner {
         llm: this.llm,
         memory: { resolve: (reference) => this.memory.resolve(reference) },
         chained: step.chained,
+        // A lookup and nothing more (see PrepareDeps). Absent outside bot mode, so this object's
+        // keys are exactly what they were for every install without a bot token.
+        ...(this.channelDirectory === undefined ? {} : { channelDirectory: this.channelDirectory }),
       };
       try {
         args = await tool.prepare(resolved, preparing);

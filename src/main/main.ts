@@ -389,6 +389,9 @@ app.whenReady().then(() => {
     chooser ?? new UnavailableChooser(),
     undefined, // sleep — the real clock; only tests need to skip the settle delays
     chain,
+    // M22. Bot mode only: the same directory the bot sender uses, so the check before a dialog
+    // and the send read one cached list. Webhook mode passes nothing, as before.
+    slackDirectory ?? undefined,
   );
 
   // The speech queue, wired both ways: the session plays THROUGH the shell, and the shell

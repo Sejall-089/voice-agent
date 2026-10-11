@@ -2,6 +2,8 @@ import { UnresolvedReferenceError, UserFixableError } from "../errors.ts";
 import { checkReference } from "../memory/checkReference.ts";
 import type {
   CapturedContext,
+  ChannelDirectory,
+  DirectoryFailure,
   Memory,
   PrepareDeps,
   Tool,
@@ -160,6 +162,113 @@ function postsTo(deps: ToolDeps): string | null {
   return deps.sender.postsTo ?? null;
 }
 
+// --- Bot mode (M22): the channel asked for is the channel posted to ---
+//
+// With a bot token the message goes to the channel that was asked for, so the texts can finally
+// say "Send to #help?" and mean it — but only for a channel Slack itself says exists. Every bot-
+// mode path asks the directory (Slack's own channel list) and refuses, BEFORE any dialog, a name
+// it does not have. The name shown and handed to the sender is SLACK'S name for the channel, never
+// the words typed.
+//
+// Bot mode is exactly `sender.mode === "bot"`. A sender that says nothing is a webhook, as every
+// sender was before M22 — so the webhook texts above are reached by exactly the paths that
+// reached them in M21, and are not touched.
+function isBotMode(deps: ToolDeps): boolean {
+  return deps.sender.mode === "bot";
+}
+
+// Fails closed: bot mode with no directory to ask is not a reason to send unchecked.
+const NO_DIRECTORY = "I couldn't check Slack channels, so nothing was sent.";
+
+// INTERIM (M22 prompt 4; replaced by the pre-flight in prompt 5). Inside a chain, a channel may
+// have been filled in from an earlier step's result — an email's words, say — and this tool sees
+// only the filled-in value, not whether it came from `{stepN}`. Until the pre-flight, which sees
+// the plan as written, refuses that case before step 1, bot mode does not post from a chain at all.
+const CHAINED_IN_BOT_MODE = "In bot mode I can't post to Slack as a step of a plan yet, so nothing was sent.";
+
+// The channel as the user will recognise it: "#help", whether "help", "#help" or " #help " was
+// given. One "#" is stripped, as the directory does.
+function hashed(channel: string): string {
+  const trimmed = channel.trim();
+  return `#${trimmed.startsWith("#") ? trimmed.slice(1) : trimmed}`;
+}
+
+function didYouMean(suggestions: readonly string[]): string {
+  const names = suggestions.slice(0, 3).map((name) => `#${name}`);
+  if (names.length === 0) return "";
+  if (names.length === 1) return ` Did you mean ${names[0]}?`;
+  if (names.length === 2) return ` Did you mean ${names[0]} or ${names[1]}?`;
+  return ` Did you mean ${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}?`;
+}
+
+function notFoundText(channel: string, suggestions: readonly string[]): string {
+  return (
+    `I couldn't find a Slack channel called ${hashed(channel)}. I can post to public channels and ` +
+    `to private channels the bot has been added to.${didYouMean(suggestions)}`
+  );
+}
+
+// One fixed sentence per failure code. Nothing Slack or an HTTP client said reaches it — the
+// directory hands over a code, never text.
+function unavailableText(failure: DirectoryFailure, channel: string): string {
+  switch (failure) {
+    case "no_token":
+    case "auth":
+      return "Slack rejected the bot token, so nothing was sent.";
+    case "network":
+    case "timeout":
+    case "slack_error":
+    case "bad_response":
+      return "I couldn't reach Slack to check the channel, so nothing was sent.";
+    case "rate_limited":
+      return "Slack is rate limiting me, so nothing was sent.";
+    case "ambiguous":
+      return `More than one Slack channel is called ${hashed(channel)}, so nothing was sent.`;
+  }
+}
+
+// Slack's own name for this channel, or a refusal in the same class `checkChannel` refuses with
+// (`UnresolvedReferenceError`), so the planner shows it as the tool's words and logs `refused`.
+async function slackChannelName(channel: string, directory: ChannelDirectory | undefined): Promise<string> {
+  if (directory === undefined) throw new UserFixableError(NO_DIRECTORY);
+  const lookup = await directory.resolve(channel);
+  if (lookup.ok) return lookup.channel.name;
+  if (lookup.reason === "not_found") throw new UnresolvedReferenceError(notFoundText(channel, lookup.suggestions));
+  throw new UnresolvedReferenceError(unavailableText(lookup.failure, channel));
+}
+
+// The confirm question in bot mode: the real destination, then the whole message. No note: the
+// channel asked for IS the channel posted to.
+async function botConfirmSummary(args: ToolInput, deps: ToolDeps): Promise<string> {
+  const name = await slackChannelName(knownChannel(args, deps), deps.channelDirectory);
+  if (deps.chained) throw new UserFixableError(CHAINED_IN_BOT_MODE);
+  const question = `Send to #${name}?`;
+  const text = sourceText(args, deps);
+  return text ? `${question}\n\n${text}` : question;
+}
+
+// The send in bot mode. The channel is checked again — the dialog's answer does not travel here —
+// and the sender is handed Slack's name for it, which it resolves to an ID once more itself.
+async function botHandler(input: ToolInput, deps: ToolDeps): Promise<string> {
+  const name = await slackChannelName(knownChannel(input, deps), deps.channelDirectory);
+  if (deps.chained) throw new UserFixableError(CHAINED_IN_BOT_MODE);
+
+  const text = sourceText(input, deps);
+  if (!text || text.trim().length === 0) throw new UserFixableError(NOTHING_TO_SEND);
+
+  const result = await deps.sender.send(`#${name}`, text);
+  if (result.ok) return `Sent to #${name}.\n\n${text}`;
+  // Slack said no outright: nothing was posted, and its reason is one of the sender's fixed texts.
+  if (result.outcome === "not_sent") {
+    throw new Error(`Could not send to #${name}: ${result.error ?? "Slack rejected the message."}`);
+  }
+  // Unknown — and a failure that does not say is treated as unknown. It may be in the channel, so
+  // the user is told to look before doing anything, and never invited to send it again.
+  throw new Error(
+    `Could not confirm the message to #${name}. It may have been sent. Check Slack before trying again.`,
+  );
+}
+
 // The text this call is about: `notes` when there are any, otherwise what the user "selected" —
 // which in this app means the CLIPBOARD (spec §4), so it is rarely empty and not always
 // relevant. ONE function, used by `prepare`, the confirm summary and the handler, so they cannot
@@ -309,7 +418,12 @@ export const sendMessageTool: Tool = {
   prepare: async (args: ToolInput, deps: PrepareDeps): Promise<ToolInput> => {
     if (deps.chained) return args;
 
-    knownChannel(args, deps);
+    const channel = knownChannel(args, deps);
+
+    // Bot mode (M22): a channel Slack does not have is refused HERE — before the formatter is paid
+    // for and before any dialog. The directory is handed to a prepare only in bot mode, so its
+    // presence is the signal; with none, this is the M21 prepare exactly.
+    if (deps.channelDirectory !== undefined) await slackChannelName(channel, deps.channelDirectory);
 
     // The user's own message: as written. `args` already carries it in `notes`, untouched.
     if (messageFromInstruction(args, deps.instruction) !== null) return args;
@@ -339,7 +453,12 @@ export const sendMessageTool: Tool = {
   // just "your Slack webhook" — and the channel that was asked for only as a note beneath it
   // (see "Saying where a message goes, honestly" above). The message stays after a blank line,
   // so the first paragraph, which is what gets spoken, is still the whole question.
-  confirmSummary: (args: ToolInput, deps: ToolDeps): string => {
+  //
+  // In bot mode (M22) the question is `botConfirmSummary`'s instead: Slack's own name for the
+  // channel, checked against Slack's list before the dialog, and no webhook note. The webhook
+  // path below is exactly M21's, and still synchronous.
+  confirmSummary: (args: ToolInput, deps: ToolDeps): string | Promise<string> => {
+    if (isBotMode(deps)) return botConfirmSummary(args, deps);
     const channel = knownChannel(args, deps);
     const where = postsTo(deps);
     const question = withNote(`Send ${destination(where)}?`, channel, where);
@@ -347,6 +466,9 @@ export const sendMessageTool: Tool = {
     return text ? `${question}\n\n${text}` : question;
   },
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
+    // Bot mode (M22) checks the channel against Slack once more and words its own result.
+    if (isBotMode(deps)) return await botHandler(input, deps);
+
     // Asked again rather than trusted: the confirm summary's answer does not travel here, and a
     // handler must not depend on a gate having run to know where it is sending.
     const channel = knownChannel(input, deps);

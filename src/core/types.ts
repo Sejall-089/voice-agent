@@ -677,6 +677,10 @@ export interface ToolDeps {
   // at the confirm gate, so what was approved is what goes — and a ticket link is not something
   // a rewrite gets to drop.
   chained: boolean;
+  // M22. Which Slack channels exist, asked of Slack itself — present ONLY in bot mode (main.ts
+  // passes it when SLACK_BOT_TOKEN is set). Read-only: it can look a name up and nothing else.
+  // `sendMessage` uses it to refuse a channel Slack does not have before any dialog.
+  channelDirectory?: ChannelDirectory;
 }
 
 // A handler returns the text to display; it throws on failure (planner catches).
@@ -694,6 +698,10 @@ export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 //   llm       the model — the one outside call a prepare may make
 //   memory    lookups only: no `write`, so nothing can be remembered before it is approved
 //   chained   where this call sits, which decides whether there is anything to prepare
+//   channelDirectory  (M22, bot mode only; absent otherwise) a LOOKUP of Slack's channel list.
+//             The second outside call a prepare may make, and like the model it can only answer:
+//             it holds no way to post. It lets a send to a channel Slack does not have be refused
+//             before the formatter is paid for and before any dialog.
 //
 // Deliberately absent: the shell (no dialogs, no actions, no clipboard writes), the sender, and
 // every app surface. A tool that needs one of those to decide what it will do is describing an
@@ -704,6 +712,7 @@ export interface PrepareDeps {
   llm: LLMClient;
   memory: Pick<Memory, "resolve">;
   chained: boolean;
+  channelDirectory?: ChannelDirectory;
 }
 
 // One askable reference (see `Tool.askForReference`). The TOOL owns the wording and what counts
