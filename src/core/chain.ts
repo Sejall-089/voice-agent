@@ -430,7 +430,7 @@ interface Reference {
 
 // `search`, not `test`: PLACEHOLDER is a global regex, and `test` on one of those remembers
 // where it stopped and answers the NEXT question from there.
-function hasPlaceholder(text: string): boolean {
+export function hasPlaceholder(text: string): boolean {
   return text.search(PLACEHOLDER) !== -1;
 }
 

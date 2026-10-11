@@ -242,12 +242,14 @@ describe("bot mode — a channel Slack does not have is refused before the dialo
     expect(s.shell.results).toEqual([notFound("#old-team")]);
   });
 
-  it("still refuses an unknown 'the …' phrase from memory alone, as in M21, without asking Slack", async () => {
+  // Changed in M22 prompt 5: an unknown "the … channel" is now tried in Slack ONCE, exactly, with
+  // "the" and "channel" dropped. Slack has no #bugs here, so the M21 words still stand.
+  it("refuses an unknown 'the …' phrase in the M21 words when Slack has no exact match either", async () => {
     const s = session();
     const outcome = await s.turn(send("the bugs channel"), "send these to the bugs channel");
     expectRefusedBeforeDialog(s, outcome);
     expect(s.shell.results[0]).toContain("teach me with: remember the bugs channel is #your-channel");
-    expect((s.directory as FakeChannelDirectory).calls).toEqual([]);
+    expect((s.directory as FakeChannelDirectory).calls).toEqual(["bugs"]);
   });
 });
 
@@ -292,36 +294,40 @@ describe("bot mode — when Slack cannot answer, nothing is sent", () => {
   });
 });
 
-describe("bot mode — inside a chain (interim until the prompt 5 pre-flight)", () => {
-  const INTERIM = "In bot mode I can't post to Slack as a step of a plan yet, so nothing was sent.";
-
-  it("refuses a channel Slack does not have at the send step, with no dialog", async () => {
+// Changed in M22 prompt 5: the prompt 4 interim (refuse every chained send) is gone. The chain's
+// pre-flight now checks the channel as the plan WROTE it, before step 1.
+describe("bot mode — inside a chain", () => {
+  it("refuses a channel Slack does not have BEFORE step 1, with no dialog", async () => {
     const s = session();
     const outcome = await s.turn(chain("#nope"), "summarize and send to #nope", "THE SUMMARY");
     expect(outcome.status).toBe("refused");
-    expect(outcome.chain).toEqual({ completed: 1, total: 2 });
+    expect(outcome.chain).toEqual({ completed: 0, total: 2 });
     expect(s.shell.confirmMessages).toEqual([]);
     expect(s.sends()).toEqual([]);
-    expect(outcome.result).toContain(notFound("#nope"));
+    expect(s.formatterCalls()).toBe(0);
+    expect(outcome.result).toBe(notFound("#nope"));
   });
 
-  it("refuses a chained send even to a real channel, with no dialog", async () => {
+  it("sends a chained message to a real channel, through its dialog", async () => {
     const s = session();
     const outcome = await s.turn(chain("#help"), "summarize and send to #help", "THE SUMMARY");
-    expect(outcome.status).toBe("refused");
-    expect(s.shell.confirmMessages).toEqual([]);
-    expect(s.sends()).toEqual([]);
-    expect(outcome.result).toContain(INTERIM);
+    expect(outcome.status).toBe("ok");
+    expect(s.shell.confirmMessages).toEqual(["Step 2 of 2: Send to #help?\n\nSummary: THE SUMMARY"]);
+    expect(s.sends()).toEqual([{ channel: "#help", text: "Summary: THE SUMMARY" }]);
   });
 
-  it("never posts to a channel an earlier step produced, even one Slack has", async () => {
+  it("never posts to a channel an earlier step produced, even one Slack has: refused before step 1", async () => {
     const s = session();
-    // Step 1's result is "help" — a real channel. It must not pick where the message goes.
+    // Step 1's result would be "help" — a real channel. It must not pick where the message goes.
     const outcome = await s.turn(chain("{step1}"), "work out where and send it", "help");
     expect(outcome.status).toBe("refused");
+    expect(outcome.chain).toEqual({ completed: 0, total: 2 });
     expect(s.shell.confirmMessages).toEqual([]);
     expect(s.sends()).toEqual([]);
-    expect(outcome.result).toContain(INTERIM);
+    expect(s.formatterCalls()).toBe(0);
+    expect(outcome.result).toBe(
+      "In bot mode I need you to name the Slack channel yourself, not take it from an earlier step, so nothing was done.",
+    );
   });
 });
 
@@ -364,11 +370,14 @@ describe("bot mode — the handler on its own", () => {
     expect(d.sender.calls).toEqual([]);
   });
 
-  it("refuses inside a chain, and sends nothing", async () => {
+  // Changed in M22 prompt 5: inside a chain the handler no longer refuses on its own — the
+  // pre-flight has already checked the channel as written. It still checks the channel in Slack.
+  it("sends inside a chain to a channel Slack has, and refuses one it does not", async () => {
     const d = direct(directoryWith(), true);
-    const error: unknown = await d.call({ channel: "#help", notes: "hi" }).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(UserFixableError);
-    expect(d.sender.calls).toEqual([]);
+    expect(await d.call({ channel: "#help", notes: "hi" })).toBe("Sent to #help.\n\nhi");
+    const error: unknown = await d.call({ channel: "#nope", notes: "hi" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(UnresolvedReferenceError);
+    expect(d.sender.calls).toEqual([{ channel: "#help", text: "hi" }]);
   });
 });
 

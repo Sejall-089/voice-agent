@@ -1,10 +1,12 @@
 import { UnresolvedReferenceError, UserFixableError } from "../errors.ts";
 import { checkReference } from "../memory/checkReference.ts";
+import { hasPlaceholder } from "../chain.ts";
 import type {
   CapturedContext,
   ChannelDirectory,
-  DirectoryFailure,
+  ChannelLookup,
   Memory,
+  StepCheckDeps,
   PrepareDeps,
   Tool,
   ToolDeps,
@@ -180,11 +182,11 @@ function isBotMode(deps: ToolDeps): boolean {
 // Fails closed: bot mode with no directory to ask is not a reason to send unchecked.
 const NO_DIRECTORY = "I couldn't check Slack channels, so nothing was sent.";
 
-// INTERIM (M22 prompt 4; replaced by the pre-flight in prompt 5). Inside a chain, a channel may
-// have been filled in from an earlier step's result — an email's words, say — and this tool sees
-// only the filled-in value, not whether it came from `{stepN}`. Until the pre-flight, which sees
-// the plan as written, refuses that case before step 1, bot mode does not post from a chain at all.
-const CHAINED_IN_BOT_MODE = "In bot mode I can't post to Slack as a step of a plan yet, so nothing was sent.";
+// Said by a chain's pre-flight (M22) when the plan would take the channel from an earlier step's
+// result — an email's words, a summary's. In bot mode that would let something the user never
+// typed choose where a message goes, so the plan is refused before step 1.
+const CHANNEL_FROM_A_STEP =
+  "In bot mode I need you to name the Slack channel yourself, not take it from an earlier step, so nothing was done.";
 
 // The channel as the user will recognise it: "#help", whether "help", "#help" or " #help " was
 // given. One "#" is stripped, as the directory does.
@@ -201,17 +203,20 @@ function didYouMean(suggestions: readonly string[]): string {
   return ` Did you mean ${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}?`;
 }
 
-function notFoundText(channel: string, suggestions: readonly string[]): string {
-  return (
-    `I couldn't find a Slack channel called ${hashed(channel)}. I can post to public channels and ` +
-    `to private channels the bot has been added to.${didYouMean(suggestions)}`
-  );
-}
-
-// One fixed sentence per failure code. Nothing Slack or an HTTP client said reaches it — the
-// directory hands over a code, never text.
-function unavailableText(failure: DirectoryFailure, channel: string): string {
-  switch (failure) {
+// THE ONE PLACE these refusals are worded (M22), for every caller: a send's checks, a chain's
+// pre-flight, the answer to "which channel do you mean?", and `remember`. `typed` is the channel as
+// it was given; the lookup is the directory's answer for it.
+//
+// One fixed sentence per outcome. Nothing Slack or an HTTP client said reaches it — the directory
+// hands over a code and names, never text.
+export function slackRefusalText(lookup: Exclude<ChannelLookup, { ok: true }>, typed: string): string {
+  if (lookup.reason === "not_found") {
+    return (
+      `I couldn't find a Slack channel called ${hashed(typed)}. I can post to public channels and ` +
+      `to private channels the bot has been added to.${didYouMean(lookup.suggestions)}`
+    );
+  }
+  switch (lookup.failure) {
     case "no_token":
     case "auth":
       return "Slack rejected the bot token, so nothing was sent.";
@@ -223,7 +228,7 @@ function unavailableText(failure: DirectoryFailure, channel: string): string {
     case "rate_limited":
       return "Slack is rate limiting me, so nothing was sent.";
     case "ambiguous":
-      return `More than one Slack channel is called ${hashed(channel)}, so nothing was sent.`;
+      return `More than one Slack channel is called ${hashed(typed)}, so nothing was sent.`;
   }
 }
 
@@ -233,15 +238,60 @@ async function slackChannelName(channel: string, directory: ChannelDirectory | u
   if (directory === undefined) throw new UserFixableError(NO_DIRECTORY);
   const lookup = await directory.resolve(channel);
   if (lookup.ok) return lookup.channel.name;
-  if (lookup.reason === "not_found") throw new UnresolvedReferenceError(notFoundText(channel, lookup.suggestions));
-  throw new UnresolvedReferenceError(unavailableText(lookup.failure, channel));
+  throw new UnresolvedReferenceError(slackRefusalText(lookup, channel));
+}
+
+// "the help channel" → "help"; "my design channel" → "design". A leading the / my / our and a
+// trailing "channel" are dropped, and nothing else is touched. Null when nothing is left.
+export function stripChannelPhrase(reference: string): string | null {
+  const bare = reference
+    .trim()
+    .replace(/^(?:the|my|our)\s+/i, "")
+    .replace(/\s*\bchannel$/i, "")
+    .trim();
+  return bare.length > 0 ? bare : null;
+}
+
+// The channel a value means IN BOT MODE, as Slack names it (M22) — or a refusal.
+//
+//   1. Memory first, by the M21 rule (`checkReference`): a literal is taken as given, a "the …"
+//      phrase memory knows becomes what memory says. Either way the result is then checked in
+//      Slack: a saved name Slack no longer has is refused with suggestions, and is NOT forgotten.
+//   2. A "the …" phrase memory does NOT know is tried in Slack once, EXACTLY, with "the" and
+//      "channel" dropped — "the help channel" is #help if Slack has #help. Never a near match, and
+//      never saved: the dialog still names the channel before anything is sent.
+//   3. Otherwise the M21 refusal ("teach me with: remember …"), unchanged.
+async function botChannelName(
+  value: unknown,
+  memory: Pick<Memory, "resolve">,
+  directory: ChannelDirectory,
+): Promise<string> {
+  const check = checkReference(value, memory);
+  if (check.ok) return await slackChannelName(check.value, directory);
+  if (check.why === "unresolved") {
+    const bare = stripChannelPhrase(check.said);
+    if (bare !== null) {
+      const lookup = await directory.resolve(bare);
+      if (lookup.ok) return lookup.channel.name;
+      // Slack could not be asked: refuse rather than guess. A plain "no such channel" falls through
+      // to the M21 words, which say how to teach it.
+      if (lookup.reason === "unavailable") throw new UnresolvedReferenceError(slackRefusalText(lookup, bare));
+    }
+  }
+  const refusal = checkChannel(value, memory);
+  throw new UnresolvedReferenceError(refusal.ok ? NO_DIRECTORY : refusal.reason);
+}
+
+// The directory, when this install is in bot mode — a bot sender AND a directory — else null.
+function botDirectory(deps: StepCheckDeps): ChannelDirectory | null {
+  return deps.senderMode === "bot" && deps.channelDirectory !== undefined ? deps.channelDirectory : null;
 }
 
 // The confirm question in bot mode: the real destination, then the whole message. No note: the
 // channel asked for IS the channel posted to.
 async function botConfirmSummary(args: ToolInput, deps: ToolDeps): Promise<string> {
-  const name = await slackChannelName(knownChannel(args, deps), deps.channelDirectory);
-  if (deps.chained) throw new UserFixableError(CHAINED_IN_BOT_MODE);
+  if (deps.channelDirectory === undefined) throw new UserFixableError(NO_DIRECTORY);
+  const name = await botChannelName(args["channel"], deps.memory, deps.channelDirectory);
   const question = `Send to #${name}?`;
   const text = sourceText(args, deps);
   return text ? `${question}\n\n${text}` : question;
@@ -249,9 +299,12 @@ async function botConfirmSummary(args: ToolInput, deps: ToolDeps): Promise<strin
 
 // The send in bot mode. The channel is checked again — the dialog's answer does not travel here —
 // and the sender is handed Slack's name for it, which it resolves to an ID once more itself.
+//
+// Inside a chain this is reached only for a channel the pre-flight checked AS WRITTEN: a channel
+// that would have come from an earlier step was refused before step 1 (`preflight` below).
 async function botHandler(input: ToolInput, deps: ToolDeps): Promise<string> {
-  const name = await slackChannelName(knownChannel(input, deps), deps.channelDirectory);
-  if (deps.chained) throw new UserFixableError(CHAINED_IN_BOT_MODE);
+  if (deps.channelDirectory === undefined) throw new UserFixableError(NO_DIRECTORY);
+  const name = await botChannelName(input["channel"], deps.memory, deps.channelDirectory);
 
   const text = sourceText(input, deps);
   if (!text || text.trim().length === 0) throw new UserFixableError(NOTHING_TO_SEND);
@@ -374,11 +427,62 @@ export const sendMessageTool: Tool = {
       question: (reference) => `Before I start: which channel do you mean by '${reference}'?`,
       retry: (reference) =>
         `I need the channel's own name, like #bugs. Which channel do you mean by '${reference}'?`,
-      accept: (answer) => {
+      // In bot mode (M22) the answer must also be a channel Slack has, and what is saved is
+      // Slack's own name for it, "#help" — checked BEFORE the planner saves anything. A name Slack
+      // does not have is asked about again, with what it does have; an answer that cannot be
+      // checked at all refuses the plan and saves nothing. In webhook mode: M21 exactly.
+      accept: async (answer, reference, deps) => {
         const check = checkChannel(answer, NOTHING_KNOWN);
-        return check.ok ? check.channel : null;
+        if (!check.ok) return { kind: "rejected" };
+        const directory = botDirectory(deps);
+        if (directory === null) return { kind: "accepted", value: check.channel };
+        const lookup = await directory.resolve(check.channel);
+        if (lookup.ok) return { kind: "accepted", value: `#${lookup.channel.name}` };
+        if (lookup.reason === "not_found") {
+          return {
+            kind: "rejected",
+            retry: `${slackRefusalText(lookup, check.channel)} Which channel do you mean by '${reference}'?`,
+          };
+        }
+        return { kind: "refused", reason: slackRefusalText(lookup, check.channel) };
+      },
+      // Bot mode (M22): "the help channel", unknown to memory, is #help when Slack has exactly
+      // #help — found without asking, and NOT saved. Anything less than an exact match is asked
+      // about as before; Slack unreachable refuses rather than guesses.
+      lookup: async (reference, deps) => {
+        const directory = botDirectory(deps);
+        const bare = stripChannelPhrase(reference);
+        if (directory === null || bare === null) return { kind: "unknown" };
+        const lookup = await directory.resolve(bare);
+        if (lookup.ok) return { kind: "found", value: `#${lookup.channel.name}` };
+        if (lookup.reason === "not_found") return { kind: "unknown" };
+        return { kind: "refused", reason: slackRefusalText(lookup, bare) };
       },
     },
+  },
+  // A chain's own check of this step, on the plan AS WRITTEN, before step 1 (M22, bot mode only).
+  //
+  //   - A channel taken from an earlier step (`{stepN}`) is refused: an email's or a summary's
+  //     words must not choose where a message goes. This is the one place that can still see the
+  //     placeholder — by the time the step runs, it has been filled in.
+  //   - Any other channel is resolved exactly as the step will resolve it (`botChannelName`) and
+  //     must be one Slack has. A plan that would create an issue and then fail to say so is
+  //     refused before the issue exists.
+  //
+  // In webhook mode it does nothing, and the chain runs as in M21.
+  preflight: async (args: ToolInput, deps: StepCheckDeps): Promise<string | null> => {
+    if (deps.senderMode !== "bot") return null;
+    const directory = botDirectory(deps);
+    if (directory === null) return NO_DIRECTORY;
+    const channel = args["channel"];
+    if (typeof channel === "string" && hasPlaceholder(channel)) return CHANNEL_FROM_A_STEP;
+    try {
+      await botChannelName(channel, deps.memory, directory);
+      return null;
+    } catch (error) {
+      if (error instanceof UserFixableError) return error.message;
+      throw error;
+    }
   },
   // THE MESSAGE IS SETTLED HERE, BEFORE ANYONE IS ASKED (M21, `Tool.prepare`).
   //
@@ -418,12 +522,15 @@ export const sendMessageTool: Tool = {
   prepare: async (args: ToolInput, deps: PrepareDeps): Promise<ToolInput> => {
     if (deps.chained) return args;
 
-    const channel = knownChannel(args, deps);
-
     // Bot mode (M22): a channel Slack does not have is refused HERE — before the formatter is paid
-    // for and before any dialog. The directory is handed to a prepare only in bot mode, so its
-    // presence is the signal; with none, this is the M21 prepare exactly.
-    if (deps.channelDirectory !== undefined) await slackChannelName(channel, deps.channelDirectory);
+    // for and before any dialog — and "the help channel", unknown to memory, may be Slack's #help.
+    // The directory is handed to a prepare only in bot mode, so its presence is the signal; with
+    // none, this is the M21 prepare exactly.
+    if (deps.channelDirectory !== undefined) {
+      await botChannelName(args["channel"], deps.memory, deps.channelDirectory);
+    } else {
+      knownChannel(args, deps);
+    }
 
     // The user's own message: as written. `args` already carries it in `notes`, untouched.
     if (messageFromInstruction(args, deps.instruction) !== null) return args;

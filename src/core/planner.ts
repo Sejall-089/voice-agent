@@ -49,6 +49,7 @@ import type {
   PlannerOutcome,
   PrepareDeps,
   ScreenSurface,
+  StepCheckDeps,
   ElementSurface,
   ElementChooser,
   Tool,
@@ -610,25 +611,80 @@ export class Planner {
   //
   // `null` from the shell — Escape, the timeout, or a bar that was busy — ends it at once with
   // no retry: the user declined, or could not be asked, and asking again would be nagging.
+  //
+  // M22 ADDS THREE THINGS, all generic — the planner still never knows which tool it is asking:
+  //   - A tool may settle a reference WITHOUT asking (`ReferenceQuestion.lookup`): "the help
+  //     channel", unknown to memory, is Slack's #help. Settled for this run only, in `settled`,
+  //     and never written to memory; memory is always asked first, so a saved fact wins.
+  //   - An answer may be checked asynchronously (`accept` awaits), and can come back as "ask
+  //     again, and say this" or "refuse the plan". Nothing is saved until it is accepted.
+  //   - Once every reference is settled, each step's own `preflight` runs on the plan AS WRITTEN,
+  //     where a `{stepN}` is still visible, and may refuse the whole plan before step 1.
   private async settleReferences(steps: readonly PlannedStep[]): Promise<PreflightCheck> {
+    // References settled by a lookup this run. Read only through `view`, and only after memory.
+    const settled = new Map<string, string>();
+    const view: Pick<Memory, "resolve"> = {
+      resolve: (reference) => {
+        const remembered = this.memory.resolve(reference);
+        if (remembered !== null) return remembered;
+        const found = settled.get(normalizeReference(reference));
+        return found === undefined ? null : { value: found, confidence: 1 };
+      },
+    };
+    const deps: StepCheckDeps = {
+      memory: view,
+      senderMode: this.sender.mode,
+      ...(this.channelDirectory === undefined ? {} : { channelDirectory: this.channelDirectory }),
+    };
+
     let asked = 0;
     for (;;) {
-      const check = preflightReferences(steps, this.registry, this.memory);
-      if (check.ok || check.unknown === undefined) return check;
+      const check = preflightReferences(steps, this.registry, view);
+      if (check.ok) {
+        // Each step's own pre-flight, in order, on the arguments AS THE PLAN WROTE THEM. The first
+        // refusal refuses the whole plan; a tool without a `preflight` is not consulted.
+        for (const planned of steps) {
+          const tool = this.registry.find((candidate) => candidate.name === planned.tool);
+          if (tool?.preflight === undefined) continue;
+          const refusal = await tool.preflight(planned.arguments, deps);
+          if (refusal !== null) return { ok: false, reason: refusal };
+        }
+        return check;
+      }
+      if (check.unknown === undefined) return check;
 
       const { step, key, said } = check.unknown;
       const tool = this.registry.find((candidate) => candidate.name === steps[step]?.tool);
       const ask = tool?.askForReference?.[key];
       if (ask === undefined) return check;
 
+      // Settled without asking? Once per reference: a lookup that "found" something the view
+      // still cannot place must not be tried again, or this loop would never end.
+      const subject = normalizeReference(said);
+      if (ask.lookup !== undefined && !settled.has(subject)) {
+        const looked = await ask.lookup(said, deps);
+        if (looked.kind === "refused") return { ok: false, reason: looked.reason };
+        if (looked.kind === "found") {
+          settled.set(subject, looked.value);
+          continue;
+        }
+      }
+
       let value: string | null = null;
-      for (const wording of [ask.question(said), ask.retry(said)]) {
+      let wording = ask.question(said);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
         if (asked >= MAX_QUESTIONS_PER_CHAIN) break;
         asked += 1;
         const answer = await this.shell.askUser(wording);
         if (answer === null) return check;
-        value = ask.accept(answer);
-        if (value !== null) break;
+        const verdict = await ask.accept(answer, said, deps);
+        if (verdict.kind === "accepted") {
+          value = verdict.value;
+          break;
+        }
+        // Unanswerable (Slack unreachable): stop, and save nothing.
+        if (verdict.kind === "refused") return { ok: false, reason: verdict.reason };
+        wording = verdict.retry ?? ask.retry(said);
       }
       if (value === null) return check;
 

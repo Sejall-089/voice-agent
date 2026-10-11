@@ -715,6 +715,38 @@ export interface PrepareDeps {
   channelDirectory?: ChannelDirectory;
 }
 
+// What a chain's pre-flight hands a tool's own checks (M22): the plan's steps as WRITTEN — before
+// any `{stepN}` is filled in — are judged with these, before step 1 runs.
+//
+//   memory            lookups only, as in PrepareDeps. Inside the pre-flight it also answers for
+//                     references settled this run without being saved (see `ReferenceLookup`).
+//   senderMode        how this install posts to Slack (`MessageSender.mode`); undefined = webhook
+//   channelDirectory  Slack's channel list, when the planner was given one (bot mode only)
+//
+// Nothing here can send, save or show anything.
+export interface StepCheckDeps {
+  memory: Pick<Memory, "resolve">;
+  senderMode: MessageSender["mode"];
+  channelDirectory?: ChannelDirectory;
+}
+
+// What a typed answer to a reference question turned out to be (M22).
+export type AnswerCheck =
+  // Save this value for the reference.
+  | { kind: "accepted"; value: string }
+  // Not an answer the tool can use: ask again — with `retry` when the tool has something
+  // specific to say (a channel Slack does not have, and what it does have), else its usual retry.
+  | { kind: "rejected"; retry?: string }
+  // The answer cannot be checked at all (Slack unreachable): refuse the plan, save nothing.
+  | { kind: "refused"; reason: string };
+
+// What a tool could settle about a reference WITHOUT asking (M22): "the help channel", unknown to
+// memory, is the Slack channel #help. Settled for this run only — never written to memory.
+export type ReferenceLookup =
+  | { kind: "found"; value: string }
+  | { kind: "unknown" }
+  | { kind: "refused"; reason: string };
+
 // One askable reference (see `Tool.askForReference`). The TOOL owns the wording and what counts
 // as an answer; the planner owns when to ask, how many times, and what happens to the answer.
 export interface ReferenceQuestion {
@@ -722,9 +754,12 @@ export interface ReferenceQuestion {
   question(reference: string): string;
   // What to ask the second time, after an answer that was not accepted.
   retry(reference: string): string;
-  // The value to store for this answer, or null if it is not one. Given ONLY what the user
-  // typed: an answer is never checked against, or completed from, anything else.
-  accept(answer: string): string | null;
+  // Is this answer something to save for `reference`? Judged from what the user typed — never
+  // completed from anything else — and, in bot mode (M22), checked against Slack's channel list
+  // BEFORE the planner saves anything. Async for that reason.
+  accept(answer: string, reference: string, deps: StepCheckDeps): AnswerCheck | Promise<AnswerCheck>;
+  // Optional (M22): try to settle the reference without asking. Called once, before the question.
+  lookup?(reference: string, deps: StepCheckDeps): Promise<ReferenceLookup>;
 }
 
 export interface Tool extends ToolSchema {
@@ -792,6 +827,11 @@ export interface Tool extends ToolSchema {
   // refused, and a valid answer is saved as a fact. An argument with no entry is refused as
   // before. Declarative, like `risk` — the planner never knows which tool it is asking for.
   askForReference?: Readonly<Record<string, ReferenceQuestion>>;
+  // A chain's own check of this step, run by the pre-flight AFTER every reference is settled and
+  // BEFORE step 1 (M22). It sees the arguments as the plan wrote them — a `{stepN}` is still a
+  // placeholder here, which it is nowhere later — and returns a refusal in the tool's words, or
+  // null. A refusal stops the whole plan: nothing runs and nothing is asked. Read-only.
+  preflight?: (args: ToolInput, deps: StepCheckDeps) => Promise<string | null>;
   // How to describe this action to the user at the confirm gate. The planner calls this with the
   // RESOLVED args, so the user always approves the concrete action ("Send to #design-team?"),
   // never the vague one they typed ("send to the team"). `dangerous` tools should define it.

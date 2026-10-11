@@ -1,6 +1,23 @@
+import { UnresolvedReferenceError } from "../errors.ts";
 import { normalizeReference } from "../memory/normalize.ts";
 import { userSource } from "../memory/source.ts";
+import { slackRefusalText } from "./sendMessage.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
+
+// The value to save for this fact (M22). Unchanged unless this install is in bot mode — a bot
+// sender AND a channel directory — and the fact is about a channel: its value starts with "#", or
+// its subject ends in "channel" ("bugs channel"). Then it must be a channel Slack has, and what is
+// saved is Slack's own "#name". A channel Slack does not have, or a Slack that cannot be asked,
+// is refused with the same words a send uses, and NOTHING is written.
+async function channelFactValue(subject: string, value: string, deps: ToolDeps): Promise<string> {
+  const directory = deps.sender.mode === "bot" ? deps.channelDirectory : undefined;
+  if (directory === undefined) return value;
+  if (!value.startsWith("#") && !/\bchannel$/.test(subject)) return value;
+
+  const lookup = await directory.resolve(value);
+  if (!lookup.ok) throw new UnresolvedReferenceError(slackRefusalText(lookup, value));
+  return `#${lookup.channel.name}`;
+}
 
 // Tasks 4 + 6 (spec.md §6): store a fact, and — the flagship — let a correction supersede an
 // old one. The storage work is already done: this handler calls the existing, tested
@@ -62,17 +79,22 @@ export const rememberTool: Tool = {
       throw new Error("I need both what to remember and what its value is.");
     }
 
+    // M22. In bot mode a CHANNEL fact is checked against Slack before it is saved, and saved as
+    // Slack's own name for the channel ("#help") — so "remember the bugs channel is #bgus" is
+    // refused with what Slack does have, instead of being remembered and failing at the next send.
+    const stored = await channelFactValue(subject, value, deps);
+
     // What did we believe before? (Lets the result show the correction, and makes the
     // versioning visible to the user rather than silent.)
     const previous = deps.memory.query(subject).find((fact) => fact.subject === subject);
 
     // The existing, already-tested version-on-conflict write: on a differing value the old row
     // is deactivated and a new version is inserted. Never an overwrite.
-    deps.memory.write(subject, value, { source: userSource() });
+    deps.memory.write(subject, stored, { source: userSource() });
 
-    if (previous && previous.value !== value) {
-      return `Updated "${subject}": ${previous.value} → ${value} (v${previous.version + 1}).`;
+    if (previous && previous.value !== stored) {
+      return `Updated "${subject}": ${previous.value} → ${stored} (v${previous.version + 1}).`;
     }
-    return `Remembered: ${subject} = ${value}`;
+    return `Remembered: ${subject} = ${stored}`;
   },
 };
