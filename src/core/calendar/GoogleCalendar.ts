@@ -153,9 +153,8 @@ export class GoogleCalendar implements CalendarSurface {
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Could not reach Google Calendar: ${message}`);
+    } catch {
+      throw new Error("Could not reach Google Calendar: the request did not get an answer.");
     }
 
     if (response.status === 401) {

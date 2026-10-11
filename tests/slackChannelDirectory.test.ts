@@ -23,7 +23,7 @@ const CHANNELS = [
   slackChannel("C0000000007", "hello"),
   slackChannel("C0000000008", "devops"),
   slackChannel("C0000000009", "webdev"),
-  slackChannel("G0000000010", "leads", { is_private: true, is_member: true }),
+  slackChannel("C0000000010", "leads", { is_private: true, is_member: true }),
 ];
 
 interface Setup {
@@ -75,7 +75,7 @@ describe("resolution", () => {
     const { directory } = setup({ steps: pagesOf(CHANNELS) });
     expect(await directory.resolve("#leads")).toEqual({
       ok: true,
-      channel: { id: "G0000000010", name: "leads", isPrivate: true },
+      channel: { id: "C0000000010", name: "leads", isPrivate: true },
     });
   });
 
@@ -378,6 +378,14 @@ const scenarios: Scenario[] = [
   },
   { label: "a network failure whose message quotes the URL and token", steps: [{ kind: "throw" }], expected: "network" },
   { label: "a request that never answers", steps: [{ kind: "hang" }], expected: "timeout", requestTimeoutMs: 20 },
+  // Mutation run, M22 prompt 3: the timeout on the BODY READ survived being reclassified as
+  // "network" — every timeout above stalled before the headers.
+  {
+    label: "headers that arrive, then a body that never does",
+    steps: [{ kind: "hangBody" }],
+    expected: "timeout",
+    requestTimeoutMs: 20,
+  },
 ];
 
 describe("failures", () => {
@@ -406,6 +414,16 @@ describe("failures", () => {
     expect(await directory.resolve("help")).toEqual(unavailable("timeout"));
     expect(slack.requests).toHaveLength(2);
   });
+
+  // Mutation run, M22 prompt 3: a request whose own timer ignored the deadline survived — the
+  // deadline test above only ever ran out BETWEEN pages. Here the deadline is the shorter of the
+  // two, so a request that waited out its own 8s would fail this test on vitest's timeout.
+  it("cuts a single request short when the refresh deadline is nearer than its own timeout", async () => {
+    const { directory } = setup({ steps: [{ kind: "hang" }], refreshDeadlineMs: 30 });
+    const started = Date.now();
+    expect(await directory.resolve("help")).toEqual(unavailable("timeout"));
+    expect(Date.now() - started).toBeLessThan(2_000);
+  }, 3_000);
 
   it("is a network failure when fetch throws synchronously", async () => {
     const directory = new SlackChannelDirectory({

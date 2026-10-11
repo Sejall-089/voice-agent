@@ -31,6 +31,9 @@ import { createLLMClient } from "../core/llm/factory.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
 import { SlackSender, webhookChannelWarning } from "../core/senders/SlackSender.ts";
+import { SlackBotSender } from "../core/senders/SlackBotSender.ts";
+import { SlackChannelDirectory } from "../core/senders/SlackChannelDirectory.ts";
+import { selectSlackMode, slackModeLine, slackModeWarningText } from "../core/senders/slackMode.ts";
 import { WhisperCppTranscriber } from "../core/transcribers/WhisperCppTranscriber.ts";
 import { PiperSynthesizer } from "../core/synthesizers/PiperSynthesizer.ts";
 import { SpeechSession } from "./shell/SpeechSession.ts";
@@ -238,7 +241,33 @@ app.whenReady().then(() => {
   // SLACK_WEBHOOK_CHANNEL is optional and is only a label: the channel that webhook was created
   // for. A webhook ignores the channel it is asked to post to, so this is what lets the confirm
   // dialog and the result name where a message really goes.
-  const sender = new SlackSender(
+  //
+  // M22. A bot token, when there is one, replaces the webhook: it posts to the channel asked
+  // for. Which mode, and the startup lines, are decided and worded in core/senders/slackMode.ts
+  // (tested there); the lines name variables only, never a value. ONE directory serves the bot
+  // sender now and, from M22 prompt 4, the planner's checks before a dialog — one cached list.
+  const slackMode = selectSlackMode(process.env);
+  for (const warning of slackMode.warnings) console.warn(`[main] ${slackModeWarningText(warning)}`);
+  console.log(
+    `[main] ${slackModeLine(slackMode, (process.env["SLACK_WEBHOOK_URL"]?.trim() ?? "").length > 0)}`,
+  );
+  const slackDirectory =
+    slackMode.mode === "bot"
+      ? new SlackChannelDirectory({
+          token: slackMode.token,
+          fetchFn: (url, init) => fetch(url, init),
+          now: Date.now,
+        })
+      : null;
+  const slackBotSender =
+    slackMode.mode === "bot" && slackDirectory !== null
+      ? new SlackBotSender({
+          token: slackMode.token,
+          directory: slackDirectory,
+          fetchFn: (url, init) => fetch(url, init),
+        })
+      : null;
+  const sender = slackBotSender ?? new SlackSender(
     process.env["SLACK_WEBHOOK_URL"],
     process.env["SLACK_WEBHOOK_CHANNEL"],
   );

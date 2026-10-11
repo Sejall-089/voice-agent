@@ -12,7 +12,7 @@ const CHANNELS = [
   { id: "C0000000001", name: "help" },
   { id: "C0000000002", name: "social" },
   { id: "C0000000003", name: "helpdesk" },
-  { id: "G0000000004", name: "leads", isPrivate: true },
+  { id: "C0000000004", name: "leads", isPrivate: true },
 ];
 
 const DUPLICATED = [

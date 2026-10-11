@@ -42,9 +42,8 @@ export class SlackSender implements MessageSender {
         return { ok: false, error: `Slack rejected the message (HTTP ${response.status}).` };
       }
       return { ok: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false, error: `Could not reach Slack: ${message}` };
+    } catch {
+      return { ok: false, error: "Could not reach Slack: the request did not get an answer." };
     }
   }
 }

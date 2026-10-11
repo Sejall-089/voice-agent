@@ -96,6 +96,12 @@ export interface LLMClient {
 export interface SendResult {
   ok: boolean;
   error?: string;
+  // When `ok` is false: did anything reach the channel? (M22.) A failure BEFORE the post — the
+  // channel was not found, Slack refused the request outright — is `not_sent`, and trying again
+  // is safe. A post that went out and was never confirmed (a timeout, a 5xx, an unreadable
+  // reply) is `maybe_sent`, and trying again may post it twice. Absent: the sender does not say
+  // (the webhook sender, as it always has).
+  outcome?: "not_sent" | "maybe_sent";
 }
 
 export interface MessageSender {
@@ -109,6 +115,10 @@ export interface MessageSender {
   // has been told (SLACK_WEBHOOK_CHANNEL). Every text that names a destination reads this,
   // never the asked channel (core/tools/sendMessage.ts).
   readonly postsTo?: string | null;
+  // How this sender decides where a message goes (M22). "webhook": the webhook's own channel,
+  // whatever is asked for. "bot": the channel asked for, looked up in Slack's own list. Absent is
+  // read as "webhook" — the only kind there was before.
+  readonly mode?: "webhook" | "bot";
 }
 
 // --- Which Slack channels exist (M22), behind an interface like MessageSender ---

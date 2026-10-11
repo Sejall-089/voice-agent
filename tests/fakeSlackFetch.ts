@@ -8,18 +8,27 @@
 // non-JSON body were NOT captured live — Slack could not be made to produce them without abusing
 // it — so those steps are the documented shapes, and are labelled as such where they are built.
 //
+// PRIVATE CHANNELS (recon, 2026-10-11). conversations.list lists a private channel ONLY when the
+// bot is a member: with two private channels in the workspace and the bot added to one, only that
+// one was listed. So a private channel the bot is not in is simply absent, and the directory
+// answers "not found" for it — before any dialog. Private channel IDs now start with "C", like
+// public ones (the old "G" prefix was not seen), so fixtures here use "C…" for both.
+//
 // Two failure steps are written to be as hostile as the real thing can be:
 //   - `throw` rejects with an Error whose message QUOTES the URL and the Authorization header,
 //     because that is what undici does for a malformed header (measured). A directory that put
 //     `error.message` anywhere would leak the token, and the leak tests would see it.
 //   - `hang` never answers until the request's AbortSignal fires — and with no signal, never at
-//     all. A directory that forgot its timeout hangs the test rather than passing it.
+//     all. A directory that forgot its timeout hangs the test rather than passing it. `hangBody`
+//     does the same after the headers have arrived.
 
 export interface RecordedRequest {
   url: string;
   method: string;
   // Lower-cased header names → values, exactly as sent.
   headers: Record<string, string>;
+  // The body as sent, when it was a string (a chat.postMessage JSON body); undefined for a GET.
+  body: string | undefined;
 }
 
 export type SlackStep =
@@ -32,7 +41,11 @@ export type SlackStep =
   // HTTP 200 with a body that is not JSON.
   | { kind: "text"; body: string }
   | { kind: "throw" }
-  | { kind: "hang" };
+  | { kind: "hang" }
+  // HTTP 200 and headers at once, then a body that never arrives until the request is aborted —
+  // the request "answered", but its reading did not. Tells a timeout during the body read from a
+  // network failure there, which nothing else here can.
+  | { kind: "hangBody" };
 
 export interface FakeSlackFetch {
   fetchFn: typeof globalThis.fetch;
@@ -84,7 +97,12 @@ export function fakeSlackFetch(steps: SlackStep[], options: FakeSlackFetchOption
     new Headers(init?.headers).forEach((value, key) => {
       headers[key] = value;
     });
-    requests.push({ url, method: init?.method ?? "GET", headers });
+    requests.push({
+      url,
+      method: init?.method ?? "GET",
+      headers,
+      body: typeof init?.body === "string" ? init.body : undefined,
+    });
     options.onRequest?.(requests.length - 1);
 
     const step = queue.shift();
@@ -126,6 +144,21 @@ export function fakeSlackFetch(steps: SlackStep[], options: FakeSlackFetchOption
               reject(signal.reason ?? new DOMException("This operation was aborted", "AbortError"));
             if (signal.aborted) abort();
             else signal.addEventListener("abort", abort, { once: true });
+            return;
+          }
+          case "hangBody": {
+            const signal = init?.signal;
+            const body = new ReadableStream<Uint8Array>({
+              start(stream) {
+                // As undici does: aborting the request errors a body still being read.
+                signal?.addEventListener(
+                  "abort",
+                  () => stream.error(signal.reason ?? new DOMException("This operation was aborted", "AbortError")),
+                  { once: true },
+                );
+              },
+            });
+            resolve(new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
             return;
           }
         }
