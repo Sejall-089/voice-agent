@@ -372,7 +372,8 @@ describe("markFromClipboard", () => {
 });
 
 describe("runInstruction prints what the model sent when it was refused", () => {
-  const shell = { showThinking: (): void => undefined };
+  // `showResult` added in M22 prompt 11: ThinkingShell now reports a run that threw.
+  const shell = { showThinking: (): void => undefined, showResult: (): void => undefined };
   const run = async (outcome: PlannerOutcome): Promise<string[]> => {
     const lines: string[] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((line: unknown) => {

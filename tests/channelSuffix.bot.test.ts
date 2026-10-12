@@ -70,7 +70,7 @@ describe("resolveSlackName", () => {
       reason: "not_found",
       suggestions: ["for-the-typed-name"],
     });
-    expect(directory.calls).toEqual(["nope channel", "nope"]);
+    expect(directory.calls).toEqual(["nope channel", "nope", "nope-channel"]);
   });
 
   it("reports a retry Slack could not answer as unavailable — never a guess", async () => {

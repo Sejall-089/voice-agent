@@ -39,9 +39,9 @@ describe("createRunInstruction (the single planner call site)", () => {
       run: (): Promise<PlannerOutcome> => Promise.reject(new Error("planner exploded")),
     };
 
-    await expect(createRunInstruction(exploding, shell)("summarize this")).rejects.toThrow(
-      "planner exploded",
-    );
+    // Changed in M22 prompt 11: a planner that throws is now caught and reported in the bar
+    // (tests/runInstruction.failure.test.ts), so the run resolves instead of rejecting.
+    await expect(createRunInstruction(exploding, shell)("summarize this")).resolves.toBeUndefined();
 
     expect(shell.thinking).toEqual([true, false]);
   });

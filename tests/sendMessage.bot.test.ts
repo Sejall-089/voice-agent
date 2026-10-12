@@ -253,7 +253,10 @@ describe("bot mode — a channel Slack does not have is refused before the dialo
     expectRefusedBeforeDialog(s, outcome);
     expect(s.shell.questions).toEqual(["Before I start: which channel do you mean by 'the bugs channel'?"]);
     expect(s.shell.results[0]).toContain("teach me with: remember the bugs channel is #your-channel");
-    expect((s.directory as FakeChannelDirectory).calls).toEqual(["bugs", "bugs"]);
+    expect((s.directory as FakeChannelDirectory).calls).toEqual([
+      "bugs channel", "bugs", "bugs-channel", // the lookup's spellings (prompt 11)
+      "bugs channel", "bugs", "bugs-channel", // prepare, after the question went unanswered
+    ]);
   });
 });
 

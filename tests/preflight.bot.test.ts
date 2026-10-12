@@ -149,7 +149,7 @@ describe("bot mode — no new text mentions a webhook", () => {
       harness(bugChain("#help")),
       harness(bugChain("the help channel")),
       harness(bugChain("the bugs channel"), { asks: ["#bug", "#bug-reports"] }),
-      harness(bugChain("the bugs channel"), { asks: ["#help"], failOn: { 1: "timeout" } }),
+      harness(bugChain("the bugs channel"), { asks: ["#help"], failOn: { 3: "timeout" } }),
       harness({ kind: "tool", name: "remember", input: { subject: "bugs channel", value: "#nope" } }),
       harness({ kind: "tool", name: "remember", input: { subject: "team", value: "#help" } }),
     ];

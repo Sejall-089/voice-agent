@@ -77,7 +77,8 @@ describe("bot mode: a lone send to an unknown phrase asks which channel", () => 
 
   it("refuses, saves nothing and sends nothing when Slack cannot check the answer", async () => {
     // Directory call 0 is the lookup of "second" (not found); call 1 checks the answer.
-    const h = harness(send("the second channel"), { asks: ["#help"], failOn: { 1: "network" }, context: NOTES });
+    // Call 3 is the answer check: calls 0-2 are the lookup's spellings (prompt 11).
+    const h = harness(send("the second channel"), { asks: ["#help"], failOn: { 3: "network" }, context: NOTES });
     const outcome = await h.planner.run("send these notes to the second channel");
 
     expect(outcome.status).toBe("refused");
@@ -163,7 +164,7 @@ describe("bot mode: the lone ask's texts", () => {
     const runs = [
       harness(send("the second channel"), { asks: ["#help"], context: NOTES }),
       harness(send("the second channel"), { asks: ["#hel", "#nope"], context: NOTES }),
-      harness(send("the second channel"), { asks: ["#help"], failOn: { 1: "network" }, context: NOTES }),
+      harness(send("the second channel"), { asks: ["#help"], failOn: { 3: "network" }, context: NOTES }),
       harness(send("the second channel"), { asks: [null], context: NOTES }),
     ];
     let questions = 0;

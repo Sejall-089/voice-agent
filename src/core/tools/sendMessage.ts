@@ -250,20 +250,50 @@ export function withoutChannelSuffix(name: string): string | null {
   return bare.replace(/^#/, "").trim().length > 0 ? bare : null;
 }
 
-// Slack's answer for a channel NAME, as every bot-mode check asks it (M22 prompt 7): exactly as
-// given first, and — only when Slack has no such channel — once more without a trailing word
-// "channel", exactly. People say "the social channel" and "post it in social channel"; the
-// channel is #social. Nothing is saved by the second try, and nothing near is ever taken.
+// "new channel" → "new-channel"; "all wicky micky" → "all-wicky-micky" (M22 prompt 11). Slack
+// channel names cannot contain spaces, so every run of whitespace becomes one hyphen. Null when
+// there is no whitespace to turn: nothing to retry.
+export function hyphenated(name: string): string | null {
+  const trimmed = name.trim();
+  return /\s/.test(trimmed) ? trimmed.replace(/\s+/g, "-") : null;
+}
+
+// Slack's answer for a channel NAME, as every bot-mode check asks it (M22 prompts 7 and 11).
 //
-// When the second try also misses, the FIRST answer stands — with its suggestions for what was
-// actually typed. When Slack cannot be asked, that is the answer: never a guess.
+//   1. Exactly as given. A channel, or Slack unable to answer, is the answer.
+//   2. Only when Slack has no such channel: the other ways people write a channel name, each
+//      looked up EXACTLY — without a trailing word "channel" ("social channel" → #social), with
+//      spaces as hyphens ("new channel" → #new-channel), and both ("all wicky micky channel").
+//      ALL of them are asked, and:
+//        - none is a channel: the FIRST answer stands, with suggestions for what was typed;
+//        - they lead to ONE channel (however many spellings reach it): that channel;
+//        - they lead to TWO different channels: refused as ambiguous — "social channel" with both
+//          #social and #social-channel is a choice between two real channels, never made for you;
+//        - Slack could not answer one of them: that, never a guess.
+//
+// Nothing is saved by a retry, and nothing near is ever taken: every check is an exact match.
 export async function resolveSlackName(directory: ChannelDirectory, name: string): Promise<ChannelLookup> {
   const first = await directory.resolve(name);
   if (first.ok || first.reason !== "not_found") return first;
-  const bare = withoutChannelSuffix(name);
-  if (bare === null) return first;
-  const second = await directory.resolve(bare);
-  return second.ok || second.reason === "unavailable" ? second : first;
+
+  const withoutSuffix = withoutChannelSuffix(name);
+  const spellings = [
+    withoutSuffix,
+    hyphenated(name),
+    withoutSuffix === null ? null : hyphenated(withoutSuffix),
+  ].filter((spelling): spelling is string => spelling !== null && spelling !== name.trim());
+
+  const found = new Map<string, Extract<ChannelLookup, { ok: true }>>();
+  for (const spelling of new Set(spellings)) {
+    const lookup = await directory.resolve(spelling);
+    if (lookup.ok) found.set(lookup.channel.id, lookup);
+    else if (lookup.reason === "unavailable") return lookup;
+  }
+
+  const [only, ...others] = [...found.values()];
+  if (only === undefined) return first;
+  if (others.length > 0) return { ok: false, reason: "unavailable", failure: "ambiguous" };
+  return only;
 }
 
 // Slack's own name for this channel, or a refusal in the same class `checkChannel` refuses with
@@ -275,13 +305,14 @@ async function slackChannelName(channel: string, directory: ChannelDirectory | u
   throw new UnresolvedReferenceError(slackRefusalText(lookup, channel));
 }
 
-// "the help channel" → "help"; "my design channel" → "design". A leading the / my / our and a
-// trailing "channel" are dropped, and nothing else is touched. Null when nothing is left.
-export function stripChannelPhrase(reference: string): string | null {
+// "the help channel" → "help channel"; "my design channel" → "design channel". Only a leading
+// the / my / our is dropped; `resolveSlackName` then tries the rest as written, without
+// "channel", and with spaces as hyphens (M22 prompt 11 — so "the new channel" can be
+// #new-channel). Null when nothing is left.
+export function withoutArticle(reference: string): string | null {
   const bare = reference
     .trim()
     .replace(/^(?:the|my|our)\s+/i, "")
-    .replace(/\s*\bchannel$/i, "")
     .trim();
   return bare.length > 0 ? bare : null;
 }
@@ -291,9 +322,10 @@ export function stripChannelPhrase(reference: string): string | null {
 //   1. Memory first, by the M21 rule (`checkReference`): a literal is taken as given, a "the …"
 //      phrase memory knows becomes what memory says. Either way the result is then checked in
 //      Slack: a saved name Slack no longer has is refused with suggestions, and is NOT forgotten.
-//   2. A "the …" phrase memory does NOT know is tried in Slack once, EXACTLY, with "the" and
-//      "channel" dropped — "the help channel" is #help if Slack has #help. Never a near match, and
-//      never saved: the dialog still names the channel before anything is sent.
+//   2. A "the …" phrase memory does NOT know is tried in Slack, EXACTLY, with "the" dropped and
+//      the spellings `resolveSlackName` tries — "the help channel" is #help if Slack has #help,
+//      "the new channel" is #new-channel. Never a near match, and never saved: the dialog still
+//      names the channel before anything is sent.
 //   3. Otherwise the M21 refusal ("teach me with: remember …"), unchanged.
 async function botChannelName(
   value: unknown,
@@ -303,9 +335,9 @@ async function botChannelName(
   const check = checkReference(value, memory);
   if (check.ok) return await slackChannelName(check.value, directory);
   if (check.why === "unresolved") {
-    const bare = stripChannelPhrase(check.said);
+    const bare = withoutArticle(check.said);
     if (bare !== null) {
-      const lookup = await directory.resolve(bare);
+      const lookup = await resolveSlackName(directory, bare);
       if (lookup.ok) return lookup.channel.name;
       // Slack could not be asked: refuse rather than guess. A plain "no such channel" falls through
       // to the M21 words, which say how to teach it.
@@ -489,9 +521,9 @@ export const sendMessageTool: Tool = {
       askWhenAlone: (deps) => botDirectory(deps) !== null,
       lookup: async (reference, deps) => {
         const directory = botDirectory(deps);
-        const bare = stripChannelPhrase(reference);
+        const bare = withoutArticle(reference);
         if (directory === null || bare === null) return { kind: "unknown" };
-        const lookup = await directory.resolve(bare);
+        const lookup = await resolveSlackName(directory, bare);
         if (lookup.ok) return { kind: "found", value: `#${lookup.channel.name}` };
         if (lookup.reason === "not_found") return { kind: "unknown" };
         return { kind: "refused", reason: slackRefusalText(lookup, bare) };

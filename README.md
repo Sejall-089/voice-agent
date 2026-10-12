@@ -551,6 +551,10 @@ warning.
 - **"social channel" means #social.** A name Slack doesn't have is tried once more without a
   trailing word "channel": "social channel", "#social channel" and "fun channel" work, exactly,
   and nothing is saved. "channel" on its own doesn't, and a misspelling is never corrected.
+- **"new channel" means #new-channel.** Slack names have no spaces, so a name Slack doesn't have
+  is also tried with hyphens: "new channel", "the new channel" and "all wicky micky" find
+  `#new-channel` and `#all-wicky-micky`. If two different channels match ("social channel" with
+  both `#social` and `#social-channel`), it refuses rather than pick one.
 - **A channel created a few seconds ago works.** On a miss the app re-reads Slack's channel list
   — normally at most every 30 s, plus one extra read once 5 s have passed since the last one —
   so a brand-new channel is found within seconds.
@@ -575,6 +579,12 @@ warning.
   phrases (dropping "channel" makes it "our help", which isn't a channel either).
 - A channel created less than about 5 s ago can still be refused until the next re-read of the
   list; ask again a few seconds later.
+- A name two real channels match by spelling ("social channel" with `#social` and
+  `#social-channel`) is refused as ambiguous; say the exact name.
+
+If the language model can't be reached at all, the bar now says "I couldn't finish that:
+something went wrong before anything was done. Check your connection and try again." instead of
+showing nothing.
 - A renamed channel is refused, with similar channels: names are stored, IDs looked up at send
   time.
 - A failure at the send step of a chain can still leave an issue filed with nobody told — the

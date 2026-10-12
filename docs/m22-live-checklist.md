@@ -75,6 +75,13 @@ To make the app forget a channel between runs, deactivate the fact in
       **Expect:** the dialogs say `Send to #social?`, `Send to #social?` and `Send to #fun?`, and
       nothing is saved to memory. Then send to **"channel"** on its own: refused as not found,
       with no dialog.
+- [ ] **3.3 Spaces as hyphens** (added after prompt 11). The workspace has `#new-channel` and
+      `#all-wicky-micky`. Send to **"new channel"**, **"the new channel"** and **"all wicky
+      micky"**.
+      **Expect:** `Send to #new-channel?`, `Send to #new-channel?` and `Send to #all-wicky-micky?`,
+      and nothing is saved to memory. **"new chanel"** (typo) is refused as not found. If you
+      also create `#social-channel`, **"social channel"** is refused: "More than one Slack channel
+      is called #social channel, so nothing was sent." (Delete `#social-channel` afterwards.)
 
 ## 4. A channel that doesn't exist
 
@@ -172,6 +179,9 @@ on whether that list is still fresh. Check both cases.
       approve, the result says "Could not confirm the message to #help. It may have been sent.
       Check Slack before trying again."
       This is the documented limit: "may have been sent" even when it can't have been.
+      *10.2 covered by tests/maybeSent.warm.bot.test.ts (not human-watched).* The test drives the
+      real directory and the real bot sender against a scripted Slack whose post fails (network
+      error, and a timeout); the box above stays open until a person watches it.
 - [ ] **10.3** Turn Wi-Fi back on and send again.
       **Expect:** it works.
 

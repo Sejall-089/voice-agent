@@ -8,6 +8,20 @@ import type { PlannerOutcome } from "../core/types.ts";
 export interface ThinkingShell {
   // Turns the bar's "Thinking…" indicator on and off.
   showThinking(on: boolean): void;
+  // Where a run that broke before it could report anything says so (M22 prompt 11).
+  showResult(text: string): void;
+}
+
+// Said when the planner itself threw — the model could not be reached, say — so nothing was
+// decided and nothing reported. Fixed text: an error's own message is never shown or logged here,
+// because an HTTP client may quote the request it failed to send.
+export const RUN_FAILED =
+  "I couldn't finish that: something went wrong before anything was done. Check your connection and try again.";
+
+// The error's class, for the console: "APIConnectionError", "TypeError". Never its message.
+function errorClass(error: unknown): string {
+  if (error instanceof Error) return error.constructor.name || error.name || "Error";
+  return typeof error;
 }
 
 export interface PlannerLike {
@@ -61,6 +75,13 @@ export function createRunInstruction(
       if (outcome.proposed?.tool !== undefined) {
         console.log(`[main] refused tool name, as sent: ${JSON.stringify(outcome.proposed.tool)}`);
       }
+    } catch (error) {
+      // A run that THREW never reached its own reporting — found live (M22): an offline model call
+      // in `decide` left only an UnhandledPromiseRejectionWarning in the console and nothing in
+      // the bar. The hotkey runs this fire-and-forget, so a rejection here is lost. Say so, in
+      // fixed words, and name only the error's class on the console.
+      console.error(`[main] error: ${errorClass(error)}`);
+      shell.showResult(RUN_FAILED);
     } finally {
       // finally, not after: a thrown planner must not leave the bar claiming to think
       // forever. There is no path out of here that keeps the indicator up.

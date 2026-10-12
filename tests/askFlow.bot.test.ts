@@ -93,7 +93,8 @@ describe("bot-mode ask flow: Slack cannot be asked", () => {
   it.each(["network", "timeout", "auth", "rate_limited", "slack_error"] as DirectoryFailure[])(
     "while checking the answer (%s): the plan is refused and nothing is saved",
     async (failure) => {
-      const h = harness(bugChain("the bugs channel"), { asks: ["#help", "#help"], failOn: { 1: failure } });
+      // Call 3 is the answer check: calls 0-2 are the lookup's spellings (prompt 11).
+      const h = harness(bugChain("the bugs channel"), { asks: ["#help", "#help"], failOn: { 3: failure } });
       const outcome = await h.planner.run(INSTRUCTION);
 
       expect(h.shell.questions).toEqual([QUESTION]);

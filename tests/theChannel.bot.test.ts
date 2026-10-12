@@ -21,7 +21,7 @@ describe("'the help channel' on a lone send", () => {
     expect(h.sender.calls).toEqual([{ channel: "#help", text: "FORMATTED" }]);
     expect(h.facts()).toEqual([]);
     expect(h.events.filter((e) => e.startsWith("write:"))).toEqual([]);
-    expect(h.directory.calls[0]).toBe("help");
+    expect(h.directory.calls.slice(0, 2)).toEqual(["help channel", "help"]);
   });
 
   it.each(["my help channel", "The Help Channel", "the help"])("also for %j", async (said) => {

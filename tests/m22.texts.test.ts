@@ -97,7 +97,7 @@ describe("bot mode: nothing but a real question or a dialog title asks anything"
     { choice: bugChain("the help channel"), options: {} },
     { choice: bugChain("the bugs channel"), options: { asks: ["#bug", null] } },
     { choice: bugChain("the bugs channel"), options: { asks: ["#bug", "#bug-reports"] } },
-    { choice: bugChain("the bugs channel"), options: { asks: ["#help"], failOn: { 1: "timeout" } } },
+    { choice: bugChain("the bugs channel"), options: { asks: ["#help"], failOn: { 3: "timeout" } } },
     { choice: plan([step("summarize", {}, "x"), step("sendMessage", { channel: "{step1}" }, "y")]), options: {} },
     { choice: { kind: "tool", name: "remember", input: { subject: "bugs channel", value: "#bug" } } as ToolChoice, options: {} },
     {

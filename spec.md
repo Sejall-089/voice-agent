@@ -2467,10 +2467,11 @@ dialog titles.
   from an earlier step (`{stepN}`, anywhere in the channel) is refused outright: "In bot mode I
   need you to name the Slack channel yourself, not take it from an earlier step, so nothing was
   done." The placeholder is visible only there; by the time the step runs it has been filled in.
-- **"the help channel":** memory first, always. On a memory **miss**, a leading the/my/our and a
-  trailing "channel" are dropped and Slack is asked once for an **exact** match. Found: used —
-  the dialog still names it — and **never saved**. Not found: the question — in a chain, and
-  since prompt 7 for a lone send too (above). A near match is never taken.
+- **"the help channel":** memory first, always. On a memory **miss**, a leading the/my/our is
+  dropped and the rest goes through the same spellings as any name (below) — "the help
+  channel" is `#help`, "the new channel" is `#new-channel` (prompt 11). Found: used — the dialog
+  still names it — and **never saved**. Not found: the question — in a chain, and since prompt 7
+  for a lone send too (above). A near match is never taken.
 - **"social channel"** (prompt 7): a name Slack does not have is tried **once more** with a
   trailing word "channel" dropped — a leading `#` kept, exact match only, nothing saved — so
   "social channel", "#social channel" and "fun channel" are `#social`, `#social` and `#fun`, and
@@ -2479,6 +2480,15 @@ dialog titles.
   what was typed, with its suggestions; if Slack cannot be asked on the retry, it refuses. The
   same retry applies to a send's checks, the pre-flight, the answer to the question and
   `remember` (`resolveSlackName` in `core/tools/sendMessage.ts`).
+- **Spaces as hyphens** (prompt 11): Slack names cannot contain spaces, so on a miss the name is
+  also tried with every run of spaces as one hyphen, and with both "channel" dropped and
+  hyphens — "new channel" → `#new-channel`, "all wicky micky" → `#all-wicky-micky`. The full
+  order: as typed (a hit ends it); then, ALL of — without "channel", with hyphens, both — each an
+  exact match. One channel found (however many spellings reach it): that channel. **Two different
+  channels found** — "social channel" with both `#social` and `#social-channel` — refused as
+  ambiguous ("More than one Slack channel is called #social channel, so nothing was sent."),
+  never a silent pick. Slack unable to answer any spelling: refused. Nothing saved, a typed Slack
+  ID never accepted, "new chanel" never corrected, webhook mode untouched.
 - **A remembered channel** is checked in Slack every time it is used; one Slack no longer has is
   refused with similar channels, and is not forgotten.
 - **The answer to "which channel do you mean?"** is checked in Slack before it is saved, and
@@ -2523,9 +2533,22 @@ files). Fakes: `tests/fakeSlackFetch.ts` (scripted Slack, including a network er
 the token and URL), `tests/FakeChannelDirectory.ts` (independent matching, async, checked
 against the real class). Mutation passes were run on the directory (prompt 3), the sender and
 mode selection (prompt 4), the pre-flight / ask / remember logic (prompt 5) and the lone-send
-ask, the "channel" retry and the extra refresh (prompt 7); every survivor got a test that kills
-it. Prompt 7 came from the first live run (a lone send that could not ask; "social channel";
-a just-created channel refused for 30 s). **Not yet fully run live** — `docs/m22-live-checklist.md`.
+ask, the "channel" retry and the extra refresh (prompt 7), and the spaces-as-hyphens spellings
+(prompt 11); every survivor got a test that kills it. Prompt 7 came from the first live run (a
+lone send that could not ask; "social channel"; a just-created channel refused for 30 s).
+The **warm-list "may have been sent"** case (live checklist 10.2) is covered by
+`tests/maybeSent.warm.bot.test.ts` — real directory and real bot sender on one scripted Slack:
+the list read a minute earlier still shows the dialog, the post then fails (network error or
+timeout), the result says it may have been sent, exactly one post and no list read, nothing
+leaked. **Not human-watched.** **Not yet fully run live** — `docs/m22-live-checklist.md`.
+
+**Related live finding (prompt 11): an instruction that threw was lost.** With the model
+unreachable, `Planner.decide` threw an OpenAI "Connection error"; the hotkey runs the instruction
+fire-and-forget, so the bar showed nothing and the console an unhandled rejection.
+`createRunInstruction` (`src/main/runInstruction.ts`) now catches it: the bar says "I couldn't
+finish that: something went wrong before anything was done. Check your connection and try
+again.", and the console logs `[main] error: <error class>` — never the error's message. No
+action-log row is written for it (`tests/runInstruction.failure.test.ts`).
 
 ## 7. Memory engine (core/memory/)
 
