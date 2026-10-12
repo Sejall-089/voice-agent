@@ -541,9 +541,22 @@ warning.
 - **If Slack can't be reached, nothing is sent** — it refuses rather than guesses.
 - **"the help channel"** works with no setup when Slack has a channel called exactly `help` and
   you haven't taught the app something else. It isn't saved; a remembered fact always wins.
+- **A phrase it doesn't know, it asks about** — even for a single send. "send these notes to the
+  second channel", with nothing remembered: "Before I start: which channel do you mean by 'the
+  second channel'?" Your answer is checked against Slack before it's saved, you see "Saved: the
+  second channel = #help", and then the usual "Send to #help?" dialog. A name Slack doesn't have
+  is asked about again (two questions at most); no answer means nothing is saved and you get the
+  old "teach me with: remember …" message. (With a webhook it never asks — the old message, as
+  before.)
+- **"social channel" means #social.** A name Slack doesn't have is tried once more without a
+  trailing word "channel": "social channel", "#social channel" and "fun channel" work, exactly,
+  and nothing is saved. "channel" on its own doesn't, and a misspelling is never corrected.
+- **A channel created a few seconds ago works.** On a miss the app re-reads Slack's channel list
+  — normally at most every 30 s, plus one extra read once 5 s have passed since the last one —
+  so a brand-new channel is found within seconds.
 - **`remember the bugs channel is #help`** checks `#help` exists and saves it as Slack names it;
   a channel Slack doesn't have is refused and nothing is saved. The "which channel do you mean?"
-  question checks your answer the same way.
+  question checks your answer the same way. Both accept "fun channel" for `#fun`.
 - **In a chain**, the channel is checked before step 1, so a bad channel never leaves an issue
   filed with nobody told. A channel taken from an earlier step's result (an email's words, say)
   is refused outright: name the channel yourself.
@@ -559,7 +572,9 @@ warning.
 - A channel deleted and recreated with the same name while the dialog is open could receive the
   message (the send re-checks the name, not the ID you approved).
 - "our help channel" is treated as a channel literally called that — only "my …" and "the …" are
-  phrases.
+  phrases (dropping "channel" makes it "our help", which isn't a channel either).
+- A channel created less than about 5 s ago can still be refused until the next re-read of the
+  list; ask again a few seconds later.
 - A renamed channel is refused, with similar channels: names are stored, IDs looked up at send
   time.
 - A failure at the send step of a chain can still leave an issue filed with nobody told — the
@@ -567,7 +582,9 @@ warning.
 - A timeout or network error on the post is reported as "may have been sent", even when you're
   offline and it can't have been.
 - The webhook (webhook mode) has no timeout.
-- Not yet run live against a real workspace end to end: `docs/m22-live-checklist.md`.
+- Not yet run live against a real workspace end to end: `docs/m22-live-checklist.md`. (A first
+  partial live run found the three things above — the single-send question, "social channel" and
+  the brand-new channel — and they are now fixed in code.)
 
 ### Setting up the Gmail reply tools (optional)
 

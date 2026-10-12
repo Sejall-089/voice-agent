@@ -23,6 +23,8 @@
   `#m22-new`, and don't tell the app about it.
 - Create two private channels, `#m22-private-in` and `#m22-private-out`. Add the bot to the
   first only.
+- Create a public channel `#fun` (for 3.2). Make sure nothing is remembered as "second channel"
+  (for 6.3–6.5).
 - Have the Gmail tools (`CHROME_DEBUG_URL`) and a connector (GitHub or Linear) set up for the
   chains in step 8.
 
@@ -56,12 +58,23 @@ To make the app forget a channel between runs, deactivate the fact in
 - [ ] **2.3** The same with **"#m22-new"**, the channel created a few minutes ago and never
       taught.
       **Expect:** `Send to #m22-new?`, and it posts there with no setup.
+- [ ] **2.4 A channel created seconds ago** (added after prompt 7). Send something to #help first,
+      so the app has just read the channel list. Then create **`#m22-newer`** in Slack, wait about
+      5–10 seconds, and send to **"#m22-newer"**.
+      **Expect:** `Send to #m22-newer?`, and it posts there. If you are quicker than about 5 s
+      after the last read, it may be refused as not found; ask again a few seconds later and it is
+      found (the documented limit).
 
 ## 3. Spelling doesn't matter
 
 - [ ] **3.1** Send to **"HELP"**, **"help"** and **"#Help"**, one after another.
       **Expect:** every dialog says `Send to #help?`, in Slack's own spelling. Cancel each one or
       send each one; either is fine.
+- [ ] **3.2 "… channel"** (added after prompt 7). Send to **"social channel"**, **"#social
+      channel"** and **"fun channel"**, one after another.
+      **Expect:** the dialogs say `Send to #social?`, `Send to #social?` and `Send to #fun?`, and
+      nothing is saved to memory. Then send to **"channel"** on its own: refused as not found,
+      with no dialog.
 
 ## 4. A channel that doesn't exist
 
@@ -88,6 +101,20 @@ To make the app forget a channel between runs, deactivate the fact in
       **Expect:** the dialog says `Send to #help?`, and it posts in #help.
 - [ ] **6.2** Afterwards, look in `memory.db`.
       **Expect:** no "help channel" fact was saved.
+- [ ] **6.3 A lone send asks** (added after prompt 7). With nothing remembered as "second
+      channel", say **"send these notes to the second channel"**.
+      **Expect:** no dialog yet. The bar asks "Before I start: which channel do you mean by 'the
+      second channel'?"
+- [ ] **6.4 Only a valid answer is saved.** Answer **"#hepl"**.
+      **Expect:** it asks again: "I couldn't find a Slack channel called #hepl. … Similar
+      channels: #help. Which channel do you mean by 'the second channel'?" Nothing is saved.
+      Answer **"#help"**.
+      **Expect:** `Saved: the second channel = #help`, then the dialog `Send to #help?`, and it
+      posts in #help. In `memory.db`, "second channel" = `#help` and nothing else was written.
+- [ ] **6.5 No answer saves nothing.** Remove the "second channel" fact, say the same thing again,
+      and press **Escape** at the question.
+      **Expect:** "I don't know which channel "the second channel" means — teach me with:
+      remember the second channel is #your-channel." Nothing is posted or saved.
 
 ## 7. remember
 
@@ -157,6 +184,10 @@ on whether that list is still fresh. Check both cases.
       `(You asked for #help; the webhook posts to its own channel.)`, or, with no
       `SLACK_WEBHOOK_CHANNEL`, `Send via your Slack webhook?` with the "ignores this" note. The
       message goes to the webhook's channel.
+- [ ] **11.2a Webhook mode never asks** (added after prompt 7). Still in webhook mode, with nothing
+      remembered as "second channel", say **"send these notes to the second channel"**.
+      **Expect:** no question and no dialog: "I don't know which channel "the second channel"
+      means — teach me with: remember the second channel is #your-channel."
 - [ ] **11.3** Put `SLACK_BOT_TOKEN` back and restart.
       **Expect:** bot mode again.
 

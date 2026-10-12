@@ -1224,7 +1224,9 @@ A tool may declare `askForReference: { <arg>: { question, retry, accept } }`. Wh
 pre-flight's refusal is for an unresolved reference in such an argument, `runChain`
 (`settleReferences` in `core/planner.ts`) asks the user through `shell.askUser` instead of
 refusing. **Only `sendMessage.channel` declares it.** `openTarget`, an empty channel, a one-step
-plan and a lone `sendMessage` are refused exactly as before, in the same words.
+plan and a lone `sendMessage` are refused exactly as before, in the same words — in webhook
+mode. In bot mode a lone send (or a one-step plan) with an unknown phrase now asks, as
+described in §6f.
 
 - **The question:** `Before I start: which channel do you mean by '<reference>'?`
 - **What counts as an answer:** `checkChannel` against a memory that knows nothing — so a
@@ -2391,7 +2393,11 @@ and nowhere else.
   before being answered from, and a failed refresh is a failure — nothing stale is served. A
   name missing from a fresh list triggers **one refresh**, at most once every **30 seconds**, so
   a channel created a minute ago works with no setup and a repeated typo does not hammer Slack.
-  Concurrent lookups share one request.
+  **Besides that normal rule, one extra refresh is allowed on a miss** (prompt 7) if at least
+  **5 seconds** have passed since the last fetch (`extraRefreshMinGapMs`) and no other extra has
+  run in the last 30 s — so a channel created seconds ago works within seconds. However fast
+  misses come, that is **at most two list fetches in any 30 s**, and a miss right after a fetch
+  never costs a second one. Concurrent lookups share one request: never more than one in flight.
 - **Suggestions:** up to three real names — prefix, then substring, then within a small edit
   distance — shown, never used.
 - **Failures are fixed codes**, never text: `no_token`, `auth`, `network`, `timeout`,
@@ -2444,6 +2450,17 @@ dialog titles.
 
 - **Lone send:** in `prepare`, before the formatter is paid for; again in the dialog and the
   handler (the cache makes repeats cheap).
+- **Lone send to a phrase nobody has taught the app** (prompt 7) — "send these notes to the
+  second channel", no memory entry: in bot mode it **asks**, exactly as a chain does, through the
+  chain's own machinery (`settleReferences` on a plan of one step, opted into by
+  `ReferenceQuestion.askWhenAlone`). "Before I start: which channel do you mean by 'the second
+  channel'?" — the answer is checked against Slack **before** it is saved, `Saved: the second
+  channel = #help` is shown, and then the normal `Send to #help?` dialog. It is asked before
+  `prepare`, so no formatter call is paid until there is a channel. Unanswered (Escape, the 60 s
+  timeout, a busy bar) or out of budget (two questions): the M21 refusal ("I don't know which
+  channel "the second channel" means — teach me with: remember …"), and nothing saved. Slack
+  unreachable while checking: refused, nothing saved. **Webhook mode never asks:** a lone send
+  still shows the M21 "teach me with: remember …" text.
 - **Chain:** in the **pre-flight**, before step 1 (`Tool.preflight`, run inside
   `settleReferences`, on the plan as written). A channel Slack does not have, or a Slack that
   cannot be asked, refuses the **whole plan** — no email read, no issue created. A channel taken
@@ -2452,8 +2469,16 @@ dialog titles.
   done." The placeholder is visible only there; by the time the step runs it has been filled in.
 - **"the help channel":** memory first, always. On a memory **miss**, a leading the/my/our and a
   trailing "channel" are dropped and Slack is asked once for an **exact** match. Found: used —
-  the dialog still names it — and **never saved**. Not found: exactly what M21 did (the lone
-  send's "teach me" refusal; the chain's question). A near match is never taken.
+  the dialog still names it — and **never saved**. Not found: the question — in a chain, and
+  since prompt 7 for a lone send too (above). A near match is never taken.
+- **"social channel"** (prompt 7): a name Slack does not have is tried **once more** with a
+  trailing word "channel" dropped — a leading `#` kept, exact match only, nothing saved — so
+  "social channel", "#social channel" and "fun channel" are `#social`, `#social` and `#fun`, and
+  the dialog shows Slack's name. "channel" on its own is not stripped to anything and does not
+  resolve, and "social chanel" is never corrected. If the retry misses too, the refusal is about
+  what was typed, with its suggestions; if Slack cannot be asked on the retry, it refuses. The
+  same retry applies to a send's checks, the pre-flight, the answer to the question and
+  `remember` (`resolveSlackName` in `core/tools/sendMessage.ts`).
 - **A remembered channel** is checked in Slack every time it is used; one Slack no longer has is
   refused with similar channels, and is not forgotten.
 - **The answer to "which channel do you mean?"** is checked in Slack before it is saved, and
@@ -2472,6 +2497,11 @@ dialog titles.
   carried to the send.
 - **"our help channel" is treated as a literal name**, not a phrase: only "my …" and "the …" are
   references (`isVagueReference`, unchanged), so it is looked up as typed and not found.
+  **Still true after prompt 7:** the "channel" retry makes it "our help", which is not a channel
+  either.
+- **A channel created less than about 5 s ago can still be refused** until the next refresh:
+  the extra refresh on a miss waits 5 s after the last fetch (and one extra per 30 s), so a
+  channel that new may be reported as not found. Asking again a few seconds later finds it.
 - **Renamed channels are refused**, with similar channels. Names are stored (memory holds
   `#name`) and resolved to an ID at send time.
 - **The webhook fetch has no timeout** (webhook mode only).
@@ -2492,8 +2522,10 @@ Recon: `scripts/slack-recon.mjs` (read-only: `auth.test`, `conversations.list`; 
 files). Fakes: `tests/fakeSlackFetch.ts` (scripted Slack, including a network error that quotes
 the token and URL), `tests/FakeChannelDirectory.ts` (independent matching, async, checked
 against the real class). Mutation passes were run on the directory (prompt 3), the sender and
-mode selection (prompt 4) and the pre-flight / ask / remember logic (prompt 5); every survivor
-got a test that kills it. **Not yet run live** — `docs/m22-live-checklist.md`.
+mode selection (prompt 4), the pre-flight / ask / remember logic (prompt 5) and the lone-send
+ask, the "channel" retry and the extra refresh (prompt 7); every survivor got a test that kills
+it. Prompt 7 came from the first live run (a lone send that could not ask; "social channel";
+a just-created channel refused for 30 s). **Not yet fully run live** — `docs/m22-live-checklist.md`.
 
 ## 7. Memory engine (core/memory/)
 
@@ -3049,8 +3081,8 @@ Post-v0:
       **What was learned** is in `CLAUDE.md` ("M21"): seven rules, each from one of the
       findings above.
 - [ ] **M22 — Slack bot-token mode: a message goes to the channel you name, and a new channel
-      needs no setup.** **Code-complete; NOT run live** — `docs/m22-live-checklist.md`. 2112
-      tests green, 75 skipped (the opt-in real-model evals).
+      needs no setup.** **Code-complete; NOT run live** — `docs/m22-live-checklist.md`. 2167
+      tests green across 92 files, 75 skipped (the opt-in real-model evals).
 
       **What changed.** With `SLACK_BOT_TOKEN` set, the app posts with a bot token instead of
       the webhook, to the channel ID Slack's own channel list gives for the name asked for. A
