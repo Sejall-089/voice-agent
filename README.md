@@ -894,10 +894,10 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M22 (Slack bot-token mode) is code-complete and NOT run live yet.** Messages go to the
-channel you name, checked against Slack's own channel list before any dialog; webhook mode is
-unchanged. Tested headless against a scripted Slack whose shapes come from a read-only recon of
-the real API, with a mutation pass on each layer. What a person still has to watch is in
+**M22 (Slack bot-token mode) is closed (13 Oct 2026), after a live run by a person.** Messages
+go to the channel you name, checked against Slack's own channel list before any dialog; webhook
+mode is unchanged. 2206 tests green across 95 files, 75 skipped (the opt-in real-model evals).
+What was watched, what is covered by script or test only, and what the live run found are in
 `docs/m22-live-checklist.md`; the design and its known limits are in `spec.md` §6f.
 
 **M20 (a second connector, GitHub issues) is ticked after a partial live pass (10 Oct 2026).**

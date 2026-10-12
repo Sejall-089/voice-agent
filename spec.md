@@ -3103,9 +3103,21 @@ Post-v0:
 
       **What was learned** is in `CLAUDE.md` ("M21"): seven rules, each from one of the
       findings above.
-- [ ] **M22 — Slack bot-token mode: a message goes to the channel you name, and a new channel
-      needs no setup.** **Code-complete; NOT run live** — `docs/m22-live-checklist.md`. 2167
-      tests green across 92 files, 75 skipped (the opt-in real-model evals).
+- [x] **M22 — Slack bot-token mode: a message goes to the channel you name, and a new channel
+      needs no setup.** **Closed 2026-10-13 after a live run by a person** —
+      `docs/m22-live-checklist.md` says what was watched (steps 1–9 and 11, the offline-model
+      message, a #help regression check), what is covered by script or test only (10.1 simulated,
+      10.2, 12.1/12.2, 13.1) and the live findings. 2206 tests green across 95 files, 75
+      skipped (the opt-in real-model evals).
+
+      **Open limits, carried deliberately** (full list in §6f):
+      - "our help channel" is treated as a literal name, not a phrase.
+      - A channel created less than about 5 s ago can be refused until the next refresh.
+      - A post failure after an irreversible step in a chain can still orphan an issue (the
+        channel is checked before step 1; the post itself can still fail or time out).
+      - The webhook fetch has no timeout (webhook mode only).
+      - The 429 and 500 shapes from Slack were never captured live.
+      - An offline or failed model call is reported in the bar but writes no action-log row.
 
       **What changed.** With `SLACK_BOT_TOKEN` set, the app posts with a bot token instead of
       the webhook, to the channel ID Slack's own channel list gives for the name asked for. A
