@@ -10,15 +10,28 @@ import type { MessageSender, SendResult } from "../types.ts";
 // was created for, as the user knows it ("#social"). It changes nothing about where a message
 // goes — the webhook decides that — only what the app is able to honestly SAY about it. Unset
 // or blank means the app does not know, and says "via your Slack webhook" with no channel.
+export interface SlackSenderOptions {
+  // How long one post may take before it is given up on (M23-pre). A webhook that never answers
+  // used to hold the send forever; now it ends as any other unanswered request does.
+  requestTimeoutMs?: number;
+  // Tests hand in a scripted fetch. Omitted → the runtime's own, looked up at call time.
+  fetchFn?: typeof globalThis.fetch;
+}
+
 export class SlackSender implements MessageSender {
   readonly postsTo: string | null;
+  private readonly requestTimeoutMs: number;
+  private readonly fetchFn: typeof globalThis.fetch | undefined;
 
   constructor(
     private readonly webhookUrl: string | undefined,
     webhookChannel?: string,
+    options: SlackSenderOptions = {},
   ) {
     const label = webhookChannel?.trim() ?? "";
     this.postsTo = label.length > 0 ? label : null;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+    this.fetchFn = options.fetchFn;
   }
 
   async send(channel: string, text: string): Promise<SendResult> {
@@ -26,9 +39,14 @@ export class SlackSender implements MessageSender {
       return { ok: false, error: "SLACK_WEBHOOK_URL is not set in .env." };
     }
 
+    // One post, cut off after `requestTimeoutMs`, never retried. A timeout ends in the same fixed
+    // words as any other request that got no answer — the error itself is never read.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
-      const response = await fetch(this.webhookUrl, {
+      const response = await (this.fetchFn ?? fetch)(this.webhookUrl, {
         method: "POST",
+        signal: controller.signal,
         headers: { "content-type": "application/json" },
         // Note: a Slack *app* webhook always posts to the channel it was configured with.
         // `channel` is a legacy custom-integration override and is ignored by an app webhook.
@@ -44,6 +62,8 @@ export class SlackSender implements MessageSender {
       return { ok: true };
     } catch {
       return { ok: false, error: "Could not reach Slack: the request did not get an answer." };
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

@@ -407,7 +407,7 @@ app.whenReady().then(() => {
 
   // THE planner call site. Typed text and dictated text both funnel through here, so the
   // planner cannot tell them apart and voice needs no changes anywhere in /core.
-  const runInstruction = createRunInstruction(planner, shell);
+  const runInstruction = createRunInstruction(planner, shell, memory);
 
   // M8: voice is only wired up when it can actually work. No transcriber means the bar
   // never opens the microphone and Enter on an empty bar does nothing — exactly as before

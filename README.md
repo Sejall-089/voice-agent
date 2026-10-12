@@ -584,14 +584,16 @@ warning.
 
 If the language model can't be reached at all, the bar now says "I couldn't finish that:
 something went wrong before anything was done. Check your connection and try again." instead of
-showing nothing.
+showing nothing, and the attempt is recorded in the action log.
 - A renamed channel is refused, with similar channels: names are stored, IDs looked up at send
   time.
 - A failure at the send step of a chain can still leave an issue filed with nobody told — the
   channel is checked first, but the post itself can still fail or time out.
 - A timeout or network error on the post is reported as "may have been sent", even when you're
   offline and it can't have been.
-- The webhook (webhook mode) has no timeout.
+- Slack rate limits (429) and server errors (500) are handled by tests built from Slack's
+  documentation, never captured live. (The webhook post now gives up after 10 s, with the usual
+  "Could not reach Slack" message.)
 - Not yet run live against a real workspace end to end: `docs/m22-live-checklist.md`. (A first
   partial live run found the three things above — the single-send question, "social channel" and
   the brand-new channel — and they are now fixed in code.)

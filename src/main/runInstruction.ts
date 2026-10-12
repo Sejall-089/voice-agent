@@ -1,4 +1,4 @@
-import type { PlannerOutcome } from "../core/types.ts";
+import type { ActionLog, PlannerOutcome } from "../core/types.ts";
 
 // THE planner call site, extracted so it is one named thing rather than a closure inside
 // app.whenReady(). Typed text and dictated text both arrive here, which is what lets voice
@@ -31,6 +31,9 @@ export interface PlannerLike {
 export function createRunInstruction(
   planner: PlannerLike,
   shell: ThinkingShell,
+  // Where a run that THREW is recorded (M23-pre). Optional: without it, a throw is shown and
+  // printed but not logged, as before. main.ts passes the same SqliteMemory the planner logs to.
+  log?: Pick<ActionLog, "logAction">,
 ): (instruction: string) => Promise<void> {
   return async (instruction: string): Promise<void> => {
     if (instruction.trim().length === 0) return;
@@ -82,6 +85,24 @@ export function createRunInstruction(
       // fixed words, and name only the error's class on the console.
       console.error(`[main] error: ${errorClass(error)}`);
       shell.showResult(RUN_FAILED);
+      // And a row in the action log (M23-pre), shaped like `refuseIncomplete`'s: no tool, no
+      // arguments, the instruction as every row records it, and the FIXED text as the result —
+      // never the error's message. `error`, not `refused`: something broke; nothing was declined.
+      // Guarded on its own: a log that cannot be written must not undo the report above.
+      if (log !== undefined) {
+        try {
+          log.logAction({
+            ts: new Date().toISOString(),
+            instruction,
+            tool: null,
+            arguments: null,
+            result: RUN_FAILED,
+            status: "error",
+          });
+        } catch {
+          console.error("[main] error: the action log could not record it");
+        }
+      }
     } finally {
       // finally, not after: a thrown planner must not leave the bar claiming to think
       // forever. There is no path out of here that keeps the indicator up.

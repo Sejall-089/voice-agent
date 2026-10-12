@@ -247,3 +247,6 @@ on whether that list is still fresh. Check both cases.
 - **OpenAI credits ran out during the work.** The opt-in real-model evals are the likely cause,
   so they now run only when asked for explicitly.
 - Token not shown anywhere during the run (confirmed by the person at the keyboard).
+- Follow-ups after the run (M23-pre, test-based, not human-watched): a failed model call now
+  leaves an action-log row; the webhook post has a 10 s timeout; 429 handling is covered by tests
+  built from Slack's documentation (still never captured live).

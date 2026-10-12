@@ -2514,13 +2514,20 @@ dialog titles.
   channel that new may be reported as not found. Asking again a few seconds later finds it.
 - **Renamed channels are refused**, with similar channels. Names are stored (memory holds
   `#name`) and resolved to an ID at send time.
-- **The webhook fetch has no timeout** (webhook mode only).
 - **A failure after an irreversible step can still orphan an issue.** A bot-mode channel is now
   checked before step 1, but the post can still fail or time out at the send step, after the
   issue exists.
 - **A timeout or network error on the post is reported as "may have been sent"** — including
   when offline with a warm cache, where nothing can actually have been sent.
-- **The 429 and 500 shapes were never captured live**; the fakes use the documented shapes.
+- **Rate limits (429) and server errors (500) are handled by tests built from Slack's
+  documentation, never captured live.** The directory answers `rate_limited` and the bot sender
+  `not_sent` "Slack is rate limiting. Try again shortly." for every 429 shape tried — with or
+  without Retry-After, an empty or non-JSON body, a Retry-After that is huge or not a number —
+  never sleeping or retrying on it (`tests/rateLimit429.test.ts`).
+- *(Resolved in M23-pre, listed here so the record stays readable: the webhook post now has a
+  10 s timeout that ends in the existing "Could not reach Slack: the request did not get an
+  answer." (`tests/slackSender.timeout.test.ts`); an offline or failed model call now leaves an
+  action-log row (see "Related live finding" below).)*
 - **Model prose that looks like a question can still confuse the next turn** in rare cases;
   the "Similar channels" wording removes one trigger, not every one.
 - **In a plan, bot mode refuses `sendMessage` only for a `{stepN}` channel.** A literal or
@@ -2547,8 +2554,11 @@ unreachable, `Planner.decide` threw an OpenAI "Connection error"; the hotkey run
 fire-and-forget, so the bar showed nothing and the console an unhandled rejection.
 `createRunInstruction` (`src/main/runInstruction.ts`) now catches it: the bar says "I couldn't
 finish that: something went wrong before anything was done. Check your connection and try
-again.", and the console logs `[main] error: <error class>` — never the error's message. No
-action-log row is written for it (`tests/runInstruction.failure.test.ts`).
+again.", and the console logs `[main] error: <error class>` — never the error's message
+(`tests/runInstruction.failure.test.ts`). **Since M23-pre it also leaves an action-log row**: no
+tool, no arguments, the instruction as typed, the fixed text above as the result, status `error`
+— written in the same catch, guarded so a log that cannot be written changes nothing else
+(`tests/runInstruction.logRow.test.ts`).
 
 ## 7. Memory engine (core/memory/)
 
@@ -3115,9 +3125,12 @@ Post-v0:
       - A channel created less than about 5 s ago can be refused until the next refresh.
       - A post failure after an irreversible step in a chain can still orphan an issue (the
         channel is checked before step 1; the post itself can still fail or time out).
-      - The webhook fetch has no timeout (webhook mode only).
-      - The 429 and 500 shapes from Slack were never captured live.
+      - The webhook fetch has no timeout (webhook mode only). *Addressed in M23-pre: a 10 s
+        timeout, same failure text.*
+      - The 429 and 500 shapes from Slack were never captured live. *M23-pre: still true; now
+        handled by tests built from Slack's documentation.*
       - An offline or failed model call is reported in the bar but writes no action-log row.
+        *Addressed in M23-pre: it now leaves an `error` row with the fixed text.*
 
       **What changed.** With `SLACK_BOT_TOKEN` set, the app posts with a bot token instead of
       the webhook, to the channel ID Slack's own channel list gives for the name asked for. A
