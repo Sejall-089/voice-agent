@@ -227,7 +227,7 @@ on whether that list is still fresh. Check both cases.
 
 - [ ] **13.1** Restart once more and send a short message to #help.
       **Expect:** it posts, so the token still works.
-- [ ] **13.2** Think back over the run: was the token shown anywhere? In a terminal, a
+- [x] **13.2** Think back over the run: was the token shown anywhere? In a terminal, a
       screenshot, a pasted log, the app window.
       **Expect:** no. If it was, reinstall the Slack app (or rotate the token), put the new one in
       `.env`, and note it here.
@@ -246,3 +246,4 @@ on whether that list is still fresh. Check both cases.
   live.
 - **OpenAI credits ran out during the work.** The opt-in real-model evals are the likely cause,
   so they now run only when asked for explicitly.
+- Token not shown anywhere during the run (confirmed by the person at the keyboard).
