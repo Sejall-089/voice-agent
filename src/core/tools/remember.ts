@@ -1,7 +1,7 @@
 import { UnresolvedReferenceError } from "../errors.ts";
 import { normalizeReference } from "../memory/normalize.ts";
 import { userSource } from "../memory/source.ts";
-import { slackRefusalText } from "./sendMessage.ts";
+import { resolveSlackName, slackRefusalText } from "./sendMessage.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
 // The value to save for this fact (M22). Unchanged unless this install is in bot mode — a bot
@@ -14,7 +14,7 @@ async function channelFactValue(subject: string, value: string, deps: ToolDeps):
   if (directory === undefined) return value;
   if (!value.startsWith("#") && !/\bchannel$/.test(subject)) return value;
 
-  const lookup = await directory.resolve(value);
+  const lookup = await resolveSlackName(directory, value);
   if (!lookup.ok) throw new UnresolvedReferenceError(slackRefusalText(lookup, value, "saved"));
   return `#${lookup.channel.name}`;
 }

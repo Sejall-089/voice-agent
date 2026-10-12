@@ -760,6 +760,10 @@ export interface ReferenceQuestion {
   accept(answer: string, reference: string, deps: StepCheckDeps): AnswerCheck | Promise<AnswerCheck>;
   // Optional (M22): try to settle the reference without asking. Called once, before the question.
   lookup?(reference: string, deps: StepCheckDeps): Promise<ReferenceLookup>;
+  // Optional (M22 prompt 7): ask about this reference on a LONE call too, not only in a chain.
+  // Read-only and decided by the tool — `sendMessage` says yes in bot mode only, so a lone send in
+  // webhook mode is refused in its own words exactly as it always was.
+  askWhenAlone?(deps: StepCheckDeps): boolean;
 }
 
 export interface Tool extends ToolSchema {

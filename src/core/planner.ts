@@ -211,11 +211,45 @@ export class Planner {
       return { ...(await this.refuse(instruction)), proposed: { tool: choice.name } };
     }
 
+    const asked = await this.askBeforeLoneCall(instruction, tool, choice.input);
+    if (asked !== null) return asked;
     return await this.runStep(instruction, tool, choice.input, context, SINGLE);
   }
 
   private menuNames(): string[] {
     return this.registry.map((tool) => tool.name);
+  }
+
+  // A LONE call naming a reference nobody has taught the app (M22 prompt 7). If the tool says this
+  // reference is worth asking about on a lone call too (`askWhenAlone` — `sendMessage` in bot mode
+  // only), it is settled exactly as a chain's would be: the same lookup, question, check before
+  // anything is saved, "Saved:" line and budget — `settleReferences`, on a plan of one step.
+  //
+  // Returns null to carry on into `runStep`, which is also what happens when the question goes
+  // unanswered: the tool then refuses in its own words, as it always did. Returns an outcome only
+  // when settling REFUSED for a reason of its own (Slack could not be asked), shown as this tool's
+  // refusal. A tool that does not opt in, and every lone call with nothing unknown, costs nothing.
+  private async askBeforeLoneCall(
+    instruction: string,
+    tool: Tool,
+    input: ToolInput,
+  ): Promise<PlannerOutcome | null> {
+    const questions = tool.askForReference;
+    if (questions === undefined) return null;
+    const steps: PlannedStep[] = [{ tool: tool.name, arguments: input, describe: "" }];
+    const check = preflightReferences(steps, this.registry, this.memory);
+    if (check.ok || check.unknown === undefined) return null;
+
+    const deps: StepCheckDeps = {
+      memory: this.memory,
+      senderMode: this.sender.mode,
+      ...(this.channelDirectory === undefined ? {} : { channelDirectory: this.channelDirectory }),
+    };
+    if (questions[check.unknown.key]?.askWhenAlone?.(deps) !== true) return null;
+
+    const settled = await this.settleReferences(steps);
+    if (settled.ok || settled.unknown !== undefined) return null;
+    return await this.refuseUserFixable(instruction, tool.name, input, settled.reason);
   }
 
   // ONE step: everything from memory resolution to the recorded outcome. Extracted at M17 so a
@@ -481,6 +515,8 @@ export class Planner {
       const tool = this.registry.find((t) => t.name === only.tool);
       // Validation established this; the check is for the type system, not for the world.
       if (tool === undefined) return await this.refuse(instruction);
+      const asked = await this.askBeforeLoneCall(instruction, tool, only.arguments);
+      if (asked !== null) return asked;
       return await this.runStep(instruction, tool, only.arguments, context, SINGLE);
     }
 

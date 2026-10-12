@@ -280,7 +280,10 @@ describe("the cache", () => {
     expect(await directory.resolve("nope")).toMatchObject({ ok: false, reason: "not_found" });
     expect(slack.requests).toHaveLength(2);
 
-    clock.t = 40_000;
+    // Changed in M22 prompt 7: was 40 s. A miss 5 s or more after the last attempt may now take
+    // ONE extra refresh (tests/directoryExtraRefresh.test.ts), so "within the gap, no request" is
+    // checked inside that 5 s.
+    clock.t = 33_000;
     expect(await directory.resolve("still-nope")).toMatchObject({ ok: false, reason: "not_found" });
     expect(slack.requests).toHaveLength(2);
   });

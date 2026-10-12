@@ -244,12 +244,16 @@ describe("bot mode — a channel Slack does not have is refused before the dialo
 
   // Changed in M22 prompt 5: an unknown "the … channel" is now tried in Slack ONCE, exactly, with
   // "the" and "channel" dropped. Slack has no #bugs here, so the M21 words still stand.
-  it("refuses an unknown 'the …' phrase in the M21 words when Slack has no exact match either", async () => {
+  // Changed in M22 prompt 7: a lone send in bot mode now ASKS first, as a chain does. Nobody
+  // answers here (no scripted answer), so it ends in the same M21 words — and Slack was asked
+  // about "bugs" twice: by the lookup before the question, and by `prepare` after it.
+  it("refuses an unknown 'the …' phrase in the M21 words when Slack has no exact match and the question goes unanswered", async () => {
     const s = session();
     const outcome = await s.turn(send("the bugs channel"), "send these to the bugs channel");
     expectRefusedBeforeDialog(s, outcome);
+    expect(s.shell.questions).toEqual(["Before I start: which channel do you mean by 'the bugs channel'?"]);
     expect(s.shell.results[0]).toContain("teach me with: remember the bugs channel is #your-channel");
-    expect((s.directory as FakeChannelDirectory).calls).toEqual(["bugs"]);
+    expect((s.directory as FakeChannelDirectory).calls).toEqual(["bugs", "bugs"]);
   });
 });
 

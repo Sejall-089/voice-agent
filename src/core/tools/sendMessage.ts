@@ -239,11 +239,38 @@ export function slackRefusalText(
   }
 }
 
+// "social channel" → "social"; "#social channel" → "#social" (M22 prompt 7). Only a trailing
+// standalone word "channel" is dropped, whatever its case, and a leading "#" is kept. Null when
+// there is no such word, or nothing would be left ("channel" on its own). "social chanel" is not
+// touched: a near spelling is never corrected.
+export function withoutChannelSuffix(name: string): string | null {
+  const trimmed = name.trim();
+  const bare = trimmed.replace(/\s+channel$/i, "");
+  if (bare === trimmed) return null;
+  return bare.replace(/^#/, "").trim().length > 0 ? bare : null;
+}
+
+// Slack's answer for a channel NAME, as every bot-mode check asks it (M22 prompt 7): exactly as
+// given first, and — only when Slack has no such channel — once more without a trailing word
+// "channel", exactly. People say "the social channel" and "post it in social channel"; the
+// channel is #social. Nothing is saved by the second try, and nothing near is ever taken.
+//
+// When the second try also misses, the FIRST answer stands — with its suggestions for what was
+// actually typed. When Slack cannot be asked, that is the answer: never a guess.
+export async function resolveSlackName(directory: ChannelDirectory, name: string): Promise<ChannelLookup> {
+  const first = await directory.resolve(name);
+  if (first.ok || first.reason !== "not_found") return first;
+  const bare = withoutChannelSuffix(name);
+  if (bare === null) return first;
+  const second = await directory.resolve(bare);
+  return second.ok || second.reason === "unavailable" ? second : first;
+}
+
 // Slack's own name for this channel, or a refusal in the same class `checkChannel` refuses with
 // (`UnresolvedReferenceError`), so the planner shows it as the tool's words and logs `refused`.
 async function slackChannelName(channel: string, directory: ChannelDirectory | undefined): Promise<string> {
   if (directory === undefined) throw new UserFixableError(NO_DIRECTORY);
-  const lookup = await directory.resolve(channel);
+  const lookup = await resolveSlackName(directory, channel);
   if (lookup.ok) return lookup.channel.name;
   throw new UnresolvedReferenceError(slackRefusalText(lookup, channel));
 }
@@ -443,7 +470,7 @@ export const sendMessageTool: Tool = {
         if (!check.ok) return { kind: "rejected" };
         const directory = botDirectory(deps);
         if (directory === null) return { kind: "accepted", value: check.channel };
-        const lookup = await directory.resolve(check.channel);
+        const lookup = await resolveSlackName(directory, check.channel);
         if (lookup.ok) return { kind: "accepted", value: `#${lookup.channel.name}` };
         if (lookup.reason === "not_found") {
           return {
@@ -456,6 +483,10 @@ export const sendMessageTool: Tool = {
       // Bot mode (M22): "the help channel", unknown to memory, is #help when Slack has exactly
       // #help — found without asking, and NOT saved. Anything less than an exact match is asked
       // about as before; Slack unreachable refuses rather than guesses.
+      // Bot mode (M22 prompt 7): a LONE send asks too — "send these notes to the second channel"
+      // gets the same question a chain would, instead of "teach me with: remember …". In webhook
+      // mode it does not, and the lone send is refused in its own words as in M21.
+      askWhenAlone: (deps) => botDirectory(deps) !== null,
       lookup: async (reference, deps) => {
         const directory = botDirectory(deps);
         const bare = stripChannelPhrase(reference);

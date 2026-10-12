@@ -60,6 +60,11 @@ export interface SlackChannelDirectoryOptions {
   // works with no setup — but not more often than this, so a typo repeated does not hammer
   // Slack. Measured from the last refresh ATTEMPT, whether or not it succeeded.
   missRefreshMinGapMs?: number;
+  // M22 prompt 7: ONE extra refresh on a miss inside that gap — so a channel created seconds
+  // after the last fetch is found without waiting it out — but only this long after the last
+  // attempt, and only one extra per `missRefreshMinGapMs`. So misses cost at most two fetches
+  // per 30 s however fast they come, and a miss right after a fill never costs a second fetch.
+  extraRefreshMinGapMs?: number;
   // Per request. A refresh is several requests when the list pages.
   requestTimeoutMs?: number;
   // For the whole refresh, every page included.
@@ -99,12 +104,15 @@ export class SlackChannelDirectory implements ChannelDirectory {
   private readonly now: () => number;
   private readonly ttlMs: number;
   private readonly missRefreshMinGapMs: number;
+  private readonly extraRefreshMinGapMs: number;
   private readonly requestTimeoutMs: number;
   private readonly refreshDeadlineMs: number;
 
   private cache: Cache | null = null;
   // When the last refresh began, successful or not. -Infinity: nothing has been tried yet.
   private lastAttemptAt = Number.NEGATIVE_INFINITY;
+  // When the last EXTRA miss-refresh (inside the normal gap) was allowed.
+  private lastExtraAt = Number.NEGATIVE_INFINITY;
   // The one refresh in flight, shared by everyone who arrives while it runs.
   private inflight: Promise<RefreshResult> | null = null;
 
@@ -114,6 +122,7 @@ export class SlackChannelDirectory implements ChannelDirectory {
     this.now = options.now ?? Date.now;
     this.ttlMs = options.ttlMs ?? 600_000;
     this.missRefreshMinGapMs = options.missRefreshMinGapMs ?? 30_000;
+    this.extraRefreshMinGapMs = options.extraRefreshMinGapMs ?? 5_000;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 8_000;
     this.refreshDeadlineMs = options.refreshDeadlineMs ?? 20_000;
   }
@@ -152,7 +161,7 @@ export class SlackChannelDirectory implements ChannelDirectory {
 
     // A miss in a fresh list. The channel may simply be newer than the list: refresh once — but
     // not if a refresh was attempted moments ago, which is the "repeated typo" case.
-    if (this.inflight !== null || this.now() - this.lastAttemptAt >= this.missRefreshMinGapMs) {
+    if (this.inflight !== null || this.mayRefreshOnMiss()) {
       const refreshed = await this.refresh();
       // A refresh that failed says nothing about whether the channel exists. Not knowing is
       // reported as not knowing, never as "not found".
@@ -162,6 +171,20 @@ export class SlackChannelDirectory implements ChannelDirectory {
     }
 
     return { ok: false, reason: "not_found", suggestions: suggest(name, this.cache?.names ?? []) };
+  }
+
+  // May a miss refresh the list now? The normal rule: the last attempt was `missRefreshMinGapMs`
+  // ago. The extra one (M22 prompt 7): at least `extraRefreshMinGapMs` since the last attempt, and
+  // no other extra inside the last `missRefreshMinGapMs` — taken, and recorded, here.
+  private mayRefreshOnMiss(): boolean {
+    const now = this.now();
+    const sinceAttempt = now - this.lastAttemptAt;
+    if (sinceAttempt >= this.missRefreshMinGapMs) return true;
+    if (sinceAttempt >= this.extraRefreshMinGapMs && now - this.lastExtraAt >= this.missRefreshMinGapMs) {
+      this.lastExtraAt = now;
+      return true;
+    }
+    return false;
   }
 
   private isExpired(cache: Cache): boolean {
