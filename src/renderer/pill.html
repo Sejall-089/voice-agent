@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Status</title>
+    <!--
+      The status pill (M23): a small window at the bottom right that says what background jobs
+      are doing and lists the ones waiting for the user.
+
+      A third page, like overlay.html, because it is a third WINDOW with its own requirements:
+      it never takes focus, but — unlike the overlay — it does take clicks. Its script draws
+      what main sends and forwards clicks; it decides nothing. See src/renderer/pill/render.ts.
+    -->
+    <style>
+      :root {
+        --ink: #f4f4f5;
+        --muted: #a1a1aa;
+        --surface: rgba(24, 24, 27, 0.96);
+        --line: rgba(255, 255, 255, 0.1);
+        --running: #3b82f6;
+        --amber: #f59e0b;
+        --failed: #ef4444;
+        --done: #22c55e;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        font: 13px/1.35 "Segoe UI", system-ui, sans-serif;
+        color: var(--ink);
+        user-select: none;
+      }
+
+      /* The window is sized to its content by main; the pill sits at its bottom edge and the
+         list, when open, fills what is above it. */
+      .pill {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+
+      button {
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .summary {
+        flex: 0 0 auto;
+        height: 44px;
+        align-self: flex-end;
+        width: 232px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 16px;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: var(--surface);
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--running);
+        flex: 0 0 auto;
+      }
+
+      .label {
+        font-weight: 600;
+      }
+
+      .mode-needs-you .summary {
+        border-color: var(--amber);
+        background: #7a4a00;
+      }
+      .mode-needs-you .dot {
+        background: var(--amber);
+      }
+      .mode-failed .dot {
+        background: var(--failed);
+      }
+      .mode-done .dot {
+        background: var(--done);
+      }
+
+      /* A short pulse when a job starts waiting; main turns the class off after a moment and
+         the pill holds steady amber. */
+      .pulse .summary {
+        animation: pulse 0.8s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+        }
+        50% {
+          box-shadow: 0 0 0 7px rgba(245, 158, 11, 0);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .pulse .summary {
+          animation: none;
+          outline: 2px solid var(--amber);
+        }
+      }
+
+      .list {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--surface);
+        padding: 8px 10px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      .heading {
+        font-weight: 600;
+      }
+      .mute {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: transparent;
+        padding: 2px 8px;
+        color: var(--muted);
+      }
+
+      .notice {
+        margin-top: 6px;
+        color: var(--amber);
+      }
+
+      .row {
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .row:last-child {
+        border-bottom: 0;
+      }
+      .title {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .detail {
+        color: var(--muted);
+        overflow-wrap: anywhere;
+        max-height: 2.7em;
+        overflow: hidden;
+      }
+      .state-needs-you .detail {
+        color: var(--amber);
+      }
+      .state-failed .detail,
+      .state-interrupted .detail,
+      .state-expired .detail {
+        color: #fca5a5;
+      }
+      .buttons {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .action {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 3px 10px;
+      }
+      .action-review,
+      .action-resume {
+        border-color: var(--amber);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="pill" class="pill"></div>
+    <script type="module" src="./pill/main.ts"></script>
+  </body>
+</html>

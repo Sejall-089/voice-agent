@@ -31,12 +31,17 @@ export interface Startable {
 export function createOnDictateHotkey(
   dictation: Startable,
   busyState: StateHolder | null,
+  // M23. Run once per ACCEPTED press, before dictation begins: main.ts detaches the job that
+  // had the bar, for the reason the instruction hotkey does — dictation shows its indicator in
+  // that same window, and a job still writing its narration there would be writing over it.
+  onAccepted?: () => void,
 ): () => void {
   return (): void => {
     if (busyState && busyState.getState() !== "idle") {
       console.log("[dictate] hotkey ignored - an instruction is already being captured");
       return;
     }
+    onAccepted?.();
     void dictation.begin();
   };
 }

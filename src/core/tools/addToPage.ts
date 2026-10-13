@@ -41,6 +41,7 @@ export const addToPageTool: Tool = {
     required: ["instruction"],
   },
   risk: "caution",
+  background: "foreground-only",
   // SAFE: reading the open page to name it in the narration. If Notion isn't reachable at
   // all, this throws and the planner refuses before anything runs — the same "if we can't say
   // what we're about to do, we don't do it" rule confirmSummary already follows.

@@ -18,6 +18,7 @@ import { isAllowedResultLink } from "../../core/resultLinks.ts";
 import type { InputInjector } from "./InputInjector.ts";
 import { virtualKeyFor } from "./mediaKeys.ts";
 import { approveLabel } from "./confirmLabel.ts";
+import { ConfirmBroker } from "./ConfirmBroker.ts";
 import type { CapturedContext, ConfirmOptions, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
@@ -97,16 +98,35 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // that "never mind" should mean never mind for everything on screen at once.
   private dismissPointer: (() => void) | null = null;
   private snapshotTarget: (() => Promise<void>) | null = null;
-  // Whether a confirm dialog is on screen awaiting an answer (M14 §8). Set SYNCHRONOUSLY
-  // before the dialog is created, so there is no instant in which it is visible and this is
-  // still false — the gap a live tester would find first.
-  private confirmPending = false;
+  // Every confirm dialog, one at a time (M23). Through M22 this was a boolean,
+  // `confirmPending`, set around a single dialog — which two jobs' confirms overlapping would
+  // have corrupted, the first answer clearing it while the second dialog was still up. The
+  // queue owns the fact now, and `confirmPending` below is read from it. A request is
+  // presented synchronously when nothing else is showing, so there is still no instant in
+  // which a dialog is visible and the guards do not know (M14 §8).
+  private readonly confirms = new ConfirmBroker<ConfirmRequest>(
+    (request) => this.presentConfirm(request),
+    (request) => this.afterConfirm(request),
+  );
+  // The window a DETACHED job's dialog hangs off: the status pill. Measured, not assumed
+  // (scripts/pill-click-recon.cjs): parented to the pill a dialog is on top at 9 of 9 points,
+  // topmost and in the foreground, with the bar on screen or hidden; unparented it is 0 of 9
+  // behind a visible bar. Null until main.ts hands one over.
+  private detachedOwner: (() => BrowserWindow | null) | null = null;
+  // Something was delivered to the bar while a detached job's dialog was up and the bar was
+  // not on screen. Shown once that dialog is gone.
+  private showAfterDetachedDialog = false;
   // The single open question (`askUser`), if any — its resolver, held on the instance for the
   // reason `pendingInput` is: nothing per-call to strand. Non-null IS "a question is waiting",
   // and it is assigned synchronously, so the hotkey guards can never see the bar asking while
   // this still says it is not.
   private pendingAsk: ((answer: string | null) => void) | null = null;
   private askTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Is a confirm on screen, or queued behind the one that is?
+  private get confirmPending(): boolean {
+    return this.confirms.isPending();
+  }
 
   constructor(private readonly window: BrowserWindow) {
     // Both listeners are registered ONCE, for the app's lifetime.
@@ -419,6 +439,14 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // alone; `confirm()` brings the bar back, already showing this, once the answer is in.
     if (this.confirmPending) {
       this.window.webContents.send("commandbar:echo", text);
+      if (!this.window.isVisible()) {
+        this.noteHiddenDelivery();
+      } else if (this.confirms.showing()?.detached === true && !this.window.isFocused()) {
+        // SOMEONE ELSE'S dialog (M23): a detached job's, which never hid this bar. The result
+        // is already on screen in an unfocused bar, and nothing about that dialog closing will
+        // ever hide it — so it gets the auto-hide any unfocused result gets.
+        this.scheduleAutoHide();
+      }
       return;
     }
     if (!this.window.isVisible()) {
@@ -460,9 +488,45 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // the path the instruction hotkey takes to say "there's a confirmation waiting" — and
     // re-showing an always-on-top bar to say so is how the bar ended up covering the very
     // dialog it was pointing at. The line is still delivered, and it is still spoken.
+    // Not re-shown while a dialog is up — and NOT remembered for afterwards either: the line
+    // most often delivered here is the hotkey's own "there's a confirmation waiting", which is
+    // stale the instant the dialog is answered.
     if (!this.window.isVisible() && !this.confirmPending) this.window.showInactive();
     this.cancelAutoHide();
     this.window.webContents.send("commandbar:status", text);
+  }
+
+  // A RESULT reached a bar that is hidden while a dialog is up. For an ATTACHED dialog that is the
+  // M19 behaviour and `afterConfirm` restores the bar exactly as it always has. For a detached
+  // one nothing would ever bring the bar back, so it is remembered and shown afterwards.
+  private noteHiddenDelivery(): void {
+    if (this.confirms.showing()?.detached === true) this.showAfterDetachedDialog = true;
+  }
+
+  // --- Jobs (M23) ---
+
+  // The window a detached job's confirm dialog is parented to. Same shape as attachPointer:
+  // the shell is handed a way to get it and never learns what a pill is.
+  attachDetachedDialogOwner(owner: () => BrowserWindow | null): void {
+    this.detachedOwner = owner;
+  }
+
+  // Can the user be handed something that needs their screen right now? Not while a dialog, a
+  // question or an instruction capture is open, and not while the microphone is in use.
+  isForegroundFree(): boolean {
+    return (
+      !this.confirmPending &&
+      this.pendingAsk === null &&
+      this.pendingInput === null &&
+      this.voiceState === "idle"
+    );
+  }
+
+  // The needs-you chime. Its own channel and its own `Audio` element in the renderer — not
+  // `speech:play`, whose player stops whatever is playing first and whose one `speech:ended`
+  // reply would end an utterance early. Fire-and-forget: nothing waits on a chime.
+  playChime(): void {
+    if (!this.window.isDestroyed()) this.window.webContents.send("chime:play");
   }
 
   // --- SpeechShell (M14) ---
@@ -559,6 +623,8 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // microphone in the same moment (spec §4a), so an app still speaking would be transcribed
     // by whisper into the user's own instruction. MockShell mirrors this exactly.
     this.stopSpeaking();
+    // And the chime with it (M23), for the same reason: whisper hears what the speaker plays.
+    if (!this.window.isDestroyed()) this.window.webContents.send("chime:stop");
 
     this.cancelAutoHide();
     this.voiceState = "recording";
@@ -789,58 +855,101 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     return this.confirmPending;
   }
 
-  async confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
-    // Set before anything awaits, so "the dialog is up" and "the guard knows" can never be
-    // observed in different states.
-    this.confirmPending = true;
+  // EVERY confirm in the app comes through here and is queued (M23): exactly one dialog is on
+  // screen at a time, and the next opens when it is answered.
+  confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
+    return this.confirms.request({
+      message,
+      options,
+      detached: options?.detached === true,
+      barWasVisible: false,
+    });
+  }
 
+  // Show one dialog. Called by the queue, never directly.
+  private async presentConfirm(request: ConfirmRequest): Promise<boolean> {
     // The bar is still visible (and its Escape registration still live) at this point —
     // nothing hides it between submit and the confirm gate. The native dialog already
     // relies on Escape meaning "no" (cancelId below), so our global hook has to step aside
     // for as long as the dialog owns the keyboard, or the two would race for the same key.
+    // True of a detached dialog too: a bar that is open for typing has the hook armed.
     this.unregisterEscape();
 
-    // THE BAR GETS OUT OF THE WAY, DELIBERATELY (M19 live fix).
-    //
-    // The bar is a 640x640 always-on-top window in the middle of the screen, and the dialog
-    // opens in the same place. Until now the only thing keeping one off the other was a side
-    // effect: the dialog took focus, the bar blurred, and the blur handler hid it. That works
-    // only when the bar HAD focus. In a chain it does not — step 2's result re-shows the bar
-    // with showInactive(), an unfocused window never blurs, and step 3's dialog opened
-    // underneath it with its text and both buttons covered. Found by a person, on the first
-    // live chain; scripts/confirm-zorder-recon.cjs reproduces it.
-    //
-    // Two changes, and they do different jobs:
-    //   1. The bar is hidden here, on purpose, whatever its focus — and put back in the
-    //      `finally`. A plain window hide, not `this.hide()`: nothing is being dismissed, so no
-    //      capture is ended and the bar's contents are not reset.
-    //   2. The dialog is PARENTED to the bar window (below). Windows keeps an owned window
-    //      above its owner whatever the owner does, and an owned window of a topmost window is
-    //      topmost itself — so even if something re-shows the bar mid-dialog it lands behind
-    //      the dialog, and another application cannot cover the dialog either. Measured: the
-    //      dialog stays on top with the bar hidden, visible, hidden mid-dialog and re-shown
-    //      mid-dialog, and the confirm stays pending throughout.
-    const wasVisible = this.window.isVisible();
-    this.cancelAutoHide();
-    if (wasVisible) this.window.hide();
-    try {
-      const { response } = await dialog.showMessageBox(this.window, {
-        type: "question",
-        // The first button's WORD is the tool's ("Create issue", "Send reply"), or "Send" when
-        // it named none. Its POSITION, and everything about Cancel, is fixed here and is not
-        // something a label can move.
-        buttons: [approveLabel(options), "Cancel"],
-        defaultId: 1, // Cancel — a stray Enter must never fire a destructive action
-        cancelId: 1, // Esc / closing the dialog means "no"
-        noLink: true,
-        title: "Confirm action",
-        message,
-      });
-      return response === 0;
-    } finally {
-      // In the finally, not after the await: a dialog that THREW must not leave the hotkeys
-      // blocked forever with nothing on screen to answer.
-      this.confirmPending = false;
+    // WHAT A DETACHED DIALOG DOES NOT DO (M23), and each omission is the point. It belongs to a
+    // job the user walked away from and was opened by their click in the pill, at a moment
+    // when the bar may be mid-instruction, holding a recording, or showing a question:
+    //   - it is NOT parented to the bar, and the bar is NOT hidden — `window.hide()` fires the
+    //     window's own "hide" event, which ends a capture and a question (see the constructor);
+    //   - speech is NOT stopped when it closes — what is being said belongs to something else;
+    //   - the bar is NOT restored afterwards, because it was never taken away.
+    // It hangs off the pill instead (see `detachedOwner`). WITH NO LIVE PILL IT IS REFUSED,
+    // and no dialog is opened at all: unparented, the dialog was measured fully covered by a
+    // visible bar (0 of 9 points), which would leave a question nobody can see blocking both
+    // hotkeys. The refusal is a thrown error — the same thing a dialog that failed to open has
+    // always been — so the run fails and the step is not run; it is never taken for a "no".
+    let owner: BrowserWindow | null;
+    if (request.detached) {
+      owner = this.detachedOwner?.() ?? null;
+      if (owner === null || owner.isDestroyed()) {
+        throw new Error("There is no status pill to show this confirmation from.");
+      }
+    } else {
+      // THE BAR GETS OUT OF THE WAY, DELIBERATELY (M19 live fix).
+      //
+      // The bar is a 640x640 always-on-top window in the middle of the screen, and the dialog
+      // opens in the same place. Until M19 the only thing keeping one off the other was a side
+      // effect: the dialog took focus, the bar blurred, and the blur handler hid it. That works
+      // only when the bar HAD focus. In a chain it does not — step 2's result re-shows the bar
+      // with showInactive(), an unfocused window never blurs, and step 3's dialog opened
+      // underneath it with its text and both buttons covered. Found by a person, on the first
+      // live chain; scripts/confirm-zorder-recon.cjs reproduces it.
+      //
+      // Two changes, and they do different jobs:
+      //   1. The bar is hidden here, on purpose, whatever its focus — and put back in
+      //      `afterConfirm`. A plain window hide, not `this.hide()`: nothing is being dismissed,
+      //      so the bar's contents are not reset.
+      //   2. The dialog is PARENTED to the bar window (below). Windows keeps an owned window
+      //      above its owner whatever the owner does, and an owned window of a topmost window is
+      //      topmost itself — so even if something re-shows the bar mid-dialog it lands behind
+      //      the dialog, and another application cannot cover the dialog either. Measured: the
+      //      dialog stays on top with the bar hidden, visible, hidden mid-dialog and re-shown
+      //      mid-dialog, and the confirm stays pending throughout.
+      request.barWasVisible = this.window.isVisible();
+      this.cancelAutoHide();
+      if (request.barWasVisible) this.window.hide();
+      owner = this.window;
+    }
+
+    const box = {
+      type: "question" as const,
+      // The first button's WORD is the tool's ("Create issue", "Send reply"), or "Send" when
+      // it named none. Its POSITION, and everything about Cancel, is fixed here and is not
+      // something a label can move.
+      buttons: [approveLabel(request.options), "Cancel"],
+      defaultId: 1, // Cancel — a stray Enter must never fire a destructive action
+      cancelId: 1, // Esc / closing the dialog means "no"
+      noLink: true,
+      title: "Confirm action",
+      message: request.message,
+    };
+    const { response } = await dialog.showMessageBox(owner, box);
+    return response === 0;
+  }
+
+  // The dialog is gone — answered, or it threw. Called by the queue on EVERY path out, after
+  // it has stopped counting this dialog as pending: a dialog that failed must not leave the
+  // hotkeys blocked for ever with nothing on screen to answer, and the Escape hook below can
+  // only be re-armed once the dialog no longer owns the key.
+  private afterConfirm(request: ConfirmRequest): void {
+    if (request.detached) {
+      if (this.showAfterDetachedDialog) {
+        this.showAfterDetachedDialog = false;
+        if (!this.window.isVisible()) {
+          this.window.showInactive();
+          this.scheduleAutoHide();
+        }
+      }
+    } else {
       // The question has been answered, so anything still queued about it is describing a
       // decision the user has already made. Live use heard the app refer to a dialog cancelled
       // five seconds earlier, because a ~5s synthesis had the summary still waiting behind it.
@@ -852,16 +961,25 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       // take focus from wherever it went next. An unfocused bar gets no blur to dismiss it, so
       // it is given the same auto-hide a voice result gets; a result arriving a moment later
       // simply restarts that timer.
-      if (wasVisible && !this.window.isVisible()) {
+      if (request.barWasVisible && !this.window.isVisible()) {
         this.window.showInactive();
         this.scheduleAutoHide();
       }
-      // Re-arm Escape only if the bar is on screen. The "show" event above normally does it;
-      // this covers a bar something else made visible while the dialog was up, when
-      // registerEscape() was refusing.
-      if (this.window.isVisible()) this.registerEscape();
     }
+    // Re-arm Escape only if the bar is on screen. The "show" event normally does it; this
+    // covers a bar that was visible throughout (a detached dialog) or that something else made
+    // visible while the dialog was up, when registerEscape() was refusing.
+    if (this.window.isVisible()) this.registerEscape();
   }
+}
+
+// One queued confirm. `barWasVisible` is filled in when it is PRESENTED, not when it is asked
+// for: a request can wait behind another dialog, and what matters is the bar at its own turn.
+interface ConfirmRequest {
+  message: string;
+  options: ConfirmOptions | undefined;
+  detached: boolean;
+  barWasVisible: boolean;
 }
 
 function messageOf(error: unknown): string {

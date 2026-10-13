@@ -10,7 +10,10 @@ import { UnavailableElements } from "./screen/UnavailableElements.ts";
 import { UnavailableChooser } from "./screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
-import { needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
+import { highestTier, needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
+import { OPEN_GATE } from "./jobs/gate.ts";
+import type { GateAnswer, JobGate } from "./jobs/gate.ts";
+import { CANCELLED_BEFORE_START, CANCELLED_BY_YOU, EXPIRED } from "./jobs/messages.ts";
 import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts";
 import { emailOpenHint } from "./contextHints.ts";
 import {
@@ -41,6 +44,7 @@ import type {
   CapturedContext,
   ChannelDirectory,
   GmailSurface,
+  JobsReader,
   LLMClient,
   Memory,
   MessageSender,
@@ -83,10 +87,57 @@ interface StepPosition {
   // Handed to the tool as `deps.chained` (M19) — see ToolDeps. A fact about POSITION, which is
   // why it lives here: the planner knows it, and nothing the model wrote can set it.
   chained: boolean;
+  // Where this step sits, for the job gate (M23): 1-based, and the plan's length.
+  index: number;
+  total: number;
 }
 
 // The shape every milestone before M17 had, and the shape a lone instruction still has.
-const SINGLE: StepPosition = { label: "", speak: true, report: true, chained: false };
+const SINGLE: StepPosition = {
+  label: "",
+  speak: true,
+  report: true,
+  chained: false,
+  index: 1,
+  total: 1,
+};
+
+// What the planner is told about the world before it plans: what the shell captured, plus the
+// one fact only Gmail knows (M19, core/contextHints.ts).
+export interface Captured {
+  context: CapturedContext;
+  planning: NonNullable<PlannerOutcome["planning"]>;
+}
+
+// Capture it — ONCE, at the moment an instruction is given. Extracted from `Planner.run` at M23
+// because a job may not start executing until later (three are already running), and what
+// "these notes" meant is what was on the clipboard when the user said it, not when a slot came
+// free. The caller holds the result and hands it to `run`; nothing reads the clipboard again.
+//
+// The Gmail check is concurrent and deadlined, because this precedes every planning call and
+// must not be able to slow one down or fail it: a check that is slow, broken or unconfigured
+// contributes nothing, and the context is then exactly what the shell captured.
+export async function captureContext(
+  shell: Pick<OSShell, "getContext">,
+  gmail: Pick<GmailSurface, "hasOpenEmail">,
+): Promise<Captured> {
+  const asked = Date.now();
+  const [captured, hint] = await Promise.all([
+    shell.getContext(),
+    emailOpenHint(gmail).then((open) => ({ open, ms: Date.now() - asked })),
+  ]);
+  return {
+    context: hint.open ? { ...captured, emailOpen: true } : captured,
+    // What the model was told, for the console (M19). A live run filed the clipboard as the bug
+    // with an email open, and "was the hint even in the prompt?" could not be answered
+    // afterwards: nothing recorded it. COUNTS AND A FLAG ONLY — never the clipboard's text.
+    planning: {
+      emailHint: hint.open,
+      emailCheckMs: hint.ms,
+      clipboardChars: captured.selectedText?.length ?? 0,
+    },
+  };
+}
 
 // The planner loop (spec.md §5). It is generic: it never names a specific tool. The LLM
 // PROPOSES a tool; the planner DISPOSES — registry check, resolve, validate, confirm gate,
@@ -137,30 +188,63 @@ export class Planner {
     // and nothing otherwise. Handed to tools as `channelDirectory` in both ToolDeps and
     // PrepareDeps, and ONLY when present: a planner built without it hands out neither key.
     private readonly channelDirectory?: ChannelDirectory,
+    // M23. Where this run may have to wait — for a free slot, for the user to come back, for a
+    // confirm nobody is there to answer. The default answers "go" to everything at once, which
+    // is every milestone before M23. See core/jobs/gate.ts.
+    private readonly gate: JobGate = OPEN_GATE,
+    // M23. The app's job records, read-only, handed to tools as `jobs` — and only when present.
+    private readonly jobs?: JobsReader,
   ) {}
 
-  async run(instruction: string): Promise<PlannerOutcome> {
-    // 1. Capture context from the shell — and, CONCURRENTLY, ask Gmail the one thing the shell
-    //    cannot know: is an email open? (M19, core/contextHints.ts.) Concurrent and deadlined,
-    //    because this precedes every planning call and must not be able to slow one down or
-    //    fail it; a check that is slow, broken or unconfigured simply contributes nothing, and
-    //    the context is then exactly what it was before this existed.
-    const asked = Date.now();
-    const [captured, hint] = await Promise.all([
-      this.shell.getContext(),
-      emailOpenHint(this.gmail).then((open) => ({ open, ms: Date.now() - asked })),
-    ]);
-    const context: CapturedContext = hint.open ? { ...captured, emailOpen: true } : captured;
-
-    // What the model was told, for the console (M19). A live run filed the clipboard as the bug
-    // with an email open, and "was the hint even in the prompt?" could not be answered
-    // afterwards: nothing recorded it. COUNTS AND A FLAG ONLY — never the clipboard's text.
-    const planning: NonNullable<PlannerOutcome["planning"]> = {
-      emailHint: hint.open,
-      emailCheckMs: hint.ms,
-      clipboardChars: captured.selectedText?.length ?? 0,
-    };
+  // `captured` is what was on the clipboard, and whether an email was open, WHEN THE
+  // INSTRUCTION WAS GIVEN (M23). A job passes it in, having taken it at submission; with
+  // nothing passed it is taken here, now, which is the same moment for a caller that runs at
+  // once — every caller before M23.
+  async run(instruction: string, captured?: Captured): Promise<PlannerOutcome> {
+    // 1. Capture context (see `captureContext`), unless the caller already did.
+    const { context, planning } = captured ?? (await captureContext(this.shell, this.gmail));
     return { ...(await this.decide(instruction, context)), planning };
+  }
+
+  // The job gate's first question (M23): may this run start executing? Asked once, after the
+  // model has answered and everything knowable about the plan is settled, and before any step.
+  // Returns null to carry on. A status question (`Tool.statusOnly`, alone) never waits.
+  private async admit(instruction: string, tools: readonly Tool[]): Promise<PlannerOutcome | null> {
+    const only = tools.length === 1 ? tools[0] : undefined;
+    const answer = await this.gate.admit({
+      tools: tools.map((tool) => tool.name),
+      statusOnly: only?.statusOnly === true,
+    });
+    if (answer === "go") return null;
+    return await this.gateStopped(instruction, null, null, answer, true, CANCELLED_BEFORE_START);
+  }
+
+  // The gate said no: the user cancelled the job, or it waited past its limit. NOTHING RAN —
+  // this is reached only from points before a handler is called. Logged like any other step
+  // that did not happen, and reported like one.
+  private async gateStopped(
+    instruction: string,
+    tool: string | null,
+    args: ToolInput | null,
+    answer: Exclude<GateAnswer, "go">,
+    report: boolean,
+    cancelledText: string = CANCELLED_BY_YOU,
+  ): Promise<PlannerOutcome> {
+    const status: ActionStatus = answer === "expired" ? "expired" : "cancelled";
+    const result = answer === "expired" ? EXPIRED : cancelledText;
+    this.log.logAction({
+      ts: new Date().toISOString(),
+      instruction,
+      tool,
+      arguments: args,
+      result,
+      status,
+    });
+    if (report) {
+      this.shell.showResult(result);
+      await this.say(toSpokenResult(result));
+    }
+    return { status, tool, result };
   }
 
   // Steps 2 onward: ask the model once, then dispose of what it proposed.
@@ -213,6 +297,8 @@ export class Planner {
 
     const asked = await this.askBeforeLoneCall(instruction, tool, choice.input);
     if (asked !== null) return asked;
+    const stopped = await this.admit(instruction, [tool]);
+    if (stopped !== null) return stopped;
     return await this.runStep(instruction, tool, choice.input, context, SINGLE);
   }
 
@@ -260,6 +346,35 @@ export class Planner {
   // shown and said here. Inside a chain the reporting moves out to `runChain`, which has to
   // compose one message about the whole plan rather than emitting two about the same event.
   private async runStep(
+    instruction: string,
+    tool: Tool,
+    proposed: ToolInput,
+    context: CapturedContext,
+    step: StepPosition,
+  ): Promise<PlannerOutcome> {
+    // M23. Tell the job gate where execution has got to — and, for a tool that needs the user
+    // present (`background: "foreground-only"`), wait here if they have walked away. Before
+    // anything else in the step, so a step that is not going to run reads nothing, formats
+    // nothing and describes nothing. Declarative, like the tier: the planner reads a property
+    // and never knows which tool it is holding back.
+    const entered = await this.gate.enterStep({
+      tool: tool.name,
+      index: step.index,
+      total: step.total,
+      foregroundOnly: tool.background === "foreground-only",
+    });
+    if (entered !== "go") {
+      return await this.gateStopped(instruction, tool.name, proposed, entered, step.report);
+    }
+    try {
+      return await this.runEnteredStep(instruction, tool, proposed, context, step);
+    } finally {
+      // In the finally: a step that threw must not leave its job holding the foreground.
+      this.gate.leaveStep();
+    }
+  }
+
+  private async runEnteredStep(
     instruction: string,
     tool: Tool,
     proposed: ToolInput,
@@ -315,6 +430,7 @@ export class Planner {
       tier: null,
       chained: step.chained,
       ...(this.channelDirectory === undefined ? {} : { channelDirectory: this.channelDirectory }),
+      ...(this.jobs === undefined ? {} : { jobs: this.jobs }),
     };
 
     // 5a. Let the tool settle what this call will actually do (M21, `Tool.prepare`).
@@ -364,7 +480,26 @@ export class Planner {
     //    answers disagree — narrating an action and then not confirming it — which is a hole in
     //    the gate rather than a slow path. A resolver that fails escalates rather than
     //    de-escalates; see resolveRisk in core/risk.ts.
-    const tier = await resolveRisk(tool.risk, args, classifying);
+    let tier = await resolveRisk(tool.risk, args, classifying);
+
+    // 6-bis. (M23) A call that needs a confirm asks the job gate first. With the user present
+    //    it answers at once and nothing here changes. In a job they have walked away from, THIS
+    //    is where it waits — possibly for half an hour — to be resumed from the pill, and it is
+    //    deliberately BEFORE the confirm summary is built: a summary reads the world, and one
+    //    built now would be shown as fact long after it stopped being one.
+    //
+    //    After a wait the tier is worked out AGAIN, and the stricter of the two answers stands.
+    //    The world may have moved (a guest added to the event); it may not talk the planner out
+    //    of a confirm the user has just been brought back to give.
+    if (needsConfirm(tier)) {
+      const permitted = await this.gate.beforeConfirm();
+      if (permitted.answer !== "go") {
+        return await this.gateStopped(instruction, tool.name, args, permitted.answer, step.report);
+      }
+      if (permitted.waited) {
+        tier = highestTier([tier, await resolveRisk(tool.risk, args, classifying)]);
+      }
+    }
 
     // Everything downstream of the decision is told what it was. A handler whose tier was
     // decided by reading the world needs this to notice the world moving under it between the
@@ -445,7 +580,16 @@ export class Planner {
 
     // 7. Execute the handler.
     try {
-      const result = await tool.handler(args, deps);
+      // M23. Marked around the call and nowhere else, so a job cut off by the app closing can
+      // say truthfully whether this step may have gone through (the marker was set) or never
+      // ran (it was not). Set immediately before, cleared in a finally.
+      let result: string;
+      this.gate.handlerStarting();
+      try {
+        result = await tool.handler(args, deps);
+      } finally {
+        this.gate.handlerFinished();
+      }
       // Worked out BEFORE the result is shown, so a tool whose speakResult throws fails the
       // run rather than leaving the screen and the voice disagreeing about what happened.
       const spoken = tool.speakResult
@@ -517,6 +661,8 @@ export class Planner {
       if (tool === undefined) return await this.refuse(instruction);
       const asked = await this.askBeforeLoneCall(instruction, tool, only.arguments);
       if (asked !== null) return asked;
+      const stopped = await this.admit(instruction, [tool]);
+      if (stopped !== null) return stopped;
       return await this.runStep(instruction, tool, only.arguments, context, SINGLE);
     }
 
@@ -532,6 +678,17 @@ export class Planner {
     const preflight = await this.settleReferences(steps);
     if (!preflight.ok) {
       return await this.refusePlan(instruction, proposed, preflight.reason);
+    }
+
+    // M23. The plan is settled; may it start? A plan is never a status question (that is one
+    // tool, alone), so this is where a fourth concurrent job waits for a slot. BEFORE
+    // `chain.begin` on purpose: a job that is only queued is not partway through anything.
+    const planned = steps
+      .map((step) => this.registry.find((t) => t.name === step.tool))
+      .filter((tool): tool is Tool => tool !== undefined);
+    const stopped = await this.admit(instruction, planned);
+    if (stopped !== null) {
+      return { ...stopped, chain: { completed: 0, total: steps.length } };
     }
 
     // Set before the first await, so "a chain is running" and "the hotkey guards know" can
@@ -588,6 +745,8 @@ export class Planner {
           speak: index === steps.length - 1,
           report: false,
           chained: true,
+          index: index + 1,
+          total: steps.length,
         };
         const outcome = await this.runStep(
           instruction,

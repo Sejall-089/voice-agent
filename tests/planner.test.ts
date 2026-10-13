@@ -142,6 +142,7 @@ describe("Planner — narrate widened to (args, deps) => string | Promise<string
       name: "testCaution",
       description: "test",
       inputSchema: { type: "object", properties: {} },
+      background: "ok",
       risk: "caution",
       narrate,
       handler: async () => {

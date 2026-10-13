@@ -1737,3 +1737,342 @@ describe("WindowsShell.confirm — the approve button's label", () => {
     expect(optionsOf(0).buttons).toEqual(["Create issue", "Cancel"]);
   });
 });
+
+// M23. A DETACHED job's confirm — opened by a click in the status pill, at a moment when the
+// bar may be mid-instruction, holding a question, or speaking. Addition B: it must not be
+// parented to the bar, must not hide it, must not run the bar's hide handler (which ends a
+// capture and a question), and must not stop speech. Only an attached confirm keeps M19's
+// behaviour — and each test below states the attached behaviour as its contrast, so "the bar
+// was left alone" cannot pass merely because nothing happens to the bar in this harness.
+describe("WindowsShell.confirm — a detached job's dialog leaves the bar alone (M23)", () => {
+  function holdDialog() {
+    const answers: ((value: { response: number }) => void)[] = [];
+    dialogShowMessageBox.mockImplementation(
+      () => new Promise<{ response: number }>((resolve) => answers.push(resolve)),
+    );
+    return {
+      answer: (response: number): void => answers.shift()?.({ response }),
+      calls: (): unknown[][] => dialogShowMessageBox.mock.calls as unknown as unknown[][],
+    };
+  }
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const hides = (): { count: number } => {
+    const seen = { count: 0 };
+    window.on("hide", () => (seen.count += 1));
+    return seen;
+  };
+  const speaker = () => {
+    const calls = { stop: 0 };
+    shell.attachSpeech({ speak: () => undefined, stop: () => (calls.stop += 1), isSpeaking: () => true });
+    return calls;
+  };
+
+  // The status pill's window, which a detached dialog hangs off. Attached for every test here,
+  // as main.ts attaches it — without one a detached dialog is refused (see the tests below).
+  let pillWindow: FakeWindow;
+  beforeEach(() => {
+    pillWindow = makeWindow();
+    shell.attachDetachedDialogOwner(() => pillWindow as unknown as Electron.BrowserWindow);
+  });
+
+  it("with an instruction CAPTURE open: the bar stays up, focused, and the capture stays pending", async () => {
+    const dialog = holdDialog();
+    const pill = pillWindow;
+    const hidden = hides();
+    const capture = shell.showInput(); // the user is typing an instruction
+    let captured: string | null = null;
+    void capture.then((text) => (captured = text));
+
+    const asking = shell.confirm("Send to #social?", { detached: true });
+    await tick();
+
+    expect(shell.isConfirmPending()).toBe(true); // both hotkeys are still blocked by it
+    expect(window.isVisible()).toBe(true);
+    expect(window.isFocused()).toBe(true);
+    expect(hidden.count).toBe(0);
+    expect(shell.isInputCapturing()).toBe(true);
+    expect(captured).toBeNull();
+    // Parented to the PILL, never the bar.
+    expect(dialog.calls()[0]?.[0]).toBe(pill);
+    expect(dialog.calls()[0]?.[0]).not.toBe(window);
+
+    dialog.answer(0);
+    await expect(asking).resolves.toBe(true);
+    expect(hidden.count).toBe(0);
+    expect(shell.isInputCapturing()).toBe(true);
+    expect(captured).toBeNull();
+
+    // The capture is still the user's to finish.
+    ipcMain.emit("commandbar:submit", {}, "what I was typing");
+    await expect(capture).resolves.toBe("what I was typing");
+  });
+
+  it("CONTRAST — an attached confirm in the same position hides the bar and ends the capture", async () => {
+    const dialog = holdDialog();
+    const hidden = hides();
+    const capture = shell.showInput();
+    const asking = shell.confirm("Send to #social?");
+    await tick();
+    expect(window.isVisible()).toBe(false);
+    expect(hidden.count).toBe(1);
+    await expect(capture).resolves.toBe("");
+    expect(dialog.calls()[0]?.[0]).toBe(window);
+    dialog.answer(1);
+    await asking;
+  });
+
+  it("with a QUESTION open: it stays on screen and stays pending", async () => {
+    const dialog = holdDialog();
+    const asked = shell.askUser("Which channel is the bugs channel?");
+    let answered: string | null = "PENDING";
+    void asked.then((value) => (answered = value));
+    const hidden = hides();
+
+    const asking = shell.confirm("Send to #social?", { detached: true });
+    await tick();
+    expect(shell.isAskPending()).toBe(true);
+    expect(window.isVisible()).toBe(true);
+    expect(hidden.count).toBe(0);
+
+    dialog.answer(1);
+    await expect(asking).resolves.toBe(false);
+    expect(shell.isAskPending()).toBe(true);
+    expect(answered).toBe("PENDING");
+
+    ipcMain.emit("commandbar:submit", {}, "#bugs");
+    await expect(asked).resolves.toBe("#bugs");
+  });
+
+  it("a blur while it is up — the dialog taking the keyboard — does not dismiss the bar", async () => {
+    const dialog = holdDialog();
+    const capture = shell.showInput();
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+
+    shell.handleBlur();
+    expect(window.isVisible()).toBe(true);
+    expect(shell.isInputCapturing()).toBe(true);
+
+    dialog.answer(1);
+    await asking;
+    ipcMain.emit("commandbar:submit", {}, "still here");
+    await expect(capture).resolves.toBe("still here");
+  });
+
+  it("does NOT stop the app speaking; an attached confirm still does", async () => {
+    const dialog = holdDialog();
+    const speech = speaker();
+
+    const detached = shell.confirm("Send?", { detached: true });
+    await tick();
+    dialog.answer(0);
+    await detached;
+    expect(speech.stop).toBe(0);
+
+    const attached = shell.confirm("Send?");
+    await tick();
+    dialog.answer(0);
+    await attached;
+    expect(speech.stop).toBe(1);
+  });
+
+  it("steps the global Escape hook aside while it is up, and re-arms it for a bar that is still open", async () => {
+    const dialog = holdDialog();
+    void shell.showInput();
+    expect(escapeHandler()).toBeDefined();
+
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    // The dialog owns Escape as its own Cancel. Left armed, the bar's hook would eat the key —
+    // and hide the bar, ending the capture this dialog was never meant to touch.
+    expect(escapeHandler()).toBeUndefined();
+
+    dialog.answer(1);
+    await asking;
+    expect(escapeHandler()).toBeDefined();
+  });
+
+  it("with the bar hidden it stays hidden: nothing was taken away, so nothing is restored", async () => {
+    const dialog = holdDialog();
+    expect(window.isVisible()).toBe(false);
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    dialog.answer(0);
+    await asking;
+    expect(window.isVisible()).toBe(false);
+    expect(escapeHandler()).toBeUndefined();
+  });
+
+  it("text that reaches a hidden bar while it is up is shown once it has closed", async () => {
+    const dialog = holdDialog();
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+
+    shell.showResult("An attached job's answer."); // some OTHER job, in front of the user
+    expect(window.isVisible()).toBe(false); // not over a dialog
+
+    dialog.answer(1);
+    await asking;
+    expect(window.isVisible()).toBe(true);
+    expect(window.isFocused()).toBe(false);
+    expect(window.sent.filter((entry) => entry.channel === "commandbar:echo").map((entry) => entry.args[0])).toEqual([
+      "An attached job's answer.",
+    ]);
+  });
+
+  it("is the real dialog with the tool's own label, parented to the pill", async () => {
+    const dialog = holdDialog();
+    const asking = shell.confirm("Send?", { detached: true, approveLabel: "Create issue" });
+    await tick();
+    const call = dialog.calls()[0] ?? [];
+    expect(call[0]).toBe(pillWindow);
+    expect(call[1]).toMatchObject({ buttons: ["Create issue", "Cancel"], defaultId: 1, cancelId: 1, message: "Send?" });
+    dialog.answer(1);
+    await asking;
+  });
+
+  // NEVER UNPARENTED. Measured (scripts/pill-click-recon.cjs): an unparented dialog is fully
+  // covered by a visible bar. So with no live pill a detached confirm is refused outright —
+  // no dialog is opened, the request fails as an error (never as a "no"), and nothing is left
+  // pending to block the hotkeys.
+  it.each([
+    ["no owner was ever attached", (): void => {
+      window = makeWindow();
+      shell = new WindowsShell(window as unknown as Electron.BrowserWindow);
+    }],
+    ["the owner callback returns null", (): void => shell.attachDetachedDialogOwner(() => null)],
+    ["the pill window has been destroyed", (): void => {
+      const dead = Object.assign(makeWindow(), { isDestroyed: () => true });
+      shell.attachDetachedDialogOwner(() => dead as unknown as Electron.BrowserWindow);
+    }],
+  ])("REFUSED with no dialog at all when %s", async (_name, arrange) => {
+    const dialog = holdDialog();
+    arrange();
+    const capture = shell.showInput();
+
+    await expect(shell.confirm("Send?", { detached: true })).rejects.toThrow("no status pill");
+
+    expect(dialog.calls()).toEqual([]);
+    expect(shell.isConfirmPending()).toBe(false);
+    // And the bar it must not disturb was not disturbed by the refusal either.
+    expect(window.isVisible()).toBe(true);
+    expect(shell.isInputCapturing()).toBe(true);
+    expect(escapeHandler()).toBeDefined();
+    ipcMain.emit("commandbar:submit", {}, "x");
+    await capture;
+
+    // An ATTACHED confirm needs no pill and is unaffected.
+    const attached = shell.confirm("Send?");
+    await tick();
+    expect(dialog.calls().length).toBe(1);
+    dialog.answer(1);
+    await attached;
+  });
+
+  it("the hotkey's 'a confirmation is waiting' line does not pop the bar up after the dialog closes", async () => {
+    const dialog = holdDialog();
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    shell.narrate("There's a confirmation waiting — answer it on screen.");
+    expect(window.isVisible()).toBe(false);
+    dialog.answer(1);
+    await asking;
+    // Stale the instant the dialog was answered: it is not shown afterwards.
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("a result landing in a VISIBLE, unfocused bar during someone else's dialog still auto-hides", async () => {
+    vi.useFakeTimers();
+    const dialog = holdDialog();
+    window.showInactive(); // an attached job's bar, never focused (the voice path)
+    const asking = shell.confirm("Send?", { detached: true });
+    await Promise.resolve();
+
+    shell.showResult("An attached job's answer.");
+    expect(window.isVisible()).toBe(true);
+
+    dialog.answer(1);
+    await vi.advanceTimersByTimeAsync(0);
+    await asking;
+    // Nothing about the detached dialog closing hides this bar, and it has no focus to lose.
+    await vi.advanceTimersByTimeAsync(13_000);
+    expect(window.isVisible()).toBe(false);
+  });
+
+  it("ONE DIALOG AT A TIME: a second confirm waits for the first, and the guard holds throughout", async () => {
+    const dialog = holdDialog();
+    const first = shell.confirm("First?");
+    const second = shell.confirm("Second?", { detached: true });
+    await tick();
+    expect(dialog.calls().length).toBe(1);
+    expect(shell.isConfirmPending()).toBe(true);
+
+    dialog.answer(0);
+    await expect(first).resolves.toBe(true);
+    // The first was answered — and under the old boolean this is where the flag cleared with
+    // a second dialog about to be on screen.
+    expect(shell.isConfirmPending()).toBe(true);
+    await tick();
+    expect(dialog.calls().length).toBe(2);
+    expect((dialog.calls()[1] ?? []).at(-1)).toMatchObject({ message: "Second?" });
+
+    dialog.answer(1);
+    await expect(second).resolves.toBe(false);
+    expect(shell.isConfirmPending()).toBe(false);
+  });
+
+  it("a dialog that throws does not strand the one queued behind it", async () => {
+    let calls = 0;
+    dialogShowMessageBox.mockImplementation(() => {
+      calls += 1;
+      return calls === 1 ? Promise.reject(new Error("dialog exploded")) : Promise.resolve({ response: 0 });
+    });
+    const first = shell.confirm("First?", { detached: true });
+    const second = shell.confirm("Second?", { detached: true });
+    await expect(first).rejects.toThrow("dialog exploded");
+    await expect(second).resolves.toBe(true);
+    expect(shell.isConfirmPending()).toBe(false);
+  });
+
+  it("isForegroundFree: not during a dialog, a question, a capture or a recording", async () => {
+    expect(shell.isForegroundFree()).toBe(true);
+
+    const dialog = holdDialog();
+    const asking = shell.confirm("Send?", { detached: true });
+    expect(shell.isForegroundFree()).toBe(false);
+    dialog.answer(1);
+    await asking;
+    expect(shell.isForegroundFree()).toBe(true);
+
+    const capture = shell.showInput();
+    expect(shell.isForegroundFree()).toBe(false);
+    ipcMain.emit("commandbar:submit", {}, "x");
+    await capture;
+    expect(shell.isForegroundFree()).toBe(true);
+
+    const asked = shell.askUser("Which?");
+    expect(shell.isForegroundFree()).toBe(false);
+    ipcMain.emit("commandbar:submit", {}, "#bugs");
+    await asked;
+
+    shell.showVoiceState("recording");
+    expect(shell.isForegroundFree()).toBe(false);
+    shell.showVoiceState("idle");
+    expect(shell.isForegroundFree()).toBe(true);
+  });
+
+  it("the chime has its own channel, and opening the microphone cuts it off", async () => {
+    shell.playChime();
+    const channels = (): string[] => window.sent.map((entry) => entry.channel);
+    expect(channels()).toContain("chime:play");
+    // Never through the speech player, whose single reply would end an utterance early.
+    expect(channels()).not.toContain("speech:play");
+
+    const started = shell.startRecording();
+    ipcMain.emit("voice:started", {});
+    await started;
+    const sent = channels();
+    expect(sent).toContain("chime:stop");
+    expect(sent.indexOf("chime:stop")).toBeLessThan(sent.indexOf("voice:start"));
+  });
+});

@@ -47,6 +47,7 @@ export const searchSpotifyTool: Tool = {
   // Opening a browser tab, which is what `openTarget` has been since M2 and for the same
   // reason: the user closes it.
   risk: "reversible",
+  background: "foreground-only",
   // A literal to put in a search box, not a reference to resolve. Letting memory near it would
   // rewrite "my favourite album" into whatever URL happened to be stored under that name and
   // then search Spotify for a URL — the same failure `pointAt` avoids with its `target`.

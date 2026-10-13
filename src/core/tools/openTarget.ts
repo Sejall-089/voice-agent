@@ -66,6 +66,7 @@ export const openTargetTool: Tool = {
     required: ["target"],
   },
   risk: "reversible",
+  background: "foreground-only",
   // Both are references, and ALTERNATIVES: either one resolving to a URL is enough (see the
   // handler). These are this tool's only arguments, so declaring them changes nothing about
   // what the planner resolves — it is what lets a chain refuse "open my dashboard" before it

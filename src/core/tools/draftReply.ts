@@ -39,6 +39,7 @@ export const draftReplyTool: Tool = {
     required: ["instruction"],
   },
   risk: "caution",
+  background: "foreground-only",
   narrate: (): string => "Reading the open email and drafting a reply…",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const instruction = requiredInstruction(input);

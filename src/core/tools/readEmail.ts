@@ -36,6 +36,7 @@ export const readEmailTool: Tool = {
     "This only reads; it changes nothing in Gmail.",
   inputSchema: { type: "object", properties: {} },
   risk: "safe",
+  background: "foreground-only",
   handler: async (_input: ToolInput, deps: ToolDeps): Promise<string> => {
     const email = await deps.gmail.readOpenEmail();
     if (email.body.trim().length === 0) {

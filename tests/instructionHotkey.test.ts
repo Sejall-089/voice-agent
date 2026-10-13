@@ -500,6 +500,7 @@ const readThing: Tool = {
   name: "readThing",
   description: "Read a thing.",
   inputSchema: { type: "object", properties: {}, required: [] },
+  background: "ok",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("THING ONE"),
 };
@@ -512,6 +513,7 @@ const sendThing: Tool = {
     properties: { text: { type: "string", description: "What to send." } },
     required: ["text"],
   },
+  background: "ok",
   risk: "dangerous",
   confirmSummary: (): string => `Send it?`,
   handler: (): Promise<string> => Promise.resolve("Sent it"),

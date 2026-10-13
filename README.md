@@ -454,6 +454,39 @@ the open boxes.
 
 ---
 
+## Background jobs (M23 — built, not yet run live)
+
+Every instruction is now a **job**. Give one, and if it is still working when you press the
+hotkey again, it carries on in the background while you say the next thing.
+
+- **In front of you, nothing changed.** A job starts *attached*: it shows and speaks in the bar
+  and its confirm dialogs open straight away, exactly as before.
+- **Press the hotkey while it works and it detaches.** It keeps going, silently. It does not
+  write to the bar, speak, or open a dialog on you.
+- **It stops and waits when it needs you** — before anything that needs your OK, and before any
+  tool that acts on whatever is on your screen (the open email, your Notion page, the media
+  keys). A small **status pill** at the bottom right turns amber, pulses once, and a short
+  **chime** plays.
+- **Click the pill** to see the list. **Review…** opens the same confirm dialog as always — the
+  pill itself never approves anything. **Resume** brings back a job that needs your screen.
+  You can cancel a job, dismiss a finished one, or mute the chime there.
+- **A wait nobody answers expires after 30 minutes** — "expired, not run". The step is never
+  run on its own.
+- **Ask "are my agents done yet?"** and it tells you: what is waiting for you, what is still
+  running, what finished or failed.
+- **Three jobs run at once**; a fourth queues.
+- **Closing the app does not resume anything.** Whatever was still going is marked
+  *interrupted* next time, and says whether its step may have gone through.
+
+The chime never plays while you are dictating, recording an instruction, or the app is
+speaking; it waits, and plays once afterwards only if something is still waiting. One copy of
+the app runs at a time: starting it again just tells you it is already running.
+
+Design: `spec.md` §5c. What is tested, what three recon scripts measured, and what still needs
+a person: `spec.md` §9, M23.
+
+---
+
 ## Running it
 
 ```bash
@@ -895,6 +928,10 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M23 (background jobs, the status pill, the needs-you chime) is built and NOT closed: it has
+not been run live.** Everything it claims rests on tests against fakes and on recon scripts run
+on one machine; no person has yet used it. See `spec.md` §9 (M23) for exactly which is which.
 
 **M22 (Slack bot-token mode) is closed (13 Oct 2026), after a live run by a person.** Messages
 go to the channel you name, checked against Slack's own channel list before any dialog; webhook

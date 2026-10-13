@@ -5,6 +5,7 @@ import {
   app,
   BrowserWindow,
   globalShortcut,
+  ipcMain,
   screen,
   session,
   shell as electronShell,
@@ -20,9 +21,19 @@ import { VoiceSession } from "./shell/VoiceSession.ts";
 import { DictationSession } from "./shell/DictationSession.ts";
 import { WindowsInputInjector } from "./shell/WindowsInputInjector.ts";
 import { combineInstructionBusy, createOnDictateHotkey } from "./dictate.ts";
-import { createRunInstruction } from "./runInstruction.ts";
+import { createJobRunner } from "./jobs/JobRunner.ts";
+import { createConnectingNotice } from "./jobs/connectingNotice.ts";
+import type { JobPlannerParts } from "./jobs/JobRunner.ts";
+import { PillWindow } from "./pill/PillWindow.ts";
+import { PillController } from "./pill/PillController.ts";
+import { JobManager } from "../core/jobs/JobManager.ts";
+import { SqliteJobStore } from "../core/jobs/JobStore.ts";
+import { PILL_COLLAPSED } from "../core/jobs/pill.ts";
+import { SqliteSettings } from "../core/settings.ts";
+import { InMemorySpeechStore } from "../core/speechStore.ts";
 import { createOnInstructionHotkey } from "./instructionHotkey.ts";
-import { Planner } from "../core/planner.ts";
+import { ALREADY_RUNNING, claimSingleInstance } from "./singleInstance.ts";
+import { captureContext, Planner } from "../core/planner.ts";
 import { buildRegistry } from "../core/registry.ts";
 import { loadConnectorTools } from "../core/mcp/load.ts";
 import { bearerHttpTransport } from "../core/mcp/transport.ts";
@@ -51,7 +62,6 @@ import { ModelElementChooser } from "../core/screen/ModelElementChooser.ts";
 import { UnavailableElements } from "../core/screen/UnavailableElements.ts";
 import { UnavailableChooser } from "../core/screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "../core/draft.ts";
-import { InMemoryChainState } from "../core/chainState.ts";
 import type {
   CalendarSurface,
   GmailSurface,
@@ -124,6 +134,9 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 
 let screenSurface: WindowsScreen | null = null;
 let elementsSurface: WindowsElements | null = null;
+// M23. The status pill's window and the one-second timer behind it, for will-quit.
+let statusPill: PillWindow<BrowserWindow> | null = null;
+let pillTimer: ReturnType<typeof setInterval> | null = null;
 
 const WINDOW_WIDTH = 640;
 const WINDOW_HEIGHT = 640;
@@ -177,7 +190,14 @@ function createCommandBar(): BrowserWindow {
 // window, so without this the very first thing the app tries to say fails silently.
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
+// M23. One running instance: a second launch quits before it builds anything, and the first
+// says it is already here. Claimed at module scope, before `whenReady`, so a second copy never
+// opens the database the first is using. The decision is in singleInstance.ts and tested there.
+let onSecondLaunch: (() => void) | null = null;
+const isPrimaryInstance = claimSingleInstance(app, () => onSecondLaunch?.());
+
 app.whenReady().then(() => {
+  if (!isPrimaryInstance) return;
   commandBar = createCommandBar();
 
   // M15. The bar is a 640x640 always-on-top window in the middle of the screen, and `pointAt`
@@ -192,6 +212,7 @@ app.whenReady().then(() => {
   commandBar.setContentProtection(true);
 
   const shell = new WindowsShell(commandBar);
+  onSecondLaunch = () => shell.narrate(ALREADY_RUNNING);
 
   // M18. APPS_EXTRA is read HERE, in composition — /core never touches process.env — and
   // handed to the shell as a built catalog. The shell already works without this (its default
@@ -233,9 +254,26 @@ app.whenReady().then(() => {
   //
   // The DB path is decided HERE and injected — /core never asks electron where it lives.
   const llm = createLLMClient();
-  const memory = new SqliteMemory(
-    createDatabase(join(app.getPath("userData"), "memory.db")),
-  );
+  // ONE database, three things in it: memory and the action log (SqliteMemory), the job
+  // records, and the app's settings (M23). `createDatabase` also adds the columns M23 gave
+  // `action_log` to a database from before it — guarded, additive, tested in tests/jobStore.test.ts.
+  const db = createDatabase(join(app.getPath("userData"), "memory.db"));
+  const memory = new SqliteMemory(db);
+  const settings = new SqliteSettings(db);
+
+  // M23. Every instruction is a job. The manager is built here, before anything can submit
+  // one, and the first thing it does is relabel whatever was still live when the app last
+  // stopped: `interrupted`, never resumed. No tool is reachable from this call.
+  const jobs = new JobManager({
+    store: new SqliteJobStore(db),
+    foregroundFree: () => shell.isForegroundFree(),
+  });
+  const interruptedJobs = jobs.restore();
+  if (interruptedJobs > 0) {
+    console.log(
+      `[main] ${interruptedJobs} job(s) were still running when the app last stopped - marked interrupted, not resumed`,
+    );
+  }
   seedIfEmpty(memory);
   // Secrets are read HERE, in composition — /core never touches process.env. Never log the URL.
   // SLACK_WEBHOOK_CHANNEL is optional and is only a label: the channel that webhook was created
@@ -350,6 +388,8 @@ app.whenReady().then(() => {
       }
     });
   }
+  // Filled in just below, once the menu exists: the namespaced (`app__tool`) names.
+  const connectorToolNames = new Set<string>();
   const tools = buildRegistry({
     gmail: gmail !== null,
     notion: notion !== null,
@@ -361,38 +401,59 @@ app.whenReady().then(() => {
     // The shell's existing status line (`narrate`, the one `caution` narrations use) is where
     // "Connecting to GitHub…" goes while a connection is being opened. A first connection is
     // the one wait in a connector call that can be long, and it happens before any dialog.
-    connectors: createConnectorTools((line) => shell.narrate(line)),
+    //
+    // M23: only when the job that HAS THE BAR is the one on a connector tool. A connection is
+    // shared, and its "Connecting…" line is said by the connection, not by a job — so without
+    // this a detached job opening Linear would write into the bar the user is typing in.
+    connectors: createConnectorTools(
+      createConnectingNotice({
+        attachedTool: () => jobs.attachedTool(),
+        isConnectorTool: (name) => connectorToolNames.has(name),
+        narrate: (line) => shell.narrate(line),
+      }),
+    ),
+    // M23. There are job records to report on, so `jobStatus` is on the menu.
+    jobs: true,
   });
+  for (const tool of tools) if (tool.name.includes("__")) connectorToolNames.add(tool.name);
   // The draft being iterated on. One per app run, in memory only — a draft is scratch state,
   // not a fact about the user, so it deliberately never reaches SQLite.
   const draft = new InMemoryDraftStore();
-  // M17. Whether a chain is running, and where it has got to. ONE instance, shared three ways:
-  // the planner sets it, and both hotkey guards read it. That sharing is the entire reason it
-  // is constructed out here rather than owned by the planner — a handler outside `run()` has no
-  // other way to know a sequence is partway through.
-  const chain = new InMemoryChainState();
+  // What the app held back the last time it spoke a summary (M14). One for the whole app:
+  // "read me the rest" refers to the last thing the user HEARD, whichever job said it. Each job
+  // reaches it through a facade that does nothing once the job is detached.
+  const speechStore = new InMemorySpeechStore();
+
+  // M23. A planner PER JOB, built from the pieces that must not be shared between two jobs —
+  // its view of the shell and the log, its chain state, its gate — over everything that is
+  // (the model, the menu, memory, the surfaces). Through M22 there was one planner and one
+  // chain state for the app; two instructions alive at once would have shared a step counter.
   // SqliteMemory is both the resolver and the action log.
-  const planner = new Planner(
-    llm,
-    shell,
-    tools,
-    memory,
-    memory,
-    sender,
-    gmail ?? new UnavailableGmail(),
-    draft,
-    notion ?? new UnavailableNotion(),
-    calendar ?? new UnavailableCalendar(),
-    undefined, // speech store — the planner's own scratch state, no composition needed
-    screenSurfaceOrNull ?? new UnavailableScreen(),
-    elements ?? new UnavailableElements(),
-    chooser ?? new UnavailableChooser(),
-    undefined, // sleep — the real clock; only tests need to skip the settle delays
-    chain,
-    // M22. Bot mode only: the same directory the bot sender uses, so the check before a dialog
-    // and the send read one cached list. Webhook mode passes nothing, as before.
-    slackDirectory ?? undefined,
-  );
+  const buildPlanner = (parts: JobPlannerParts): Planner =>
+    new Planner(
+      llm,
+      parts.shell,
+      tools,
+      memory,
+      parts.log,
+      sender,
+      gmail ?? new UnavailableGmail(),
+      draft,
+      notion ?? new UnavailableNotion(),
+      calendar ?? new UnavailableCalendar(),
+      parts.speech,
+      screenSurfaceOrNull ?? new UnavailableScreen(),
+      elements ?? new UnavailableElements(),
+      chooser ?? new UnavailableChooser(),
+      undefined, // sleep — the real clock; only tests need to skip the settle delays
+      parts.chain,
+      // M22. Bot mode only: the same directory the bot sender uses, so the check before a dialog
+      // and the send read one cached list. Webhook mode passes nothing, as before.
+      slackDirectory ?? undefined,
+      parts.gate,
+      // Read-only, for `jobStatus`.
+      jobs,
+    );
 
   // The speech queue, wired both ways: the session plays THROUGH the shell, and the shell
   // hands it whatever the planner asks to have said. A failure to speak is narrated on screen
@@ -407,7 +468,25 @@ app.whenReady().then(() => {
 
   // THE planner call site. Typed text and dictated text both funnel through here, so the
   // planner cannot tell them apart and voice needs no changes anywhere in /core.
-  const runInstruction = createRunInstruction(planner, shell, memory);
+  //
+  // Since M23 each one becomes a job (jobs/JobRunner.ts). The signature is unchanged — a
+  // string in, a promise out — and context is captured the moment this is called, not when
+  // the job is given a slot.
+  const gmailForContext = gmail ?? new UnavailableGmail();
+  const runInstruction = createJobRunner({
+    manager: jobs,
+    shell,
+    log: memory,
+    speech: speechStore,
+    capture: () => captureContext(shell, gmailForContext),
+    buildPlanner,
+  });
+
+  // M23. What both hotkeys ask before they do anything: is the job that has the bar in the
+  // middle of something that must not be walked away from? (A step acting on the screen, or
+  // a confirm being prepared.) The same shape the M17 chain guard had, answered by the job
+  // manager — a job merely working, and every background job, answers no.
+  const foregroundHeld = { isRunning: (): boolean => jobs.attachedBlocks() };
 
   // M8: voice is only wired up when it can actually work. No transcriber means the bar
   // never opens the microphone and Enter on an empty bar does nothing — exactly as before
@@ -444,9 +523,12 @@ app.whenReady().then(() => {
     dictation,
     voice,
     speech,
-    // M17. The same instance the planner sets, so a press partway through a chain is blocked
-    // and told so rather than starting a second concurrent run over the top of it.
-    chain,
+    // M17, re-grounded at M23: blocked, and told so, only while the attached job holds the
+    // foreground. Otherwise the press goes through and that job is detached to the background.
+    chain: foregroundHeld,
+    detach: () => {
+      jobs.detachAttached();
+    },
     runInstruction,
   });
   const hotkey = registerHotkey(shell, onHotkey);
@@ -459,7 +541,10 @@ app.whenReady().then(() => {
   // just while voice happens to still be recording — or the bar's own Enter-to-submit and
   // dictation's Enter-to-finish could both fire from one keypress.
   const onDictate = dictation
-    ? createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell, chain))
+    ? createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell, foregroundHeld), () => {
+        // Dictation shows its indicator in the bar: the job that had it goes to the background.
+        jobs.detachAttached();
+      })
     : null;
   const dictateHotkey = onDictate
     ? registerDictateHotkey(shell, () => {
@@ -481,6 +566,69 @@ app.whenReady().then(() => {
     void voice?.abandon();
     void dictation?.abandon();
   });
+
+  // M23. The status pill and the needs-you chime. Built last, because "is the microphone or
+  // the speaker busy" needs voice, dictation and speech to exist.
+  //
+  // The window's options, that it is only ever shown inactive, and where it goes are all
+  // decided in pill/PillWindow.ts and core/jobs/pill.ts, and tested there against a fake
+  // window; what is left here is the electron calls themselves.
+  const pill = new PillWindow<BrowserWindow>({
+    create: (options) => {
+      const win = new BrowserWindow({
+        ...options,
+        ...PILL_COLLAPSED,
+        webPreferences: {
+          preload: join(__dirname, "../preload/pill.js"),
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      });
+      // Like the bar's window, it never navigates and never opens another (M21).
+      win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      win.webContents.on("will-navigate", (event, url) => {
+        if (url !== win.webContents.getURL()) event.preventDefault();
+      });
+      return win;
+    },
+    load: (win) =>
+      !app.isPackaged && process.env["ELECTRON_RENDERER_URL"]
+        ? win.loadURL(`${process.env["ELECTRON_RENDERER_URL"]}/pill.html`)
+        : win.loadFile(join(__dirname, "../renderer/pill.html")),
+    // The primary display's work area, in DIP, read each time the pill is placed.
+    workArea: () => screen.getPrimaryDisplay().workArea,
+  });
+  statusPill = pill;
+  // A detached job's confirm dialog hangs off the pill, never the bar (WindowsShell).
+  shell.attachDetachedDialogOwner(() => pill.window());
+  screen.on("display-metrics-changed", () => pill.reposition());
+
+  const pillController = new PillController({
+    manager: jobs,
+    settings,
+    surface: pill,
+    playChime: () => shell.playChime(),
+    // Never over the microphone or the app's own voice: the chime waits for all three.
+    isBusy: () =>
+      (dictation?.getState() ?? "idle") !== "idle" ||
+      (voice?.getState() ?? "idle") !== "idle" ||
+      shell.isSpeaking(),
+  });
+  // From the pill's page, and only from it: a message on these channels from any other
+  // window is dropped. What each may ask for is checked again in PillController.
+  const fromPill = (event: Electron.IpcMainEvent): boolean =>
+    event.sender === pill.window()?.webContents;
+  ipcMain.on("pill:action", (event, id: unknown, action: unknown) => {
+    if (fromPill(event)) pillController.onAction(id, action);
+  });
+  ipcMain.on("pill:expand", (event, expanded: unknown) => {
+    if (fromPill(event)) pillController.onExpand(expanded);
+  });
+  ipcMain.on("pill:mute", (event, muted: unknown) => {
+    if (fromPill(event)) pillController.onMute(muted);
+  });
+  // Once a second: waits expire, a finished job fades, a held chime may be due.
+  pillTimer = setInterval(() => pillController.tick(), 1_000);
 
   console.log(
     `[main] ready - ${hotkey ?? "(no free hotkey)"} opens the bar${voice ? " and starts listening" : " (voice off)"}`,
@@ -719,4 +867,9 @@ app.on("will-quit", () => {
   // possible thing to leave behind, because there is nothing visible to close it with.
   screenSurface?.dispose();
   elementsSurface?.dispose();
+  // M23. The pill is another always-on-top window that must not outlive the app. Jobs still
+  // running are left exactly as they are in the database: the next start marks them
+  // interrupted, which is also what happens when the process is killed and this never runs.
+  if (pillTimer !== null) clearInterval(pillTimer);
+  statusPill?.dispose();
 });

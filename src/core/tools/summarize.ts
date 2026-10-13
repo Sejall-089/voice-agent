@@ -26,6 +26,7 @@ export const summarizeTool: Tool = {
     required: [],
   },
   risk: "safe",
+  background: "ok",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const text = deps.context.selectedText;
     if (!text || text.trim().length === 0) {

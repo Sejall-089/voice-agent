@@ -73,6 +73,7 @@ export const systemVolumeTool: Tool = {
   // because the user changes it back, with the same key this tool just pressed. Nothing is
   // sent, written or destroyed, so there is nothing to announce and nothing to ask.
   risk: "reversible",
+  background: "foreground-only",
   // Both arguments are literals — a direction out of a fixed set, and a count. Memory
   // resolution exists to turn "my dashboard" into a URL and has nothing to contribute here;
   // the same call `pointAt` and `openApp` make about their own arguments.

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MicRecorder } from "./audio/recorder.ts";
 import { SpeechPlayer } from "./audio/player.ts";
+import { ChimePlayer } from "./audio/chime.ts";
+import chimeUrl from "./assets/needs-you.wav";
 import { ResultText } from "./ResultText.tsx";
 
 type VoiceState = "idle" | "recording" | "stopped" | "transcribing";
@@ -26,6 +28,10 @@ export function CommandBar(): JSX.Element {
   // One player for the window's lifetime, same reasoning as the recorder above.
   const playerRef = useRef<SpeechPlayer | null>(null);
   const player = (playerRef.current ??= new SpeechPlayer());
+  // The needs-you chime (M23), on an element of its own — see audio/chime.ts for why it does
+  // not share the speech player's.
+  const chimeRef = useRef<ChimePlayer | null>(null);
+  const chime = (chimeRef.current ??= new ChimePlayer(chimeUrl));
   // One "I started typing" signal per bar opening, not one per keystroke.
   const typedRef = useRef(false);
   // Read inside IPC callbacks, which close over the first render's state otherwise.
@@ -123,7 +129,13 @@ export function CommandBar(): JSX.Element {
       player.stop();
     });
 
+    const offChime = window.api.onChime(() => chime.play());
+    const offChimeStop = window.api.onChimeStop(() => chime.stop());
+
     return () => {
+      offChime();
+      offChimeStop();
+      chime.stop();
       offShow();
       offAsk();
       offFocusInput();

@@ -29,6 +29,7 @@ export const reviseDraftTool: Tool = {
     required: ["instruction"],
   },
   risk: "caution",
+  background: "foreground-only",
   narrate: (): string => "Updating the draft in the reply box…",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const instruction = requiredInstruction(input);

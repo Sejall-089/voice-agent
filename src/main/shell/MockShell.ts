@@ -3,6 +3,7 @@ import { BUILT_IN_CATALOG, createAppLauncher, type AppLauncher } from "./appLaun
 import { pressesFor } from "../../core/media.ts";
 import { virtualKeyFor } from "./mediaKeys.ts";
 import { approveLabel } from "./confirmLabel.ts";
+import { ConfirmBroker } from "./ConfirmBroker.ts";
 import type { CapturedContext, ConfirmOptions, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
@@ -52,6 +53,16 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   // What the approve button said for each of those dialogs, in the same order — one entry per
   // entry in `confirmMessages`.
   public readonly confirmLabels: string[] = [];
+  // Whether each of those dialogs was a DETACHED job's (M23, `ConfirmOptions.detached`), in the
+  // same order.
+  public readonly confirmDetached: boolean[] = [];
+  // The most dialogs that were ever open AT ONCE (M23). Counted where a dialog is actually
+  // shown, independently of the queue in front of it — so "one dialog at a time" is something
+  // a test reads off the shell, and a queue that let two through would show here as 2.
+  public maxOpenConfirms = 0;
+  private openConfirms = 0;
+  // How many chimes were asked for (M23).
+  public chimes = 0;
   // Every question that was actually PUT, in order. One refused because the shell was busy is
   // not here: it was never shown to anyone.
   public readonly questions: string[] = [];
@@ -99,10 +110,17 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   private pendingPlay: (() => void) | null = null;
   private readonly holdConfirm: boolean;
   private pendingConfirm: ((approved: boolean) => void) | null = null;
-  // Mirrors WindowsShell's own `confirmPending`, set synchronously before confirm() awaits
-  // anything. It is what the M17 chain tests read to prove the hotkey guard's precondition is
-  // actually true while a chain is parked at a dialog.
-  private confirmPending = false;
+  // THE SAME QUEUE THE REAL SHELL USES (M23), with only the dialog itself faked — so this
+  // mock cannot be more lenient about ordering than Windows is. "A confirm is pending" is read
+  // from it, as it is in WindowsShell; it is true from the instant a confirm is asked for,
+  // which is what the M17 chain tests read to prove the hotkey guard's precondition holds
+  // while a chain is parked at a dialog.
+  private readonly confirmQueue = new ConfirmBroker<{ message: string; options?: ConfirmOptions }>(
+    (request) => this.presentConfirm(request.message, request.options),
+  );
+  private get confirmPending(): boolean {
+    return this.confirmQueue.isPending();
+  }
   private readonly asks: (string | null)[];
   private readonly holdAsk: boolean;
   private pendingAsk: ((answer: string | null) => void) | null = null;
@@ -187,21 +205,39 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   }
 
   confirm(message: string, options?: ConfirmOptions): Promise<boolean> {
+    return this.confirmQueue.request(options === undefined ? { message } : { message, options });
+  }
+
+  // One dialog "on screen". Recorded HERE, when it is shown, not when it is asked for: a
+  // confirm waiting behind another has not been put in front of anyone yet.
+  private presentConfirm(message: string, options?: ConfirmOptions): Promise<boolean> {
     this.confirmMessages.push(message);
     // Through the SAME function the real shell uses, so what is recorded is the label Windows
     // would show — default and blank-label fallback included — and never a more lenient one.
     this.confirmLabels.push(approveLabel(options));
-    // Set BEFORE anything awaits, and cleared on every path out — the same discipline
-    // WindowsShell.confirm() follows, because "the dialog is up" and "the guard knows" must
-    // never be observable in different states.
-    this.confirmPending = true;
+    this.confirmDetached.push(options?.detached === true);
+    this.openConfirms += 1;
+    this.maxOpenConfirms = Math.max(this.maxOpenConfirms, this.openConfirms);
+    const closed = (approved: boolean): boolean => {
+      this.openConfirms -= 1;
+      return approved;
+    };
     if (!this.holdConfirm) {
-      this.confirmPending = false;
-      return Promise.resolve(this.confirms.shift() ?? false);
+      return Promise.resolve(closed(this.confirms.shift() ?? false));
     }
     return new Promise<boolean>((resolve) => {
-      this.pendingConfirm = resolve;
+      this.pendingConfirm = (approved) => resolve(closed(approved));
     });
+  }
+
+  // The needs-you chime (M23). Counted, never played.
+  playChime(): void {
+    this.chimes += 1;
+  }
+
+  // Mirrors WindowsShell.isForegroundFree for the states this mock can be in.
+  isForegroundFree(): boolean {
+    return !this.confirmPending && !this.askPending;
   }
 
   // Is a confirm dialog on screen awaiting an answer? The property the M14 §8 hotkey guard
@@ -216,7 +252,6 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   answerConfirm(approved?: boolean): void {
     const pending = this.pendingConfirm;
     this.pendingConfirm = null;
-    this.confirmPending = false;
     pending?.(approved ?? this.confirms.shift() ?? false);
   }
 

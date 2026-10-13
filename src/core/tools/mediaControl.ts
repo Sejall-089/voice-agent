@@ -44,6 +44,7 @@ export const mediaControlTool: Tool = {
     required: ["action"],
   },
   risk: "reversible",
+  background: "foreground-only",
   // A fixed action name, not a reference to look up — same as `systemVolume`'s direction.
   resolvesReferences: false,
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {

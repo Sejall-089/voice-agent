@@ -624,6 +624,36 @@ export interface Memory extends MemoryResolver {
 
 // --- Tools ---
 
+export type BackgroundTag = "ok" | "foreground-only";
+
+// One job as a status answer needs to see it (M23) — a read-only projection, declared here so a
+// tool can name it without importing the job machinery. `core/jobs/` produces it.
+export type JobState =
+  | "queued"
+  | "running"
+  | "needs-you"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "expired"
+  | "interrupted";
+
+export interface JobSummary {
+  id: string;
+  instruction: string;
+  state: JobState;
+  // What a job in `needs-you` is waiting for, or null.
+  waitingFor: "confirm" | "foreground-only" | null;
+  // The tool it is on, or stopped at. A NAME from the registry, never text a model wrote.
+  tool: string | null;
+}
+
+export interface JobsReader {
+  // The jobs worth telling someone about: background work, never the status questions
+  // themselves and never something the user watched finish in the bar.
+  list(): readonly JobSummary[];
+}
+
 // Dependencies handed to every tool handler (injected, never global — spec §10).
 export interface ToolDeps {
   context: CapturedContext;
@@ -681,6 +711,9 @@ export interface ToolDeps {
   // passes it when SLACK_BOT_TOKEN is set). Read-only: it can look a name up and nothing else.
   // `sendMessage` uses it to refuse a channel Slack does not have before any dialog.
   channelDirectory?: ChannelDirectory;
+  // M23. The app's own job records, read-only — present only when the planner was built with
+  // them. One tool reads it (`jobStatus`); it can list and nothing else.
+  jobs?: JobsReader;
 }
 
 // A handler returns the text to display; it throws on failure (planner catches).
@@ -777,6 +810,23 @@ export interface Tool extends ToolSchema {
   // than on the tool itself (a calendar event with guests emails them; the same event without
   // guests touches nobody). See core/risk.ts for why calendar needed this and Gmail did not.
   risk: ToolRisk<ToolInput, ToolDeps>;
+  // May this tool run while nobody is at the command bar? (M23.)
+  //
+  //   "ok"               pure, or an API call working from what was captured at submission.
+  //   "foreground-only"  acts on whatever is open or focused AT THAT MOMENT (the open email, the
+  //                      Notion page, the media session), takes focus, overwrites the clipboard
+  //                      or speaks. A detached job PAUSES before one of these and waits for the
+  //                      user; it never runs one on its own.
+  //
+  // REQUIRED, WITH NO DEFAULT, on purpose. An optional field would make a new tool one or the
+  // other by omission, and "runs unattended" is not a property a tool should acquire because
+  // someone forgot a line. Independent of `risk`: a `safe` read of "the open email" is still
+  // about a moment, and a `dangerous` Slack post is still fine to prepare in the background —
+  // the confirm gate is what stops it, not this.
+  background: BackgroundTag;
+  // Answers from the app's own records and does nothing else (M23): never queued behind running
+  // jobs, never listed as a job, never counted in its own answer. `jobStatus` is the one.
+  statusOnly?: boolean;
   handler: ToolHandler;
   // Whether the planner should run this tool's args through memory's reference resolution.
   // Defaults to true. Memory-WRITING tools set this false: their args are literals to store
@@ -883,7 +933,9 @@ export interface Tool extends ToolSchema {
 
 // --- Action log seam (M1 in-memory; M3 becomes SQLite action_log) ---
 
-export type ActionStatus = "ok" | "refused" | "no_tool" | "error" | "cancelled";
+// "expired" (M23): a detached job waited for the user past its limit, so the step was NOT run.
+// Its own status rather than "cancelled", because nobody said no — nobody answered.
+export type ActionStatus = "ok" | "refused" | "no_tool" | "error" | "cancelled" | "expired";
 
 export interface ActionLogEntry {
   ts: string;
@@ -892,13 +944,20 @@ export interface ActionLogEntry {
   arguments: ToolInput | null;
   result: string | null;
   status: ActionStatus;
+  // M23. Which job wrote this row, and whether that job was DETACHED (running without the
+  // command bar) when it did. Both absent on every row written before M23 and by any caller
+  // that is not a job. `getLast()` skips detached rows: a background step must never become
+  // the "previous turn" the next spoken instruction is resolved against.
+  jobId?: string;
+  detached?: boolean;
 }
 
 export interface ActionLog {
   logAction(entry: ActionLogEntry): void;
   logMiss(instruction: string): void; // records a "no_tool" miss
   // The single most recently logged entry, or null on a fresh session — the planner's
-  // one turn of state, fed back into the next chooseTool call.
+  // one turn of state, fed back into the next chooseTool call. Rows a DETACHED job wrote are
+  // skipped (M23): the previous turn is what the user last did in front of the bar.
   getLast(): ActionLogEntry | null;
 }
 

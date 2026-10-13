@@ -142,6 +142,28 @@ two-tracker choice and the failure wording are NOT yet run live (§9):**
   - **Still out**: comments, labels, assignees, editing or closing an issue, pull requests,
     files, and the other 43 tools; Slack DMs; OAuth; stdio servers; any change to `plan.ts`.
 
+**Added after v0 (M23) — in progress, see §9 for the build order and what is built:**
+- **Background jobs.** Every instruction is one *job* running the existing chain machinery (up
+  to three steps, the same per-step gates). A job starts **attached** — it behaves exactly as an
+  instruction did before M23 — and is **detached** when the instruction hotkey is pressed while
+  it is still working, at which point it carries on without the command bar. A detached job
+  **pauses** ("needs you") at a confirm or at a tool that needs the user present, and a pause
+  that nobody answers for 30 minutes expires without the tool running. At most three jobs
+  execute at once; the rest queue. Jobs are recorded in SQLite and are **never resumed** after
+  a restart — they are marked interrupted. See §5c.
+- **A status pill.** A small frameless window at the bottom right of the work area that shows
+  what jobs are doing and lists the ones waiting. It is the one place a paused job is answered
+  from — and **it never approves anything**: its button opens the same native confirm dialog
+  every `dangerous` call has always passed through.
+- **A needs-you chime**: one short bundled sound when a job starts waiting. No speech is
+  involved, and it is never played over a recording, a dictation or the app's own voice.
+- **`jobStatus`**, a `safe` tool: "are my agents done yet?" is answered from the job records by
+  a fixed template. No other tool is added.
+- **One running instance.** A second launch focuses the first and exits.
+- **Still out**: resuming a job after a restart, a job that plans again after seeing a result
+  (the open-ended loop below is unchanged), scheduling, answering a confirm by voice, a tray
+  icon, and any pill control beyond open-the-dialog / cancel / mute.
+
 **Explicitly OUT of scope for v0 (do not build, do not scaffold):**
 - ~~Voice / speech-to-text.~~ **Moved into scope in M7**, after v0 was complete and
   live-verified. It was out of v0 deliberately — voice is a second way to produce the
@@ -212,7 +234,10 @@ two-tracker choice and the failure wording are NOT yet run live (§9):**
 - Any UI beyond the command bar, a result popup, and (M15) the pointing overlay — a
   transparent, click-through, always-on-top window that draws one highlight and dismisses
   itself. It is the deliverable of that milestone rather than an expansion of the app's
-  chrome: it has no controls, cannot take focus, and cannot receive a click.
+  chrome: it has no controls, cannot take focus, and cannot receive a click. **M23 adds one
+  more, and it was asked for: the status pill.** It cannot take focus either, but it does take
+  clicks — to open a waiting confirm's dialog, cancel a job, or mute the chime — and that is
+  the whole of what it may do. Anything beyond those two windows and the bar is still out.
 - Auth systems, accounts, cloud sync.
 
 If a task seems to require anything in the OUT list, stop and flag it.
@@ -939,9 +964,12 @@ changes behaviour is live-only; `tests/eval/planChoice.eval.test.ts` (opt-in,
 ### Deliberately deferred
 
 No new tools; no conditional branching mid-chain ("if I'm free at 3, book X, otherwise Y" — a
-fixed plan is a straight line, not a decision tree); no persistent background execution (the whole
+fixed plan is a straight line, not a decision tree); ~~no persistent background execution (the whole
 chain runs inside one instruction; a task that survives closing the bar needs a task registry, a
-notification path and cancellation, and is a larger milestone).
+notification path and cancellation, and is a larger milestone)~~ — **that milestone is M23**
+(§5c): the task registry is the job store, the notification path is the pill and the chime, and
+a job can be cancelled. What M23 does **not** change is everything above this line: one planning
+call, a fixed plan, three steps, the same gate per step.
 
 ### The clock in the prompt (added in M13)
 
@@ -969,6 +997,169 @@ be assumed to be.
 `now` and `zone` are **defaulted arguments**, following `DraftStore.get(now = Date.now())`:
 production passes nothing and gets the real clock; tests pass a fixed instant and get a
 deterministic prompt. `/core` still reads no globals it hasn't been handed.
+
+---
+
+## 5c. Background jobs (M23) — the same chain, without the bar
+
+**In progress: built and tested against fakes and three recon scripts; not run live, not
+closed. §9 has the build order and what each claim rests on.**
+
+Every instruction is one **job**. A job runs the planner an instruction always ran — one
+planning call, a fixed plan of up to three steps, the same per-step gates (§5, §5b). Nothing
+about *what* may run or *who* approves it changed. What M23 adds is that an instruction no
+longer has to hold the command bar until it is finished.
+
+### Attached and detached
+
+A job starts **attached**: the user just asked for it and is looking at the bar. An attached
+job behaves exactly as an instruction did through M22 — its narration, results and speech go
+to the bar, tools that act on the screen run, and a confirm dialog opens at once, for every
+step.
+
+Pressing the instruction hotkey (or the dictation hotkey) while it is still working
+**detaches** it. From that press on:
+
+- its narration and results go to its own job record, shown in the status pill — never to the
+  bar's status, result or Thinking lines, the speaker, the "read me the rest" store, or the
+  previous turn (`core/jobs/JobShell.ts`);
+- it **pauses** — state `needs-you` — before a confirm, and before any tool tagged
+  `foreground-only`. It does not open a dialog on someone who is typing.
+
+A press is **blocked** instead, as before, in three cases: a dialog is open, a question is
+open, or the attached job *holds the foreground* — it is inside a `foreground-only` step, or
+between "this step needs a confirm" and that dialog being answered. Through M22 any running
+chain blocked both hotkeys for its whole length; now only that narrower thing does.
+
+### `Tool.background`
+
+Required on every tool, with no default (`core/types.ts`):
+
+| Tag | Tools | Why |
+|---|---|---|
+| `ok` | summarize, recall, remember, readSchedule, createEvent, moveEvent, sendMessage, `linear__*`, `github__*`, jobStatus | pure, or an API call working from what was captured at submission |
+| `foreground-only` | draftReply, reviseDraft, sendReply, readEmail, addToPage | act on whatever is open at that moment |
+| `foreground-only` | pointAt, openTarget, openApp, searchSpotify | take focus, or point at the current window |
+| `foreground-only` | systemVolume, mediaControl, rewrite, elaborate | hit the current media session, overwrite the clipboard, or speak |
+
+Independent of `risk`: `readEmail` is `safe` and still about a moment; `sendMessage` is
+`dangerous` and still fine to prepare unattended, because the confirm gate is what holds it.
+`tests/background.test.ts` pins this table.
+
+### States
+
+```
+submit ─► running ─► done / failed / cancelled
+            │  ▲
+  no slot   ▼  │ a slot frees
+          queued ─► cancelled
+running ─► needs-you ─► running     (resumed from the pill)
+               ├──────► expired     (30 minutes, nobody answered — the tool is NOT run)
+               └──────► cancelled
+queued / running / needs-you ─► interrupted   (only at startup)
+```
+
+- **Planning is not capped; executing is.** At most three jobs execute at once
+  (`MAX_RUNNING`). A job holds no slot until its plan is settled, so a status question is
+  answered at once however many are busy. A job that is waiting for the user gives its slot
+  back; one the user has just resumed does not queue behind the cap.
+- **Expiry** is 30 minutes from the moment a job starts waiting, checked on a one-second timer
+  *and at the click* that resumes it. An expired step is logged with status `expired` and its
+  handler is never called. Once a job has been resumed the clock no longer applies: the
+  dialog's answer decides.
+- **Cancel**: a queued or waiting job stops at once. A job mid-step is left to finish that
+  step — a handler cannot be un-called — and nothing after it starts.
+- **Restart**: jobs are rows in the `jobs` table of the same SQLite file. On startup every live
+  job becomes `interrupted` and is **never resumed**. A marker written immediately before each
+  handler call and cleared after it is what lets the record say *"it may or may not have gone
+  through"* only for a step that had started, and *"nothing was sent by that step"* otherwise.
+
+### Context is captured once, at submission
+
+`captureContext` (`core/planner.ts`) reads the clipboard and the email-open flag when the
+instruction is given, and the job holds the result for its whole life — through a wait for a
+slot, a detach and a thirty-minute pause. Nothing reads the clipboard again. The email's
+*content* is not captured (it never was — §5b); the tools that read it are `foreground-only`.
+The captured context is **not persisted**: a job is never resumed after a restart, so nothing
+needs it, and a clipboard is as likely to hold a password as notes.
+
+### The confirm gate, when nobody is there
+
+A detached job waits **before** its confirm summary is built. When the user clicks its row in
+the pill, the planner works the tier out again (keeping the stricter of the two answers),
+builds the summary from the world as it is *then*, and asks the shell for the dialog. So what
+the dialog says was true when it opened, not when the job paused.
+
+All confirms, attached and detached, go through one queue (`shell/ConfirmBroker.ts`) that
+replaced the shell's `confirmPending` boolean: one dialog on screen at a time, the next opens
+when it is answered, and "is a confirm pending" — which both hotkey guards read — is answered
+from the queue.
+
+A **detached** dialog differs from an attached one only in what it may disturb, which is
+nothing: it is parented to the pill window instead of the bar, the bar is not hidden (hiding
+it fires the handler that ends a capture or a question), a blur does not dismiss the bar, and
+speech is not stopped. **With no live pill window it is refused** — no dialog is opened, and
+the request fails as an error rather than a "no" — because an unparented dialog was measured
+fully covered by a visible bar. A yes given to a dialog whose job was cancelled from the pill
+while it was open (the queue cannot take a request back) is discarded: nothing runs. A job that was detached without being resumed for a confirm cannot open
+a dialog at all: its request resolves "not approved" without one being shown.
+
+### The status pill
+
+A frameless, non-focusable, always-on-top window at the bottom right of the primary display's
+work area, excluded from screen capture, shown only with `showInactive()`.
+
+| Shows | When |
+|---|---|
+| amber, "N needs you" | a job is waiting. Pulses for 2.4 s when a job starts waiting, then steady |
+| "N didn't finish" | failed, interrupted or expired — stays until each is dismissed |
+| "N running" | otherwise, while anything is running or queued |
+| "Done" | for 8 s after the last job finishes cleanly, then the window hides |
+
+Clicking it opens a list. Each row has only its own buttons — **Review…** (opens the native
+confirm dialog; approves nothing), **Resume** (a job that needs the screen), **Cancel**,
+**Dismiss** — and the list has a mute toggle for the chime. The button labels are fixed in the
+page's code; a row's title is the user's instruction and its detail may be a tool's result,
+and both are drawn as text. Everything the page sends is checked again in main
+(`pill/PillController.ts`): an unknown action, an unknown job, or an action that row is not
+currently offering is dropped.
+
+Only **background** jobs appear — one that was detached at some point. A job the user watched
+finish in the bar is not listed, and neither is a status question.
+
+Where it goes is a pure function of the work area in DIP (`core/jobs/pill.ts`, `pillBounds`),
+with no scale factor in it.
+
+### The chime
+
+One bundled sound (`src/renderer/assets/needs-you.wav`, generated by `scripts/make-chime.mjs`)
+when a job enters `needs-you`. No speech engine and no network are involved. Not played for
+done or failed. While dictation, an instruction recording or the app's own voice is active it
+is held, and played once afterwards only if a job that wanted it is still waiting. Jobs that
+start waiting within 2 s of a chime are covered by it. On by default; the mute toggle is saved
+in the `settings` table. It plays on its own `chime:play` channel and its own `Audio` element
+in the bar's window, never through the speech player.
+
+### `jobStatus`
+
+"Are my agents done yet?" routes to a `safe` tool that reads the job records and answers from
+a fixed template (`core/jobs/statusAnswer.ts`) — a spoken sentence leading with whatever is
+waiting, and on screen that sentence plus one line per job. It makes no model call. It reports
+jobs that are live or ended in the last 30 minutes, and never itself. Completions are
+otherwise silent.
+
+### Action log
+
+`action_log` gains two nullable columns, added by a guarded migration that checks for each
+first (`core/memory/db.ts`): `job_id`, and `detached` — whether the job was detached when it
+wrote the row. `getLast()`, which supplies the previous turn to the next planning call, skips
+detached rows. `ActionStatus` gains `expired`.
+
+### Deliberately not built
+
+Resuming a job after a restart; cancelling a handler in flight; a job that asks a question
+while detached (it is told nobody answered, and the plan is refused); a pill on any display
+but the primary; a tray icon; answering a confirm from the pill or by voice.
 
 ---
 
@@ -3147,6 +3338,172 @@ Post-v0:
       for two old places that put `error.message` in front of the user; bot-mode wording in
       `sendMessage`; the pre-flight, ask flow, `remember` and "the X channel"; then wording and
       docs. A mutation pass after each code prompt; every surviving mutation got a test.
+- [ ] **M23 — background jobs, a status pill and a needs-you chime.** **In progress; not
+      closed, not run live.** Scope is §2's M23 entry; the design is §5c.
+
+      **Build order** (agreed 2026-10-13; everything agreed after the first plan is folded in
+      here, per CLAUDE.md "Scope added mid-milestone"):
+      0. This entry, §2 and §5b amended; one running instance (`requestSingleInstanceLock`,
+         the decision tested behind a fake app object).
+      0b. Two recon scripts **before any fixture**: a click on the non-focusable pill bringing
+         a native dialog to the front, and the chime playing from the hidden bar window.
+      1. Job model, `JobManager` state machine, SQLite job store. `action_log.job_id` added by
+         a guarded migration (column checked first; tested on a copy of a real `memory.db` and
+         on a fresh one). `getLast()` ignores rows a detached job wrote.
+      2. Per-job chain state; attached / detached; the hotkey guards block only on an attached
+         job mid foreground-only step, an open dialog or an open question, and otherwise detach.
+      3. Context captured at submission (clipboard + the email-open flag), in memory only,
+         never re-read and never persisted.
+      4. `Tool.background: "ok" | "foreground-only"`, required, no default; the two pause
+         reasons (a confirm, a foreground-only tool) for a detached job.
+      5. Confirm broker: a queue that replaces the shell's `confirmPending` boolean, one dialog
+         at a time, 30-minute expiry checked when the pill is clicked, the pause taken
+         **before** `confirmSummary` so the summary and tier are computed when the dialog opens.
+         A detached confirm is not parented to the bar, does not hide it, does not end a
+         capture or a question, and does not stop speech.
+      6. `jobStatus` and its templated answer; status runs never appear in the pill or in
+         their own answer; planning happens outside the cap.
+      7. Pill window, pure state reducer, pure position function, list UI (open dialog / cancel
+         / mute), a pulse on entering needs-you then steady amber. A detached job writes only
+         to its job record — never the bar, the result popup, `pointTarget`, the draft or
+         speech stores, or the speaker.
+      8. The chime: a pure `shouldChime`, its own `chime:play` channel and `Audio` element,
+         mute persisted in a `settings(key, value)` table.
+      9. Restart: `running` / `needs-you` → `interrupted`, never resumed; a step-started marker
+         written before each handler so an interrupted job can say "may have gone through" or
+         "nothing was sent".
+      10. The `jobStatus` routing eval against the real model (asked for: ~20 phrasings × 3
+          trials, once), a headless three-job simulation, then `/milestone-closeout`.
+
+      **Built (2026-10-13): every item above. Not closed.** No mutation pass has been run yet —
+      several of the new suites were green the first time they ran, which by CLAUDE.md proves
+      nothing until each rule has been broken once. No live checklist exists yet. Both are
+      `/milestone-closeout`'s Phase A.
+
+      **What the three recon scripts measured** (this machine, Electron 33, 1920×1080 at 150%,
+      2026-10-13) — each run *before* the code that depends on it:
+
+      | Script | Question | Measured |
+      |---|---|---|
+      | `scripts/pill-click-recon.cjs` | does a real click reach a `focusable: false` window? | yes; the page received it |
+      | | does that click take focus or the foreground? | no — `pillFocused=false`, foreground not ours, bar got 0 `hide` / 0 `blur` |
+      | | dialog **parented to the pill**, bar hidden | on top 9/9, topmost, foreground; bar 0 hide / 0 blur |
+      | | dialog **parented to the pill**, bar on screen | on top 9/9, topmost, foreground; bar still visible, 0 hide / 0 blur |
+      | | dialog **unparented**, bar on screen | **0/9 — fully covered by the bar**, not topmost (M19's finding again) |
+      | `scripts/chime-recon.cjs` | does an `Audio` play and end in a window never shown? | yes — `ended`, `currentTime` 0.42 of 0.42 s (first play ~990 ms to `ended`: device warm-up) |
+      | | do two elements overlap without cutting each other off? | yes, both `ended` |
+      | | does pausing one leave the other playing? | yes |
+      | `scripts/pill-render-recon.cjs` | the BUILT page in a real window: bridge, drawing, real clicks | `window.pill` present and `window.api` absent; three rows and their buttons drawn; a real click on "Review…" reached main as `pill:action(job-review, review)`, on mute as `pill:mute(true)`, on the pill as `pill:expand(true)`; the window never took focus |
+
+      That is why a detached dialog is parented to the pill (`WindowsShell.presentConfirm`),
+      and why the chime has an `Audio` element of its own.
+
+      **What those scripts cannot say**, and so is not claimed: that the chime was *audible*
+      (only that Chromium's pipeline ran to `ended`); what a human click does where the
+      scripts used a synthetic one from a child process — in particular that the dialog gets
+      *keyboard* focus; anything on a second monitor or at a scale other than 150%; and the
+      whole app end to end, which has not been started with this code at all.
+
+      **`scripts/job-migration-check.mjs`**, run against a *copy* of this machine's real
+      `memory.db` (503 action-log rows, 18 facts, the seven-column pre-M23 table): both
+      columns added, every column and row kept, all existing rows NULL in both, `getLast()`
+      unchanged, a second start a no-op, and a stamped row and a job row written and read
+      back. The original file was not opened for writing.
+
+      **An independent review of the diff** (a fresh agent, findings only, 2026-10-13) passed
+      the tags, the SQL filter, the migration guard, the step-started marker and the absence
+      of any leftover `confirmPending` boolean, and found four real faults, all fixed with a
+      test each:
+      - a detached dialog with no pill window opened **unparented** → now refused, no dialog;
+      - a connector's "Connecting to Linear…" line was written to the bar by whichever job
+        opened the connection, detached or not → shown only when the job that has the bar is
+        itself on a connector tool (`main/jobs/connectingNotice.ts`);
+      - cancelling a job whose dialog was already open or queued did not withdraw it, and
+        pressing its approve button ran the handler → the answer is discarded;
+      - a result landing in a visible, unfocused bar during another job's detached dialog was
+        never auto-hidden → it is; and the hotkey's "a confirmation is waiting" line no longer
+        pops the bar up after that dialog closes.
+
+      **Found by the review and NOT fixed — open limits:**
+      - `pointAt`'s target window is one app-wide value set at each hotkey press, not captured
+        per job. A `pointAt` job detached during planning and later resumed from the pill reads
+        the window of the most recent press, not its own. The one-slot `DraftStore` has the
+        same shape for a resumed `reviseDraft` / `sendReply`.
+      - While any dialog is open, an attached job's `askUser` is told "could not be asked".
+      - Resuming a job that waits on a **confirm** is not held back while the user is typing
+        or recording: the dialog opens and takes the keyboard for its duration (the bar and
+        the capture are left intact).
+      - `MockShell.isForegroundFree` knows only dialogs and questions, not captures or
+        recordings, so the "busy" resume rule is tested against the real shell's own unit test
+        and not end to end.
+
+      **Tests at the end of the build** (2026-10-13): **2488 passed across 112 files, 95
+      skipped** (the opt-in real-model evals, 20 of them new), typecheck clean on both configs.
+      It was 2242 across 98 at the commit before. Run as plain `npm test`, with the app closed
+      and `better-sqlite3` rebuilt for node by its own `pretest`. (During the build the suite
+      was run against a separately installed node build of the same SQLite version, because a
+      running `npm run dev` held the project's binary open; the figures agree.)
+
+      New files: `tests/jobManager.test.ts` (the state machine, expiry on a fake clock, the
+      cap), `tests/jobs.run.test.ts` (real planners as jobs: interleaved chains, the snapshot,
+      expired / cancelled pauses with handler spies, addition A), `tests/jobs.hotkey.test.ts`,
+      `tests/jobs.simulation.test.ts` (three concurrent jobs end to end),
+      `tests/jobStore.test.ts` (the migration, `getLast()`, restart, settings),
+      `tests/confirmBroker.test.ts`, `tests/pill.test.ts` (reducer, position, a fake
+      `BrowserWindow`, the controller), `tests/chime.test.ts`, `tests/statusAnswer.test.ts`,
+      `tests/background.test.ts`, `tests/singleInstance.test.ts`, `tests/connectingNotice.test.ts`,
+      `src/renderer/pill/render.test.ts` (jsdom), plus a detached-confirm block in
+      `tests/WindowsShell.capture.test.ts`.
+
+      **The `jobStatus` routing eval, against the real model** (asked for; run ONCE,
+      2026-10-13; `tests/eval/jobStatus.eval.test.ts`, `M23_STATUS_EVAL=1`). Provider
+      `openai` (`gpt-5`), 20 phrasings × 3 trials = 60 `chooseTool` calls, the full menu with
+      `jobs: true`, context taken through `captureContext` with a fixed clipboard of unrelated
+      standup notes, no email open, no previous turn. **60 of 60.**
+
+      | | Phrasing | Chosen (3 trials) |
+      |---|---|---|
+      | 3/3 | are my agents done yet | jobStatus ×3 |
+      | 3/3 | what's running | jobStatus ×3 |
+      | 3/3 | anything waiting on me | jobStatus ×3 |
+      | 3/3 | are my jobs done | jobStatus ×3 |
+      | 3/3 | did that finish | jobStatus ×3 |
+      | 3/3 | how are my background jobs doing | jobStatus ×3 |
+      | 3/3 | is anything still running in the background | jobStatus ×3 |
+      | 3/3 | what's the status of my agents | jobStatus ×3 |
+      | 3/3 | do any of my jobs need me | jobStatus ×3 |
+      | 3/3 | have my agents finished | jobStatus ×3 |
+      | 3/3 | what are my agents up to | jobStatus ×3 |
+      | 3/3 | is there anything I need to approve | jobStatus ×3 |
+      | 3/3 | *near miss:* tell the team the agents are done | sendMessage ×3 |
+      | 3/3 | *near miss:* post "the background jobs are finished" in the bugs channel | sendMessage ×3 |
+      | 3/3 | *near miss:* start an agent to check Gmail | no tool ×3 |
+      | 3/3 | *near miss:* run a job that summarizes this | summarize ×3 |
+      | 3/3 | *near miss:* remember that the agents finish by five | remember ×3 |
+      | 3/3 | *near miss:* what do you remember about my agents | recall ×3 |
+      | 3/3 | *near miss:* what's on my calendar today | readSchedule ×3 |
+      | 3/3 | *near miss:* is the build done? ask in the team channel | sendMessage ×3 |
+
+      Positives 36/36, near-miss negatives 24/24. **What this does not show**: Anthropic was
+      not run; one clipboard and no previous turn were used, and a previous turn that is
+      itself a job-status answer (or a long clipboard that talks about agents) may move it;
+      "did that finish" with a foreground action as the previous turn is the phrasing most
+      likely to be about something else, and that was not measured.
+
+      **A first, partial mutation pass** (nine rules, Edit tool, one at a time; the full pass
+      is still owed at close-out):
+
+      | Rule broken | Caught by |
+      |---|---|
+      | planner carries on after an expired / cancelled confirm wait | first run: 1 test, and only by the row's status — the handler-never-called tests passed, because the job shell's "no permit, no dialog" rule caught it behind them. Tests strengthened (the summary must not be BUILT; the row's status and wording); then 3 |
+      | planner runs a step the gate refused to enter | 2 (the foreground-only expiry test, the simulation) |
+      | confirm queue shows a second dialog over the first | 4, across the queue, MockShell, WindowsShell and two real jobs |
+      | a detached job's result goes to the bar | 4 |
+      | a detached job speaks | 2 |
+      | a detached dialog is presented like an attached one | 5 |
+      | a detached dialog stops speech / restores the bar | 1 |
+      | `getLast()` stops skipping detached rows | 2 |
+      | an "attached" permit honoured after a detach | **survived** — the check was unreachable (a job holding that permit cannot be detached, which is tested), so the line was removed rather than left as a rule nothing can exercise |
 
 **v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's

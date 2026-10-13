@@ -7,13 +7,15 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M22; the next one is whatever is agreed and added to that list). Do not jump ahead. Each
+  M22; **M23, background jobs, is built and open**: not run live, not closed. After it, the
+  next one is whatever is agreed and added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
   If a task seems to need anything still OUT of scope (auto-clicking or any vision-driven
   clicking, a Mac/Linux shell, an open-ended agent loop where the model sees each result and
-  picks its next move, UI beyond the command bar / result / pointing overlay, auth, accounts
-  or cloud sync), stop and ask — don't scaffold it "just in case". **A new connector or
+  picks its next move, UI beyond the command bar / result / pointing overlay / status pill
+  (M23), resuming a job after a restart, auth, accounts or cloud sync), stop and ask — don't
+  scaffold it "just in case". **A new connector or
   surface is not out of scope, but ask before adding one** (spec.md §2: it is a cost
   question). Voice, DOM-based Gmail/Notion, pointing, fixed chains of up to three tools and
   MCP connectors are all built — do not stop for those.

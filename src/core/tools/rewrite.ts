@@ -34,6 +34,7 @@ export const rewriteTool: Tool = {
     required: [],
   },
   risk: "reversible",
+  background: "foreground-only",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const text = deps.context.selectedText;
     if (!text || text.trim().length === 0) {

@@ -19,6 +19,7 @@ import { createEventTool } from "./tools/createEvent.ts";
 import { moveEventTool } from "./tools/moveEvent.ts";
 import { elaborateTool } from "./tools/elaborate.ts";
 import { pointAtTool } from "./tools/pointAt.ts";
+import { jobStatusTool } from "./tools/jobStatus.ts";
 
 // The closed-world menu of tools the app can do (spec.md §6). Adding a tool is additive:
 // a handler file plus an entry here. The planner never changes.
@@ -86,6 +87,11 @@ export const speechTools: Tool[] = [elaborateTool];
 // The gate stayed because the smaller disclosure is still a disclosure.)
 export const pointingTools: Tool[] = [pointAtTool];
 
+// The job-status tool (M23). Gated on there being job records to read: main.ts builds a
+// JobManager and passes `jobs: true`. A planner built without one — every test and eval that
+// predates M23 — is never offered a tool that could only ever say "nothing is running".
+export const jobTools: Tool[] = [jobStatusTool];
+
 export interface RegistryOptions {
   // Whether a Chrome to drive is actually configured.
   gmail: boolean;
@@ -111,6 +117,8 @@ export interface RegistryOptions {
   // depends on a config file. They are still a closed list — only tools a connector definition
   // in core/mcp/connectors/ pins can be in it.
   connectors?: readonly Tool[];
+  // Optional (defaults to not offered) — whether this run has job records (M23).
+  jobs?: boolean;
 }
 
 // The menu for one app run.
@@ -127,6 +135,7 @@ export function buildRegistry(options: RegistryOptions): Tool[] {
   if (options.calendar === true) tools.push(...calendarTools);
   if (options.speech === true) tools.push(...speechTools);
   if (options.pointing === true) tools.push(...pointingTools);
+  if (options.jobs === true) tools.push(...jobTools);
   // A connector tool is namespaced (`linear__create_issue`), so it cannot share a name with a
   // hand-built one by accident. If one ever did, the HAND-BUILT TOOL WINS and the other is left
   // off: the planner resolves a name with `find`, and which of two same-named tools ran must
@@ -147,6 +156,7 @@ export function findTool(name: string): Tool | undefined {
     ...calendarTools,
     ...speechTools,
     ...pointingTools,
+    ...jobTools,
   ].find((tool) => tool.name === name);
 }
 

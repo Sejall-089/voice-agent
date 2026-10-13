@@ -47,6 +47,7 @@ const readThing: Tool = {
   name: "readThing",
   description: "Read a thing.",
   inputSchema: { type: "object", properties: {}, required: [] },
+  background: "ok",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("THING ONE"),
 };
@@ -55,6 +56,7 @@ const readOther: Tool = {
   name: "readOther",
   description: "Read another thing.",
   inputSchema: { type: "object", properties: {}, required: [] },
+  background: "ok",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("THING TWO"),
 };
@@ -67,6 +69,7 @@ const noteThing: Tool = {
     properties: { text: { type: "string", description: "What to note." } },
     required: ["text"],
   },
+  background: "ok",
   risk: "caution",
   narrate: (input: ToolInput): string => `Noting "${text(input)}"…`,
   handler: (input: ToolInput): Promise<string> => Promise.resolve(`Noted: ${text(input)}`),
@@ -80,6 +83,7 @@ const sendThing: Tool = {
     properties: { text: { type: "string", description: "What to send." } },
     required: ["text"],
   },
+  background: "ok",
   risk: "dangerous",
   confirmSummary: (input: ToolInput): string => `Send "${text(input)}"?`,
   handler: (input: ToolInput): Promise<string> => Promise.resolve(`Sent: ${text(input)}`),
@@ -89,6 +93,7 @@ const brokenThing: Tool = {
   name: "brokenThing",
   description: "A thing that can't run right now.",
   inputSchema: { type: "object", properties: {}, required: [] },
+  background: "ok",
   risk: "safe",
   handler: (): Promise<string> => Promise.reject(new UserFixableError(NOT_CONNECTED)),
 };
@@ -97,6 +102,7 @@ const emptyThing: Tool = {
   name: "emptyThing",
   description: "A thing that produces nothing.",
   inputSchema: { type: "object", properties: {}, required: [] },
+  background: "ok",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("   "),
 };

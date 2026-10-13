@@ -156,6 +156,10 @@ export function buildConnectorTools(
       description: tool.description,
       inputSchema: tool.inputSchema,
       risk,
+      // M23. A connector call is a request to someone else's API with arguments fixed before
+      // it is made: nothing about it depends on what is on the user's screen at that moment.
+      // The confirm gate, not this, is what holds a `dangerous` one for an answer.
+      background: "ok",
       // From the PINNED definition and nowhere else. The server's own account of the tool —
       // `remoteTool()`'s description, title, annotations — is never consulted for it; a
       // conditional spread, so a tool that pins none has no property at all and gets the

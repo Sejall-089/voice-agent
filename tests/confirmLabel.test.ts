@@ -84,6 +84,7 @@ describe("the planner hands the dialog the tool's own label", () => {
       name: "probe",
       description: "",
       inputSchema: { type: "object", properties: {}, required: [] },
+      background: "ok",
       risk: "dangerous",
       confirmSummary: (args) => `Do it? ${JSON.stringify(args)}`,
       handler: () => Promise.resolve("done"),

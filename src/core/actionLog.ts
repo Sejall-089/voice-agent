@@ -22,7 +22,12 @@ export class InMemoryActionLog implements ActionLog {
     });
   }
 
+  // Rows a detached job wrote are skipped (M23), exactly as SqliteMemory.getLast skips them.
   getLast(): ActionLogEntry | null {
-    return this.entries[this.entries.length - 1] ?? null;
+    for (let i = this.entries.length - 1; i >= 0; i -= 1) {
+      const entry = this.entries[i];
+      if (entry !== undefined && entry.detached !== true) return entry;
+    }
+    return null;
   }
 }

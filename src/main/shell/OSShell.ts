@@ -62,6 +62,12 @@ export interface ConfirmOptions {
   // reads as a command rather than a description, so the planner passes `tool.confirmLabel`
   // and never anything a model, an argument, an email or a server wrote.
   approveLabel?: string;
+  // M23. This confirm belongs to a job the user has walked away from, opened by their click
+  // in the status pill. It is the same dialog with the same buttons; what differs is what it
+  // may disturb — nothing. It is not parented to the command bar, does not hide it, does not
+  // end a capture or a question that is open in it, and does not stop the app speaking.
+  // Set by the job's shell from where the job stands, never by a tool or a model.
+  detached?: boolean;
 }
 
 export interface OSShell {

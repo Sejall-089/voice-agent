@@ -36,6 +36,7 @@ function toolWithRisk(risk: Tool["risk"], ran: string[]): Tool {
     name: "probe",
     description: "test double",
     inputSchema: { type: "object", properties: {}, required: [] },
+    background: "ok",
     risk,
     narrate: (): string => "about to do the thing",
     confirmSummary: (_args: ToolInput): string => "do the thing?",

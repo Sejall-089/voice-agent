@@ -28,6 +28,7 @@ export const elaborateTool: Tool = {
     "that was given in full, and do not use it to look anything up again.",
   inputSchema: { type: "object", properties: {}, required: [] },
   risk: "safe",
+  background: "foreground-only",
   handler: async (_input: ToolInput, deps: ToolDeps): Promise<string> => {
     const held = deps.speech.take();
     if (held === null) {

@@ -107,8 +107,8 @@ export class SqliteMemory implements Memory, ActionLog {
   logAction(entry: ActionLogEntry): void {
     this.db
       .prepare(
-        `INSERT INTO action_log (ts, instruction, tool, arguments, result, status)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO action_log (ts, instruction, tool, arguments, result, status, job_id, detached)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.ts,
@@ -117,6 +117,9 @@ export class SqliteMemory implements Memory, ActionLog {
         entry.arguments ? JSON.stringify(entry.arguments) : null,
         entry.result,
         entry.status,
+        // M23. NULL for a row no job wrote — which is every row from before M23.
+        entry.jobId ?? null,
+        entry.detached === undefined ? null : entry.detached ? 1 : 0,
       );
   }
 
@@ -143,7 +146,15 @@ export class SqliteMemory implements Memory, ActionLog {
           result: string | null;
           status: ActionLogEntry["status"];
         }
-      >(`SELECT ts, instruction, tool, arguments, result, status FROM action_log ORDER BY id DESC LIMIT 1`)
+      >(
+        // M23. A row a DETACHED job wrote is skipped: this is the "previous turn" handed to the
+        // next planning call, and what a background job did while the user was elsewhere is
+        // not what "no, I meant…" refers to. `detached` is NULL on every older row, hence the
+        // explicit test rather than `detached = 0`.
+        `SELECT ts, instruction, tool, arguments, result, status FROM action_log
+          WHERE detached IS NULL OR detached = 0
+          ORDER BY id DESC LIMIT 1`,
+      )
       .get();
 
     if (!row) return null;

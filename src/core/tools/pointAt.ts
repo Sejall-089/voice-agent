@@ -59,6 +59,7 @@ export const pointAtTool: Tool = {
     required: ["target"],
   },
   risk: "caution",
+  background: "foreground-only",
   // `target` is a literal description of something visible, not a reference to look up. Memory
   // resolution exists to turn "my dashboard" into a URL, and letting it near this argument would
   // rewrite "my inbox" into `https://mail.google.com/...` and then hunt the screen for a URL.

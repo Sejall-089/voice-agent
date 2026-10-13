@@ -69,6 +69,12 @@ export interface SpeakerLike {
 // Just enough of core/chainState.ts's ChainState to guard on (M17). A narrow structural type
 // rather than the interface itself, matching how `StateHolder` and `VoiceLike` are declared
 // here: this file states what it needs, not where it comes from.
+//
+// SINCE M23 THE THING BEHIND IT IS A JOB, NOT A CHAIN. main.ts answers `isRunning()` from the
+// job manager: true while the ATTACHED job is doing something that must not be walked away
+// from — a step that acts on the screen, or the stretch in which its confirm dialog is being
+// prepared. A job that is merely working, and every job already running in the background,
+// answers false, and the press goes through (and detaches it, below).
 export interface ChainLike {
   isRunning(): boolean;
 }
@@ -81,11 +87,16 @@ export interface InstructionHotkeyDeps {
   // M17. Null on any install — it is only ever the planner's own chain state, and a planner
   // that never chains simply never sets it.
   chain: ChainLike | null;
+  // M23. The press was NOT blocked, so the user is starting something else: whatever job was
+  // attached to the bar carries on in the background from here. Called once per accepted
+  // press, after every guard and before the bar is touched. Absent before M23 and in any
+  // install without jobs.
+  detach?: () => void;
   runInstruction: (instruction: string) => Promise<void>;
 }
 
 export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => void {
-  const { shell, dictation, voice, speech, chain, runInstruction } = deps;
+  const { shell, dictation, voice, speech, chain, detach, runInstruction } = deps;
 
   return (): void => {
     // 1. Dictation and the instruction bar share one microphone AND, while dictation is
@@ -159,6 +170,13 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
       speech?.speak(toSpokenLine(CHAIN_RUNNING));
       return;
     }
+
+    // 4a. (M23) Nothing blocked the press. The job that had the bar — if one is still working —
+    //     is detached HERE, before the bar is reset for the new instruction: from this line on
+    //     its narration, results and speech go to its own record and the status pill, and it
+    //     will wait rather than open a dialog on someone who is typing. Deliberately after all
+    //     four guards: a press that was ignored must not send anything to the background.
+    detach?.();
 
     // 5. Barge-in. Here as well as in startRecording() on purpose: this fires the instant the
     //    key is pressed, while the microphone takes 160-680ms to warm up, so the app goes

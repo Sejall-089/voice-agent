@@ -43,6 +43,7 @@ export const readScheduleTool: Tool = {
     required: [],
   },
   risk: "safe",
+  background: "ok",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const now = Date.now();
     const from = optionalString(input, "from") ?? new Date(now).toISOString();

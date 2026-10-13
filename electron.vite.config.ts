@@ -20,7 +20,15 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      lib: { entry: resolve("src/preload/preload.ts") },
+      // Two preloads (M23): the command bar's, and the status pill's own — a different window
+      // with a much smaller bridge. Named entries, so the outputs are `preload.js` (the name
+      // main.ts has always loaded) and `pill.js`.
+      lib: {
+        entry: {
+          preload: resolve("src/preload/preload.ts"),
+          pill: resolve("src/preload/pill.ts"),
+        },
+      },
     },
   },
   renderer: {
@@ -35,6 +43,8 @@ export default defineConfig({
         input: {
           index: resolve("src/renderer/index.html"),
           overlay: resolve("src/renderer/overlay.html"),
+          // M23: the status pill. Plain DOM, no React; its own preload.
+          pill: resolve("src/renderer/pill.html"),
         },
       },
     },

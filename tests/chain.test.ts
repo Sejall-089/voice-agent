@@ -459,6 +459,7 @@ describe("preflightReferences", () => {
       name: "probe",
       description: "",
       inputSchema: { type: "object", properties: {}, required: [] },
+      background: "ok",
       risk: "safe",
       referenceArgs: ["where"],
       ...extra,

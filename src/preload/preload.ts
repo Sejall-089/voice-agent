@@ -122,6 +122,21 @@ const api = {
   speechEnded(error?: string): void {
     ipcRenderer.send("speech:ended", error);
   },
+
+  // --- The needs-you chime (M23). Its own channels: nothing is reported back. ---
+
+  // main → renderer: play the bundled chime.
+  onChime(callback: () => void): () => void {
+    const listener = (): void => callback();
+    ipcRenderer.on("chime:play", listener);
+    return () => ipcRenderer.removeListener("chime:play", listener);
+  },
+  // main → renderer: cut it off — the microphone is about to open.
+  onChimeStop(callback: () => void): () => void {
+    const listener = (): void => callback();
+    ipcRenderer.on("chime:stop", listener);
+    return () => ipcRenderer.removeListener("chime:stop", listener);
+  },
 };
 
 export type CommandBarApi = typeof api;
