@@ -50,6 +50,8 @@ export interface JobView {
   // What a detached job would have put in the bar. In memory only.
   lines: readonly string[];
   updatedAt: number;
+  // When the user first saw it in the pill's open list, or null.
+  seenAt: number | null;
 }
 
 export type JobChange =
@@ -187,6 +189,7 @@ export class JobManager implements JobsReader {
       inFlightTool: null,
       inFlightStep: null,
       result: null,
+      seenAt: null,
       attached: !barIsTaken,
       lines: [],
       cancelRequested: false,
@@ -465,6 +468,26 @@ export class JobManager implements JobsReader {
     return true;
   }
 
+  // The user has SEEN these jobs: the pill's list was open with them in it. Recorded once per
+  // job — the first time — and saved with it, so the clock it starts survives a restart and a
+  // second look does not restart it. Only a job that has ended can be seen in this sense; a
+  // live one is not waiting to be noticed. Returns how many were newly marked.
+  //
+  // `updatedAt` is deliberately NOT touched: it is when the job ended, and the status answer
+  // and the done-fade both read it as that.
+  markSeen(ids: readonly string[]): number {
+    let marked = 0;
+    for (const id of ids) {
+      const job = this.jobs.get(id);
+      if (job === undefined || job.seenAt !== null || !TERMINAL.includes(job.state)) continue;
+      job.seenAt = this.now();
+      this.store.save(job);
+      this.emit({ type: "updated", job: view(job) });
+      marked += 1;
+    }
+    return marked;
+  }
+
   // Every wait that has gone on too long becomes `expired`, and its step is not run. Called on
   // a timer; `resume` makes the same check at the click, so a late timer cannot let one through.
   expireDue(): number {
@@ -618,5 +641,6 @@ function view(job: Live): JobView {
     result: job.result,
     lines: [...job.lines],
     updatedAt: job.updatedAt,
+    seenAt: job.seenAt,
   };
 }

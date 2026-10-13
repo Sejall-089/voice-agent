@@ -33,6 +33,11 @@ export interface JobRecord {
   inFlightTool: string | null;
   inFlightStep: number | null;
   result: string | null;
+  // When the user first SAW this job in the pill's open list, or null if they never have.
+  // It starts the one-hour clock after which a failed or expired job leaves the pill — and it
+  // is written down with the job, so restarting the app neither resets that clock nor makes a
+  // job the user has not seen look seen. Leaving the pill never deletes this record.
+  seenAt: number | null;
 }
 
 export interface JobStore {
@@ -41,11 +46,14 @@ export interface JobStore {
   // `interrupted`, with a sentence saying whether its step may have gone through. Returns how
   // many. NOTHING IS RESUMED — this is a relabelling and no handler is reachable from it.
   markInterrupted(now: number): number;
-  // Jobs worth showing after a restart: background, unacknowledged, ended since `since`.
+  // Jobs worth showing after a restart: background and unacknowledged, and either ended
+  // since `since` — or failed, expired or interrupted at ANY time. Those three wait for the
+  // user (core/jobs/pill.ts): one that happened last week and was never seen is still owed.
   loadUnacknowledged(since: number): JobRecord[];
 }
 
 const LIVE: readonly JobState[] = ["queued", "running", "needs-you"];
+const WAITS_TO_BE_SEEN: readonly JobState[] = ["failed", "expired", "interrupted"];
 
 export class InMemoryJobStore implements JobStore {
   public readonly records = new Map<string, JobRecord>();
@@ -76,7 +84,7 @@ export class InMemoryJobStore implements JobStore {
           record.background &&
           !record.acknowledged &&
           !LIVE.includes(record.state) &&
-          record.updatedAt >= since,
+          (record.updatedAt >= since || WAITS_TO_BE_SEEN.includes(record.state)),
       )
       .map((record) => ({ ...record }));
   }
@@ -99,6 +107,7 @@ interface Row {
   in_flight_tool: string | null;
   in_flight_step: number | null;
   result: string | null;
+  seen_at: number | null;
 }
 
 function fromRow(row: Row): JobRecord {
@@ -122,6 +131,8 @@ function fromRow(row: Row): JobRecord {
     inFlightTool: row.in_flight_tool,
     inFlightStep: row.in_flight_step,
     result: row.result,
+    // NULL on every row written before the column existed: never seen.
+    seenAt: row.seen_at ?? null,
   };
 }
 
@@ -135,17 +146,17 @@ export class SqliteJobStore implements JobStore {
       .prepare(
         `INSERT INTO jobs (id, instruction, kind, state, background, acknowledged, created_at,
                            updated_at, step, total, tool, pause_reason, pause_since,
-                           in_flight_tool, in_flight_step, result)
+                           in_flight_tool, in_flight_step, result, seen_at)
          VALUES (@id, @instruction, @kind, @state, @background, @acknowledged, @createdAt,
                  @updatedAt, @step, @total, @tool, @pauseReason, @pauseSince,
-                 @inFlightTool, @inFlightStep, @result)
+                 @inFlightTool, @inFlightStep, @result, @seenAt)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, state = excluded.state, background = excluded.background,
            acknowledged = excluded.acknowledged, updated_at = excluded.updated_at,
            step = excluded.step, total = excluded.total, tool = excluded.tool,
            pause_reason = excluded.pause_reason, pause_since = excluded.pause_since,
            in_flight_tool = excluded.in_flight_tool, in_flight_step = excluded.in_flight_step,
-           result = excluded.result`,
+           result = excluded.result, seen_at = excluded.seen_at`,
       )
       .run({
         ...record,
@@ -175,7 +186,8 @@ export class SqliteJobStore implements JobStore {
       .prepare<[number], Row>(
         `SELECT * FROM jobs
           WHERE kind = 'work' AND background = 1 AND acknowledged = 0
-            AND state NOT IN ('queued', 'running', 'needs-you') AND updated_at >= ?
+            AND state NOT IN ('queued', 'running', 'needs-you')
+            AND (updated_at >= ? OR state IN ('failed', 'expired', 'interrupted'))
           ORDER BY created_at`,
       )
       .all(since)

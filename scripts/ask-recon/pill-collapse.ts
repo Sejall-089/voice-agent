@@ -6,7 +6,7 @@
 //   node scripts/ask-recon/run.mjs pill-collapse [png dir]
 //
 // !! IT MOVES THE REAL MOUSE POINTER AND CLICKS, on a small window it shows at the bottom
-// !! right of the screen, for about 45 seconds. Do not touch the mouse while it runs. It sends
+// !! right of the screen, for about 60 seconds. Do not touch the mouse while it runs. It sends
 // !! no keystrokes, makes no API calls, and approves nothing: no tool exists in it to run.
 //
 // WHY THIS EXISTS. Found live: after one click on the pill the job list stayed open for that
@@ -82,7 +82,11 @@ const LONG_FAILURE =
 void app.whenReady().then(async () => {
   const { workArea } = screen.getPrimaryDisplay();
   const anchor = { right: workArea.x + workArea.width - PILL_MARGIN, bottom: workArea.y + workArea.height - PILL_MARGIN };
-  const manager = new JobManager({ store: new InMemoryJobStore() });
+  // The clock the job manager and the pill run on: the real one, plus a skew this script can
+  // add to — the only way to watch "one hour after it was seen" without waiting an hour.
+  let skew = 0;
+  const now = (): number => Date.now() + skew;
+  const manager = new JobManager({ store: new InMemoryJobStore(), now });
 
   // main.ts's own construction of the pill, over the built page and preload.
   const pill = new PillWindow<BrowserWindow>({
@@ -100,6 +104,9 @@ void app.whenReady().then(async () => {
     settings: new InMemorySettings(),
     surface: pill,
     playChime: () => undefined, // silent: this script is about what is drawn
+    now,
+    // The app's own one-line-per-event record, printed as the app prints it.
+    log: (line) => console.log(`[main] ${line}`),
     isBusy: () => false,
     pointerOver: () => {
       const win = pill.window();
@@ -244,6 +251,31 @@ void app.whenReady().then(async () => {
   mouse(dismiss.x, dismiss.y, true);
   await sleep(700);
   log(`6. after a real click on "Dismiss":      ${await state()}  label=${JSON.stringify(controller.view().label)}`);
+
+  // --- How long a job stays: cancelled goes at once; failed stays until seen, then an hour. ---
+  manager.cancel(waiting);
+  await sleep(900);
+  log(`7. the waiting job was cancelled:        pillVisible=${String(pill.window()?.isVisible() ?? false)}  mode=${controller.view().mode}`);
+
+  const stays = manager.submit("send these notes to fun channel");
+  manager.detachAttached();
+  manager.finish(stays, "failed", "Slack said no.");
+  await sleep(1_200);
+  skew += 3 * 60 * 60 * 1000; // three hours with nobody opening the list
+  await sleep(1_300);
+  log(`8. a job failed, 3 h pass, list unopened: pillVisible=${String(win().isVisible())}  mode=${controller.view().mode}  seen=${String(manager.get(stays)?.seenAt !== null)}`);
+  await clickPill();
+  await sleep(1_500);
+  log(`9. the list is opened by a real click:   ${await state()}  seen=${String(manager.get(stays)?.seenAt !== null)}`);
+  await shot("collapse-9-failed-seen");
+  onHotkey();
+  await sleep(700);
+  skew += 59 * 60 * 1000 + 50_000; // 59 min 50 s after it was seen
+  await sleep(1_300);
+  log(`10. 59 min 50 s after it was seen:       pillVisible=${String(win().isVisible())}  mode=${controller.view().mode}  label=${JSON.stringify(controller.view().label)}`);
+  skew += 20_000; // past the hour
+  await sleep(1_500);
+  log(`11. one hour after it was seen:          pillVisible=${String(pill.window()?.isVisible() ?? false)}  mode=${controller.view().mode}  recordStillThere=${String(manager.get(stays)?.state === "failed")}`);
 
   clearInterval(timer);
   away();

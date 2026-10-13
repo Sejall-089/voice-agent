@@ -633,6 +633,9 @@ app.whenReady().then(() => {
       if (win === null || !win.isVisible()) return null;
       return isPointInRect(screen.getCursorScreenPoint(), win.getBounds());
     },
+    // One console line per pill event — a click, a row's button, the pointer entering or
+    // leaving, the list opening or closing and why. Timestamps, job ids and fixed words only.
+    log: (line) => console.log(`[main] ${line}`),
   });
   // From the pill's page, and only from it: a message on these channels from any other
   // window is dropped. What each may ask for is checked again in PillController.

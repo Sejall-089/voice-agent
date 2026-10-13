@@ -43,6 +43,7 @@ const record = (over: Partial<JobRecord>): JobRecord => ({
   inFlightTool: null,
   inFlightStep: null,
   result: null,
+  seenAt: null,
   ...over,
 });
 
@@ -128,6 +129,9 @@ describe("the action_log migration (addition C)", () => {
     expect(columns(db, "jobs")).toEqual([
       "id", "instruction", "kind", "state", "background", "acknowledged", "created_at", "updated_at",
       "step", "total", "tool", "pause_reason", "pause_since", "in_flight_tool", "in_flight_step", "result",
+      // Added after M23 by the guarded migration: when the user first saw the job in the pill.
+      // A timestamp, not content.
+      "seen_at",
     ]);
   });
 });

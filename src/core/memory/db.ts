@@ -72,16 +72,19 @@ CREATE TABLE IF NOT EXISTS settings (
 const ADDED_COLUMNS: readonly { table: string; column: string; type: string }[] = [
   { table: "action_log", column: "job_id", type: "TEXT" },
   { table: "action_log", column: "detached", type: "INTEGER" },
+  // When the user first saw a job in the pill's open list. The `jobs` table itself shipped
+  // with M23, so an install from that week has it without this column.
+  { table: "jobs", column: "seen_at", type: "INTEGER" },
 ];
 
 export function migrate(db: DatabaseType): string[] {
   const added: string[] = [];
   for (const { table, column, type } of ADDED_COLUMNS) {
-    const present = db
-      .prepare<[], { name: string }>(`PRAGMA table_info(${table})`)
-      .all()
-      .some((info) => info.name === column);
-    if (present) continue;
+    const existing = db.prepare<[], { name: string }>(`PRAGMA table_info(${table})`).all();
+    // No such table: nothing to add a column to. (`createDatabase` creates every table first,
+    // so this is only ever true for a caller that migrates a database it did not create.)
+    if (existing.length === 0) continue;
+    if (existing.some((info) => info.name === column)) continue;
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     added.push(`${table}.${column}`);
   }

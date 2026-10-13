@@ -81,7 +81,7 @@ try {
       const live = createDatabase(copy);
       const memory = new SqliteMemory(live);
       memory.logAction({ ts: new Date().toISOString(), instruction: "migration check", tool: null, arguments: null, result: null, status: "ok", jobId: "check", detached: true });
-      new SqliteJobStore(live).save({ id: "check", instruction: "migration check", kind: "work", state: "running", background: true, acknowledged: false, createdAt: 1, updatedAt: 1, step: 0, total: 0, tool: null, pauseReason: null, pauseSince: null, inFlightTool: null, inFlightStep: null, result: null });
+      new SqliteJobStore(live).save({ id: "check", instruction: "migration check", kind: "work", state: "running", background: true, acknowledged: false, createdAt: 1, updatedAt: 1, step: 0, total: 0, tool: null, pauseReason: null, pauseSince: null, inFlightTool: null, inFlightStep: null, result: null, seenAt: null });
       const stamped = live.prepare(`SELECT job_id, detached FROM action_log ORDER BY id DESC LIMIT 1`).get();
       const interrupted = new SqliteJobStore(live).markInterrupted(2);
       live.close();

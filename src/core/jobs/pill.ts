@@ -163,11 +163,38 @@ export function clip(text: string, max: number): string {
   return `${kept.replace(/[\s,;:.\-—]+$/, "")}…`;
 }
 
+// How long a failed or expired job stays in the pill AFTER the user has seen it.
+export const SEEN_CLEAR_MS = 60 * 60 * 1000;
+// How many jobs the open list shows. Older ones are not listed; nothing is deleted.
+export const LIST_CAP = 10;
+
+// How long each kind of job stays in the pill. THE PILL ONLY — leaving it deletes nothing:
+// the job's record and its action-log rows are untouched (core/jobs/JobStore.ts).
+//
+//   running, queued, needs-you   while they are.
+//   done                         a few seconds, then gone. Nothing was asked of the user.
+//   cancelled                    not at all. The user did that; there is nothing to tell them.
+//   failed, expired              UNTIL THE USER HAS SEEN IT, however long that takes — the
+//                                pill stays red for a week if nobody opens it. "Seen" is the
+//                                list being open with the job in it (`seenAt`, saved with the
+//                                job). One hour after that it goes on its own.
+//   interrupted                  until it is dismissed, and only then. It may say "may or may
+//                                not have gone through", and that must not expire quietly.
+//
+// A dismissed job is gone at once, whatever it was.
 function isShown(job: JobView, now: number): boolean {
   if (job.kind !== "work" || !job.background || job.acknowledged) return false;
-  // Finished cleanly, or cancelled by the user's own hand: shown briefly, then gone.
-  if (job.state === "done" || job.state === "cancelled") return now - job.updatedAt < DONE_FADE_MS;
-  return true;
+  switch (job.state) {
+    case "done":
+      return now - job.updatedAt < DONE_FADE_MS;
+    case "cancelled":
+      return false;
+    case "failed":
+    case "expired":
+      return job.seenAt === null || now - job.seenAt < SEEN_CLEAR_MS;
+    default:
+      return true;
+  }
 }
 
 const STOPPED: readonly JobState[] = ["failed", "interrupted", "expired"];
@@ -233,7 +260,15 @@ export function pillView(state: PillState): PillView {
   // list needs them in.
   const rank = (job: JobView): number =>
     job.state === "needs-you" ? 0 : STOPPED.includes(job.state) ? 1 : 2;
-  const items = [...shown]
+  // THE LIST IS CAPPED (`LIST_CAP`): the ten most recent. A job that is waiting for the user
+  // is never the one left off — it is listed ahead of any job that has merely ended, however
+  // old it is, because the list is the only place it can be answered from. A job past the cap
+  // is still counted in the label above, still in the store, and is listed again as the ones
+  // in front of it clear; it is not "seen" until then.
+  const listed = [...shown]
+    .sort((a, b) => Math.min(rank(a), 1) - Math.min(rank(b), 1) || b.updatedAt - a.updatedAt)
+    .slice(0, LIST_CAP);
+  const items = listed
     .sort((a, b) => rank(a) - rank(b) || a.updatedAt - b.updatedAt)
     .map((job) => ({
       id: job.id,

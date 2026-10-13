@@ -1155,9 +1155,33 @@ work area, excluded from screen capture, shown only with `showInactive()`.
 | Shows | When |
 |---|---|
 | amber, "N needs you" | a job is waiting. Pulses for 2.4 s when a job starts waiting, then steady |
-| "N didn't finish" | failed, interrupted or expired — stays until each is dismissed |
+| "N didn't finish" | failed, expired or interrupted — see "How long a job stays" below |
 | "N running" | otherwise, while anything is running or queued |
 | "Done" | for 8 s after the last job finishes cleanly, then the window hides |
+
+**How long a job stays in the pill** (2026-10-14). The pill only — leaving it deletes nothing:
+the job's row and its action-log rows are kept.
+
+| Job | Stays |
+|---|---|
+| running, queued, needs-you | while it is |
+| done | 8 s, then gone |
+| cancelled by the user | not shown at all |
+| failed, expired | **until the user has seen it**, however long that is; then one hour more |
+| interrupted | until it is dismissed, and only then — it may say "may or may not have gone through" |
+
+"Seen" means the list was open with the job in it. It is recorded once, as `seen_at` on the
+job's row (added by the same guarded migration as the action-log columns), so a restart
+neither resets the hour nor counts as a look; a failed job nobody opened the list for is
+brought back after a restart however old it is. The list shows at most **ten** jobs, the most
+recent — except that a job waiting for the user is never the one left off. A job past the ten
+is still counted in the pill's label and is not "seen" until it is listed.
+
+**One console line per pill event** (`[main] <timestamp> pill …`): a click on the pill, a
+row's button, the pointer entering or leaving, and every time the list opens or closes with
+the reason. Added after a live report ("the list stayed open after Review…") that four
+real-window runs could not reproduce and nothing had recorded. Timestamps, job ids and fixed
+words only.
 
 **The list always starts collapsed** (fixed 2026-10-13, after a live run in which a list opened
 once stayed open for every later instruction). Whether it is open is one in-memory flag in the

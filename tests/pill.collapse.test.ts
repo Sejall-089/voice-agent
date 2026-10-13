@@ -53,6 +53,7 @@ const job = (state: JobView["state"], over: Partial<JobView> = {}): JobView => (
   result: null,
   lines: [],
   updatedAt: T0,
+  seenAt: null,
   ...over,
 });
 
@@ -417,8 +418,11 @@ describe("PillController: what closes an open list", () => {
     const id = await w.waitingJob();
     await w.pageLoaded();
     w.controller.onExpand(true);
+    expect(w.controller.view().expanded).toBe(true);
     w.controller.onAction(id, action);
-    expect(w.last()?.expanded).toBe(false);
+    // Asked of the controller, not of the last view sent to the page: after Cancel the job
+    // leaves the pill at once and the window is hidden, so nothing more is sent.
+    expect(w.controller.view().expanded).toBe(false);
   });
 
   it("Dismiss closes it (with another job still listed, so the pill stays)", async () => {

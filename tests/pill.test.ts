@@ -43,6 +43,7 @@ const job = (state: JobView["state"], over: Partial<JobView> = {}): JobView => (
   result: null,
   lines: [],
   updatedAt: T0,
+  seenAt: null,
   ...over,
 });
 
@@ -65,7 +66,9 @@ describe("the pill's state reducer", () => {
     expect(pillView(withJobs([job("needs-you"), job("needs-you")])).label).toBe("2 need you");
   });
 
-  it("failed outranks running, and stays until acknowledged — however long that takes", () => {
+  // Title corrected when the rule changed: it stays while UNSEEN (this job never is), not
+  // "until acknowledged" — once seen it also clears after an hour (tests/pill.lifecycle.test.ts).
+  it("failed outranks running, and an unseen one stays however long that takes; a dismissed one is gone", () => {
     const failed = job("failed", { result: "Slack said no." });
     const state = withJobs([failed, job("running")]);
     expect(pillView(state)).toMatchObject({ mode: "failed", label: "1 didn't finish" });
@@ -90,10 +93,12 @@ describe("the pill's state reducer", () => {
     expect(pillView(faded)).toMatchObject({ mode: "hidden", items: [] });
   });
 
-  it("a job the user cancelled fades too; it is not a failure", () => {
-    const state = withJobs([job("cancelled")]);
-    expect(pillView(state).mode).toBe("done");
-    expect(pillView(reducePill(state, { type: "tick", now: T0 + DONE_FADE_MS })).mode).toBe("hidden");
+  // The rule changed (it used to fade like a finished job): the user cancelled it themselves,
+  // so there is nothing to tell them. tests/pill.lifecycle.test.ts has every state's rule.
+  it("a job the user cancelled is not shown at all, not even for the done-fade", () => {
+    expect(pillView(withJobs([job("cancelled")])).mode).toBe("hidden");
+    // The contrast, so "hidden" above is the rule and not an empty harness: done IS shown.
+    expect(pillView(withJobs([job("done")])).mode).toBe("done");
   });
 
   it("never shows a status question, an attached-only job, or a dismissed one", () => {
@@ -526,9 +531,16 @@ describe("PillController — the pill's buttons, and the chime", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(answer.value).toEqual({ answer: "cancelled", waited: true });
     expect(h.manager.get(id)?.state).toBe("cancelled");
+    // Cancelled by the user: it leaves the pill at once, with nothing to dismiss.
+    expect(h.last()?.mode).toBe("hidden");
 
-    h.controller.onAction(id, "dismiss");
-    expect(h.manager.get(id)?.acknowledged).toBe(true);
+    // Dismiss is for a job that ended some other way.
+    const failed = h.manager.submit("file this bug");
+    h.manager.detachAttached();
+    h.manager.finish(failed, "failed", "It broke.");
+    expect(h.last()?.mode).toBe("failed");
+    h.controller.onAction(failed, "dismiss");
+    expect(h.manager.get(failed)?.acknowledged).toBe(true);
     expect(h.last()?.mode).toBe("hidden");
   });
 
