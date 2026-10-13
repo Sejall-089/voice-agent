@@ -43,6 +43,19 @@ body {
   font-size: 20px;
   line-height: 1.4;
   -webkit-app-region: no-drag;
+  /* A textarea, so a long instruction wraps instead of scrolling sideways out of view. It
+     starts at one line, grows with its text (CommandBar sets the height) to four lines, and
+     scrolls VERTICALLY past that. Never horizontally. */
+  display: block;
+  font-family: inherit;
+  padding: 0;
+  margin: 0;
+  resize: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: calc(4 * 1.4em);
 }
 
 .command-input::placeholder {

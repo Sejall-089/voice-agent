@@ -19,7 +19,7 @@ export function CommandBar(): JSX.Element {
   // A question the app is waiting on (`askUser`). While it is up the input is the ANSWER box:
   // Enter submits whatever is there, an empty line included. Main owns when it ends.
   const [question, setQuestion] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   // One recorder for the window's lifetime — the mic is opened and released per recording.
   // useRef(null) + lazy init, not useRef(new MicRecorder()): the latter constructs a
   // throwaway recorder on every single render.
@@ -155,7 +155,13 @@ export function CommandBar(): JSX.Element {
 
   // Typing is how you say "not this time" to the microphone. Sent once per opening, on
   // the first real text change, so it never fires for arrow keys or a stray Shift.
-  const onChange = (value: string): void => {
+  //
+  // ONE LINE OF TEXT, HOWEVER IT ARRIVES. The box is a textarea so a long instruction WRAPS and
+  // is all on screen (a single-line input scrolled it sideways, and what was run could not be
+  // read back), but an instruction is still one line: a newline that gets in — pasted text,
+  // an IME — is flattened to a space here, so no value this component holds ever contains one.
+  const onChange = (raw: string): void => {
+    const value = flattenNewlines(raw);
     setText(value);
     if (!typedRef.current && value.length > 0) {
       typedRef.current = true;
@@ -165,8 +171,24 @@ export function CommandBar(): JSX.Element {
 
   const listening = voiceRef.current === "recording" || voiceRef.current === "stopped";
 
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+  // The box grows with its text, up to the height the stylesheet allows (about four lines),
+  // and scrolls vertically past that. Set from the content's own height on every change —
+  // including the resets, which is what shrinks it back to one line.
+  useEffect(() => {
+    const box = inputRef.current;
+    if (box === null) return;
+    box.style.height = "auto";
+    box.style.height = `${box.scrollHeight}px`;
+  }, [text]);
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === "Enter") {
+      // Enter never types a newline into the box — with or without Shift. A textarea's own
+      // default would, so it is always prevented.
+      e.preventDefault();
+      // Shift+Enter is "new line" everywhere else, and there are no new lines here: it does
+      // nothing at all, rather than submitting something the user was still writing.
+      if (e.shiftKey) return;
       const value = text.trim();
       // An empty bar submits ONLY while dictating — there Enter means "stop talking, run
       // it". With nothing typed and nothing recorded there is nothing to run.
@@ -189,10 +211,10 @@ export function CommandBar(): JSX.Element {
     <div className="command-bar">
       {/* What the app is waiting to be told. Above the input, because the input is its answer. */}
       {question !== null && <div className="command-question">{question}</div>}
-      <input
+      <textarea
         ref={inputRef}
         className="command-input"
-        type="text"
+        rows={1}
         placeholder={
           question !== null
             ? "Type your answer…  (Enter to answer · Esc to cancel)"
@@ -248,6 +270,12 @@ export function CommandBar(): JSX.Element {
       )}
     </div>
   );
+}
+
+// An instruction is one line. Any run of line breaks becomes a single space, so two pasted
+// lines stay two words apart rather than fusing.
+export function flattenNewlines(text: string): string {
+  return text.replace(/\s*[\r\n]+\s*/g, " ");
 }
 
 function describe(error: unknown): string {

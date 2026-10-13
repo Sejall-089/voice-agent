@@ -826,6 +826,49 @@ providers, and it leaves the single-step path **byte-identical** to every milest
 `core/chain.ts`'s question, so a garbled response and a plan we decline to run reach the user as
 different sentences.
 
+### Several tool calls at once — asked once more, then refused (added 2026-10-13)
+
+A model may answer with several separate tool calls in one response (a provider's native
+"parallel" batch) instead of one tool or one `plan`. That is not something this app can run:
+the calls carry no order and no `{stepN}`. `classifyToolCalls` reports it as its own
+`ToolChoice`, `{ kind: "multiple", tools }` — names only, arguments never decoded.
+
+The planner then asks **exactly once more**, with a fixed sentence from code appended to the
+user's instruction (`PLAN_RETRY_INSTRUCTION`, `core/llm/toolChoice.ts`): emit one `plan` listing
+the steps in order, or one tool. Nothing has run and the model has seen no result, so this is
+still one accepted answer decided before step 1. Whatever comes back takes the ordinary path —
+a plan meets the same validation as any plan (three steps, known tools, backward references,
+the `functions.` prefix rule). A second multi-call answer is refused. A single tool, a plan, a
+decline and a truncated answer are never retried. It applies to both providers and to attached
+and detached jobs alike, because it lives in the planner.
+
+The refusal is logged as `refused` with `arguments: { calls: [names] }`, the way a plan refusal
+records its tool names, and **not** through `logMiss`: every tool named exists, so it does not
+belong in §8's backlog of tools worth building. In the bar it is followed by a second paragraph,
+`What I heard: “<instruction>”`; the spoken line is the refusal alone.
+
+**Why, and what was measured.** Found live on OpenAI `gpt-5`: "create an issue on github for
+body format and send these notes to fun channel" came back as `github__create_issue` +
+`sendMessage` and was refused. The two halves are independent, which is exactly when a parallel
+batch is a natural answer. One real-model run of that phrase ×10 through the app's own client
+and this rule (27-tool menu, a checklist on the clipboard, no previous turn): **plan on the
+first try 5, plan after the retry 5, refused 0** — a retry rate of 5 in 10, 15 model calls in
+all. An earlier nine-call diagnosis saw the multi-call shape on 1 of 3 trials of the same phrase
+and on none of six trials of two phrasings whose second step depends on the first. Ten trials
+is a small sample: "0 refused" means none was seen, not that none can happen.
+
+**Considered and not done.** `parallel_tool_calls: false` on OpenAI: its function-calling guide
+says it "ensures exactly zero or one tool is called", but nothing found documents it for
+`gpt-5` on Chat Completions, and a model held to one call may simply make one of the two — a
+silent half-job where there is now a loud refusal. Converting the calls into a plan in code:
+the order of a parallel batch is not documented as an execution order, and a dependent task
+sent that way would run its second step on invented arguments.
+
+**The bar's text box** became a wrapping textarea in the same change: a long instruction used
+to scroll sideways out of view in a single-line input. It grows to four lines, then scrolls
+vertically; Enter submits, Shift+Enter does nothing, and a pasted newline is flattened to a
+space. Measured in a real window by `scripts/bar-wrap-recon.cjs`.
+
 ### Cross-step data — `{stepN}`, whole results only
 
 A **string** argument may contain `{stepN}`, replaced by step N's whole result text.

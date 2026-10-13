@@ -42,6 +42,29 @@ export const MULTIPLE_TOOL_CALLS =
   "I tried to decide more than one thing in a single step, and I don't run that safely. " +
   "Ask for one thing, or say it as a single request I can plan as steps.";
 
+// What the model is told when it is asked ONCE more after a multi-call answer.
+//
+// A FIXED STRING, written here and appended by code. Nothing in it comes from a model, from the
+// answer being rejected, or from the user's clipboard — it restates the rule the system prompt
+// already gives, at the moment the model has just broken it.
+//
+// Why a retry at all (found live, then measured: 1 of 3 on "create an issue on github for body
+// format and send these notes to fun channel"): when the halves of a request are INDEPENDENT,
+// a provider's native parallel batch is a natural answer and the same model plans it correctly
+// on the next attempt. The retry happens before any step has run and the model has seen no
+// result, so the fixed-plan rule of spec §5b is intact: one accepted answer, decided up front.
+export const PLAN_RETRY_INSTRUCTION =
+  "(Your previous answer made several separate tool calls at once, which cannot be run. If " +
+  "this request needs more than one tool, its parts are separate steps or depend on each " +
+  "other: answer with ONE call to the `plan` tool that lists every step in order. If it needs " +
+  "only one tool, call that one tool. Never make more than one tool call.)";
+
+// The instruction as it is sent on that one retry: the user's own words, untouched, then the
+// fixed text.
+export function withPlanRetry(instruction: string): string {
+  return `${instruction}\n\n${PLAN_RETRY_INSTRUCTION}`;
+}
+
 // null means "the model made no tool call at all" — the caller's own provider-specific
 // decline/truncation handling (stop_reason, finish_reason) takes over from there, because that
 // classification genuinely differs by provider and belongs in the transport, not here.
@@ -53,7 +76,7 @@ export function classifyToolCalls(calls: readonly RawToolCall[]): ToolChoice | n
   // provider may not even have attempted to decode the others (see openai.ts), so nothing here
   // may assume `.input` is safe to read when this branch fires.
   if (calls.length > 1) {
-    return { kind: "none", text: MULTIPLE_TOOL_CALLS };
+    return { kind: "multiple", tools: calls.map((call) => call.name) };
   }
 
   const call = calls[0];

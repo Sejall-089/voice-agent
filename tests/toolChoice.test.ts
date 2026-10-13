@@ -64,7 +64,9 @@ describe("classifyToolCalls on more than one call", () => {
       { name: "multi_tool_use.parallel", input: { tool_uses: [] } },
     ]);
 
-    expect(result).toEqual({ kind: "none", text: MULTIPLE_TOOL_CALLS });
+    // Its own kind since the retry was added — carrying the NAMES, in the order returned, so
+    // the planner can ask once more and, failing that, record which tools were reached for.
+    expect(result).toEqual({ kind: "multiple", tools: ["readSchedule", "multi_tool_use.parallel"] });
   });
 
   it("refuses even when EVERY call is a real, registered tool", () => {
@@ -75,7 +77,9 @@ describe("classifyToolCalls on more than one call", () => {
       { name: "recall", input: { subject: "the team" } },
     ]);
 
-    expect(result).toEqual({ kind: "none", text: MULTIPLE_TOOL_CALLS });
+    // Names only: the second call's arguments ("the team") are nowhere in the result.
+    expect(result).toEqual({ kind: "multiple", tools: ["readSchedule", "recall"] });
+    expect(JSON.stringify(result)).not.toContain("the team");
   });
 
   it("refuses even when one of the calls is `plan` itself", () => {
@@ -84,7 +88,8 @@ describe("classifyToolCalls on more than one call", () => {
       { name: "readSchedule", input: {} },
     ]);
 
-    expect(result).toEqual({ kind: "none", text: MULTIPLE_TOOL_CALLS });
+    // A `plan` beside another call is still several answers, not a plan.
+    expect(result).toEqual({ kind: "multiple", tools: [PLAN_TOOL_NAME, "readSchedule"] });
   });
 
   it("never reads a later call's input, so a provider may leave it undecoded", () => {
@@ -102,7 +107,7 @@ describe("classifyToolCalls on more than one call", () => {
     const calls = [{ name: "readSchedule", input: {} }, poisoned];
 
     expect(() => classifyToolCalls(calls)).not.toThrow();
-    expect(classifyToolCalls(calls)).toEqual({ kind: "none", text: MULTIPLE_TOOL_CALLS });
+    expect(classifyToolCalls(calls)).toEqual({ kind: "multiple", tools: ["readSchedule", "sendMessage"] });
   });
 
   it("names the message so both providers can never drift onto different wording", () => {

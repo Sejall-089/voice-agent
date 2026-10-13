@@ -74,6 +74,7 @@ const describeChoice = (choice: ToolChoice): string => {
   if (choice.kind === "tool") return `tool ${choice.name} ${JSON.stringify(choice.input)}`;
   if (choice.kind === "plan") return `plan ${choice.steps.map((s) => `${s.tool} ${JSON.stringify(s.arguments)}`).join(" > ")}`;
   if (choice.kind === "none") return `PROSE ${JSON.stringify(choice.text)}`;
+  if (choice.kind === "multiple") return `MULTIPLE CALLS ${choice.tools.join(" + ")}`;
   return `incomplete (${choice.reason})`;
 };
 

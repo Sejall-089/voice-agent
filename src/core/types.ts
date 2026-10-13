@@ -71,6 +71,12 @@ export type ToolChoice =
   // instruction that only ever meant one action.
   | { kind: "plan"; steps: PlannedStep[] }
   | { kind: "none"; text: string | null }
+  // The model answered with SEVERAL separate tool calls instead of one tool or one `plan`
+  // (a native "parallel" batch). Not a decision this app can run: the calls carry no order and
+  // no way to pass one's result to the next. Its own variant, not a `none` with a sentence in
+  // it, because the planner does two things with it that it must not do for a decline: ask
+  // once more for a plan, and record WHICH tools were named. Names only — never arguments.
+  | { kind: "multiple"; tools: string[] }
   // The model never reached an answer — it hit its token ceiling first. Distinct from
   // "none" on purpose: "I decline" and "I ran out of room" are different facts, and
   // collapsing them makes a budget failure look like a missing capability. Reasoning
@@ -983,7 +989,9 @@ export interface PlannerOutcome {
   // sound — or what other name forms a model produces — was unrecoverable afterwards. It is
   // deliberately NOT written to the action log in full: arguments can hold the user's words,
   // and the last log row is fed into the next planning prompt. The log row gets the tool names.
-  proposed?: { tool?: string; plan?: readonly PlannedStep[] };
+  //
+  // `calls`: the tool NAMES of a multi-call answer that was refused, in the order returned.
+  proposed?: { tool?: string; plan?: readonly PlannedStep[]; calls?: readonly string[] };
   // What the planner told the model about the world on this run (M19), for the `[main]` line.
   // Whether the "An email is open in Gmail." hint was in the prompt, how long the Gmail check
   // behind it took, and how much clipboard text was sent. A flag and two numbers — the

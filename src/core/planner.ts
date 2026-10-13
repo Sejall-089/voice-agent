@@ -11,6 +11,7 @@ import { UnavailableChooser } from "./screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
 import { highestTier, needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
+import { MULTIPLE_TOOL_CALLS, withPlanRetry } from "./llm/toolChoice.ts";
 import { OPEN_GATE } from "./jobs/gate.ts";
 import type { GateAnswer, JobGate } from "./jobs/gate.ts";
 import { CANCELLED_BEFORE_START, CANCELLED_BY_YOU, EXPIRED } from "./jobs/messages.ts";
@@ -261,12 +262,32 @@ export class Planner {
     //    Nothing is substituted for it: the turn before would be a staler context still.
     const last = this.log.getLast();
     const previousTurn = last !== null && isUnknownReferenceRefusal(last) ? null : last;
-    const choice = await this.llm.chooseTool(
+    let choice = await this.llm.chooseTool(
       instruction,
       context,
       toToolSchemas(this.registry),
       previousTurn,
     );
+
+    // 2a. SEVERAL TOOL CALLS AT ONCE instead of one tool or one plan. Asked ONCE more, with a
+    //     fixed sentence from code appended (core/llm/toolChoice.ts) — and only for this: a
+    //     single tool, a plan, a decline and a truncation are all taken as they come.
+    //
+    //     Nothing has run and the model has been shown no result, so this is still one accepted
+    //     answer decided before step 1. Whatever comes back is an ordinary answer and goes down
+    //     the ordinary path below: a plan meets the same validation as any plan. A second
+    //     multi-call answer is refused, by name, and never truncated to its first call.
+    if (choice.kind === "multiple") {
+      choice = await this.llm.chooseTool(
+        withPlanRetry(instruction),
+        context,
+        toToolSchemas(this.registry),
+        previousTurn,
+      );
+      if (choice.kind === "multiple") {
+        return await this.refuseMultiple(instruction, choice.tools);
+      }
+    }
 
     // 3. Registry check — declined or hallucinated tool → graceful refusal + log a miss.
     //    A TRUNCATED response is handled separately: the model never decided anything, so
@@ -1007,6 +1028,36 @@ export class Planner {
     this.shell.showResult(shown);
     await this.say(toSpokenResult(shown));
     return { status: "no_tool", tool: null, result: shown };
+  }
+
+  // The model answered with several tool calls at once, twice. Nothing was decided that this
+  // app can run, so nothing runs.
+  //
+  // LOGGED WITH THE TOOL NAMES, as a plan refusal is, and for the same reason: without them
+  // the row says only that something was refused, and which tools the model reached for was
+  // unrecoverable after the first live failure. NAMES ONLY — this row is the previous turn fed
+  // to the next planning prompt. And NOT through `logMiss`: spec §8's miss list is the backlog
+  // of tools worth building, and every tool named here already exists.
+  //
+  // The bar also shows what was heard, as a second paragraph: the instruction is long by
+  // nature when this happens, and the user needs to see it arrived whole. The SPOKEN line is
+  // the refusal alone — reading someone's own sentence back to them is noise.
+  private async refuseMultiple(
+    instruction: string,
+    tools: readonly string[],
+  ): Promise<PlannerOutcome> {
+    this.log.logAction({
+      ts: new Date().toISOString(),
+      instruction,
+      tool: null,
+      arguments: { calls: [...tools] },
+      result: MULTIPLE_TOOL_CALLS,
+      status: "refused",
+    });
+    const shown = `${MULTIPLE_TOOL_CALLS}\n\nWhat I heard: “${instruction.trim()}”`;
+    this.shell.showResult(shown);
+    await this.say(toSpokenResult(MULTIPLE_TOOL_CALLS));
+    return { status: "refused", tool: null, result: shown, proposed: { calls: tools } };
   }
 
   // The model ran out of tokens before answering. Nothing was decided, so nothing runs —

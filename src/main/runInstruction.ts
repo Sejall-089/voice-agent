@@ -75,6 +75,10 @@ export function createRunInstruction(
       if (outcome.proposed?.plan !== undefined) {
         console.log(`[main] refused plan, as sent: ${JSON.stringify(outcome.proposed.plan)}`);
       }
+      if (outcome.proposed?.calls !== undefined) {
+        // Names only: a multi-call answer's arguments are never decoded (core/llm/openai.ts).
+        console.log(`[main] refused tool calls, as sent: ${JSON.stringify(outcome.proposed.calls)}`);
+      }
       if (outcome.proposed?.tool !== undefined) {
         console.log(`[main] refused tool name, as sent: ${JSON.stringify(outcome.proposed.tool)}`);
       }
