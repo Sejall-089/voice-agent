@@ -3,7 +3,9 @@ out/
 dist/
 .env
 *.log
-.claude/
+# Local Claude Code configuration stays ignored; only the project's skills are committed.
+.claude/*
+!.claude/skills/
 
 # Recon output — generated WAVs from scripts/tts-recon.mjs, never committed.
 tts-recon-out/

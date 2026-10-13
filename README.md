@@ -898,7 +898,8 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 **M22 (Slack bot-token mode) is closed (13 Oct 2026), after a live run by a person.** Messages
 go to the channel you name, checked against Slack's own channel list before any dialog; webhook
-mode is unchanged. 2206 tests green across 95 files, 75 skipped (the opt-in real-model evals).
+mode is unchanged. 2242 tests green across 98 files, 75 skipped (the opt-in real-model evals);
+it was 2206 across 95 at M22's close, before the follow-ups after it.
 What was watched, what is covered by script or test only, and what the live run found are in
 `docs/m22-live-checklist.md`; the design and its known limits are in `spec.md` §6f.
 

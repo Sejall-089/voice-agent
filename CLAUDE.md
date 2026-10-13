@@ -6,11 +6,17 @@ truth for scope, stack, and decisions.
 ## How to work here
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
-- **Build milestone by milestone** (M0 → M6 in spec.md §9). Do not jump ahead. Each
+- **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
+  M22; the next one is whatever is agreed and added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
-- **Respect the scope guardrails** (spec.md §2). If a task seems to need anything in
-  the OUT-of-scope list (voice, computer-use, extra connectors, Mac/Linux, multi-step
-  loops), stop and ask — don't scaffold it "just in case".
+- **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
+  If a task seems to need anything still OUT of scope (auto-clicking or any vision-driven
+  clicking, a Mac/Linux shell, an open-ended agent loop where the model sees each result and
+  picks its next move, UI beyond the command bar / result / pointing overlay, auth, accounts
+  or cloud sync), stop and ask — don't scaffold it "just in case". **A new connector or
+  surface is not out of scope, but ask before adding one** (spec.md §2: it is a cost
+  question). Voice, DOM-based Gmail/Notion, pointing, fixed chains of up to three tools and
+  MCP connectors are all built — do not stop for those.
 - **MockShell first.** Build and test the core against `MockShell` before wiring the
   real `WindowsShell`. `/core` must never import `electron`.
 
@@ -18,7 +24,8 @@ truth for scope, stack, and decisions.
 - TypeScript strict; no `any` in `/core`.
 - The LLM proposes, the planner disposes: registry check + validation + confirm gate
   are deterministic and must never be bypassed.
-- Irreversible tools (`sendMessage`) always pass through `shell.confirm()`.
+- Every `dangerous`-tier call (`sendMessage`, `sendReply`, a connector create) always passes
+  through `shell.confirm()`; every `caution`-tier call narrates first (`core/risk.ts`).
 - Secrets only from `.env`; never log the API key or webhook URL.
 - Unregistered requests → graceful refusal + `logMiss()`. Never invent a tool.
 
@@ -204,3 +211,9 @@ missing and a live test found it.
 - Run the test suite against MockShell.
 - Update `spec.md` if any decision changed.
 - Summarize what changed and what the next milestone needs.
+
+The full close-out procedure is the `/milestone-closeout` skill
+(`.claude/skills/milestone-closeout/`): the mutation pass, the live checklist
+(`docs/M<N>-live-checklist.md`, written before the live pass), the stop for a person's live
+results, and the doc updates — including re-checking this file's scope and status lines and
+the status index in `docs/context/README.md`.

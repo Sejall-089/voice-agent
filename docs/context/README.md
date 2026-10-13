@@ -5,20 +5,38 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status: see `PROJECT_CONTEXT_UPDATE_9.md`.** M0-M19 shipped. M19 (MCP support,
-with Linear as the first connector) was run live and ticked on 2026-10-09 **with named
-gaps**: the Gmail -> Linear -> Slack chain, the confirm dialogs and one run of the plan-choice
-fix were seen by a person; the decline/failure cases, the long-email dialog, the injected-instruction
-email and the `functions.` prefix rule are covered by tests only. 1214 tests pass. Plan choice with a
-non-empty clipboard was improved after the close (verb-keyed wording, a confirm label, a log
-line) and that fix's live re-run passed on 2026-10-09; it still cannot be made certain.
-`docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` both still have open items,
-and say which.
+**Current status (as of 2026-10-13): M0-M22 shipped.** There is no context file past
+`PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19 only**. For M20, M21 and M22 the
+status lives in `spec.md` (§9's entry for each, and §6e / §6f for the design) and in each
+milestone's live checklist:
+
+- **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
+  ticked, 12 open.
+- **M21 - references checked before a chain starts; ask instead of refuse.**
+  `docs/M21-live-checklist.md`: 25 ticked, 6 open.
+- **M22 - Slack bot-token mode.** Closed 2026-10-13 after a live run by a person.
+  `docs/m22-live-checklist.md`: 32 ticked, 6 open. 2206 tests passed across 95 files at the
+  close; with the follow-ups after it (a model-error log row, the webhook timeout, the 429
+  tests) `npm test` now passes 2242 across 98 files, 75 skipped (the opt-in real-model evals).
+
+An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
+which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
+
+M19 (MCP support, with Linear as the first connector) was run live and ticked on 2026-10-09
+**with named gaps**: the Gmail -> Linear -> Slack chain, the confirm dialogs and one run of the
+plan-choice fix were seen by a person; the decline/failure cases, the long-email dialog, the
+injected-instruction email and the `functions.` prefix rule are covered by tests only. Plan
+choice with a non-empty clipboard was improved after the close (verb-keyed wording, a confirm
+label, a log line) and that fix's live re-run passed on 2026-10-09; it still cannot be made
+certain.
+
+This index is re-checked at every milestone close-out (`.claude/skills/milestone-closeout/`).
 
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
-2. `PROJECT_CONTEXT_UPDATE_9.md` — current status
-3. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
+2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
+3. `spec.md` §9 (M20, M21, M22) and the three checklists above — status since
+4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`
 
