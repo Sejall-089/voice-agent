@@ -1159,6 +1159,22 @@ work area, excluded from screen capture, shown only with `showInactive()`.
 | "N running" | otherwise, while anything is running or queued |
 | "Done" | for 8 s after the last job finishes cleanly, then the window hides |
 
+**The list always starts collapsed** (fixed 2026-10-13, after a live run in which a list opened
+once stayed open for every later instruction). Whether it is open is one in-memory flag in the
+pill's state — never a setting, never persisted. It becomes true only on a click of the pill,
+and goes back to false on: a second click; any row's button that took effect; an accepted
+press of the instruction or dictation hotkey (the same hook that detaches the attached job,
+`main/jobs/startingSomethingElse.ts`); ten seconds with the pointer off the pill's window; and
+the pill emptying. Nothing about a job — a new one, one that starts waiting, one that fails —
+opens it. The window cannot take focus, so there is no blur: the page reports the pointer
+entering and leaving, and once a second main also asks the OS where the pointer is, because
+the window is resized under it and a `mouseleave` was measured not arriving.
+
+The open panel is **sized to its content**: the page measures the list and main resizes the
+window to fit, up to 440 px, keeping the bottom-right corner fixed. A job's message is drawn
+whole and wrapped; only text over 420 characters is shortened, between words, with an
+ellipsis. Measured in a real window by `scripts/ask-recon/pill-collapse.ts`.
+
 Clicking it opens a list. Each row has only its own buttons — **Review…** (opens the native
 confirm dialog; approves nothing), **Resume** (a job that needs the screen), **Cancel**,
 **Dismiss** — and the list has a mute toggle for the chime. The button labels are fixed in the

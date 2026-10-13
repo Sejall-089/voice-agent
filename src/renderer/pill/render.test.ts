@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { PillView } from "../../core/jobs/pillView.ts";
 import { ChimePlayer } from "../audio/chime.ts";
-import { ACTION_LABEL, renderPill } from "./render.ts";
+import { ACTION_LABEL, measurePill, renderPill } from "./render.ts";
 
 // What the pill actually DRAWS (M23). CLAUDE.md: a log line proves what the app decided, not
 // what the user saw — so this inspects the DOM the page ends up with, and clicks its buttons.
@@ -138,6 +138,30 @@ describe("renderPill", () => {
     ]);
     expect(draw({ ...VIEW, notice: null }).root.querySelector(".notice")).toBeNull();
     expect(draw(VIEW).root.querySelector(".notice")).toBeNull();
+  });
+});
+
+describe("measurePill", () => {
+  it("is null when the list is not open — there is nothing to size the window to", () => {
+    expect(measurePill(draw({ ...VIEW, expanded: false }).root)).toBeNull();
+    expect(measurePill(draw({ ...VIEW, mode: "hidden", items: [], expanded: false }).root)).toBeNull();
+  });
+
+  it("is the list's full content height plus the pill and the gap", () => {
+    const { root } = draw(VIEW);
+    const list = root.querySelector(".list") as HTMLElement;
+    // jsdom does no layout, so the three numbers a browser would supply are supplied here.
+    Object.defineProperty(list, "scrollHeight", { value: 201.2 });
+    Object.defineProperty(list, "offsetHeight", { value: 120 });
+    Object.defineProperty(list, "clientHeight", { value: 118 });
+    // content 201.2 + border 2 + gap 6 + pill 44, rounded UP so nothing is cut by a fraction.
+    expect(measurePill(root)).toBe(254);
+  });
+
+  it("a detail is drawn as ONE element holding the whole message — nothing is truncated by the page", () => {
+    const long = "Could not confirm the message to #fun. It may have been sent. Check Slack before trying again.";
+    const { text } = draw({ ...VIEW, items: [{ id: "j", title: "t", state: "failed", detail: long, actions: ["dismiss"] }] });
+    expect(text(".row .detail")).toEqual([long]);
   });
 });
 

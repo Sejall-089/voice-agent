@@ -25,6 +25,21 @@ export const ACTION_LABEL: Readonly<Record<PillAction, string>> = {
   dismiss: "Dismiss",
 };
 
+// The pill's own height and the gap above it (pill.html's stylesheet): what the window needs
+// besides the list.
+const SUMMARY_HEIGHT = 44;
+const GAP = 6;
+
+// How tall the window has to be to show the whole open list without scrolling: the list's
+// full content height (its `scrollHeight`, which does not shrink when the box is too small),
+// its border, the gap and the pill. Null when the list is not open.
+export function measurePill(root: HTMLElement): number | null {
+  const list = root.querySelector<HTMLElement>(".list");
+  if (list === null) return null;
+  const border = list.offsetHeight - list.clientHeight;
+  return Math.ceil(list.scrollHeight + border + GAP + SUMMARY_HEIGHT);
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
   tag: K,

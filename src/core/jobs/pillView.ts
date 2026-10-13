@@ -28,4 +28,7 @@ export interface PillView {
   items: PillItem[];
   // A sentence shown for a moment (a resume that could not happen yet), or null/absent.
   notice?: string | null;
+  // How tall the open list's content is, in CSS pixels, once the page has measured it and
+  // main has accepted the figure. Main sizes the window from it; absent until then.
+  contentHeight?: number;
 }

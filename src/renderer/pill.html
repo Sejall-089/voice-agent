@@ -156,11 +156,14 @@
         font-weight: 600;
         overflow-wrap: anywhere;
       }
+      /* Shown WHOLE and wrapped at word boundaries. It used to be capped at two lines with the
+         overflow hidden, which cut a long failure message off mid-word; main shortens anything
+         very long at a word, with an ellipsis, and the window is sized to fit what is here.
+         `break-word`, not `anywhere`: a word is broken only when it alone is wider than the
+         panel (a URL), never to fill a line. */
       .detail {
         color: var(--muted);
-        overflow-wrap: anywhere;
-        max-height: 2.7em;
-        overflow: hidden;
+        overflow-wrap: break-word;
       }
       .state-needs-you .detail {
         color: var(--amber);

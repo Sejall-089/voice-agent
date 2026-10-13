@@ -23,12 +23,13 @@ import { WindowsInputInjector } from "./shell/WindowsInputInjector.ts";
 import { combineInstructionBusy, createOnDictateHotkey } from "./dictate.ts";
 import { createJobRunner } from "./jobs/JobRunner.ts";
 import { createConnectingNotice } from "./jobs/connectingNotice.ts";
+import { createStartingSomethingElse } from "./jobs/startingSomethingElse.ts";
 import type { JobPlannerParts } from "./jobs/JobRunner.ts";
 import { PillWindow } from "./pill/PillWindow.ts";
 import { PillController } from "./pill/PillController.ts";
 import { JobManager } from "../core/jobs/JobManager.ts";
 import { SqliteJobStore } from "../core/jobs/JobStore.ts";
-import { PILL_COLLAPSED } from "../core/jobs/pill.ts";
+import { isPointInRect, PILL_COLLAPSED } from "../core/jobs/pill.ts";
 import { SqliteSettings } from "../core/settings.ts";
 import { InMemorySpeechStore } from "../core/speechStore.ts";
 import { createOnInstructionHotkey } from "./instructionHotkey.ts";
@@ -515,6 +516,15 @@ app.whenReady().then(() => {
   shell.attachInput(injector);
   const dictation = transcriber ? new DictationSession(shell, transcriber, injector) : null;
 
+  // M23. "The user has started something else": detach the job that had the bar, close the
+  // pill's list. The pill's controller is built further down (it needs voice, dictation and
+  // speech to exist), so it is looked up at the moment of the press.
+  let pillControllerRef: PillController | null = null;
+  const startingSomethingElse = createStartingSomethingElse({
+    jobs,
+    pill: () => pillControllerRef,
+  });
+
   // One hotkey: open the bar and start listening at the same moment. The handler lives in
   // instructionHotkey.ts rather than here, so its guards are testable without booting electron
   // — which is exactly what the missing M14 §8 guard needed and did not have.
@@ -526,9 +536,8 @@ app.whenReady().then(() => {
     // M17, re-grounded at M23: blocked, and told so, only while the attached job holds the
     // foreground. Otherwise the press goes through and that job is detached to the background.
     chain: foregroundHeld,
-    detach: () => {
-      jobs.detachAttached();
-    },
+    // The job that had the bar goes to the background, and the pill's list closes.
+    detach: startingSomethingElse,
     runInstruction,
   });
   const hotkey = registerHotkey(shell, onHotkey);
@@ -541,10 +550,13 @@ app.whenReady().then(() => {
   // just while voice happens to still be recording — or the bar's own Enter-to-submit and
   // dictation's Enter-to-finish could both fire from one keypress.
   const onDictate = dictation
-    ? createOnDictateHotkey(dictation, combineInstructionBusy(voice, shell, foregroundHeld), () => {
-        // Dictation shows its indicator in the bar: the job that had it goes to the background.
-        jobs.detachAttached();
-      })
+    ? createOnDictateHotkey(
+        dictation,
+        combineInstructionBusy(voice, shell, foregroundHeld),
+        // Dictation shows its indicator in the bar: the job that had it goes to the background,
+        // and the pill's list closes, exactly as for the instruction hotkey.
+        startingSomethingElse,
+      )
     : null;
   const dictateHotkey = onDictate
     ? registerDictateHotkey(shell, () => {
@@ -613,6 +625,14 @@ app.whenReady().then(() => {
       (dictation?.getState() ?? "idle") !== "idle" ||
       (voice?.getState() ?? "idle") !== "idle" ||
       shell.isSpeaking(),
+    // Where the pointer really is, asked of the OS once a tick: the page reports enter and
+    // leave, but the window is resized under the pointer when the list opens and closes, and
+    // a `mouseleave` that never came must not keep the list open for ever.
+    pointerOver: () => {
+      const win = pill.window();
+      if (win === null || !win.isVisible()) return null;
+      return isPointInRect(screen.getCursorScreenPoint(), win.getBounds());
+    },
   });
   // From the pill's page, and only from it: a message on these channels from any other
   // window is dropped. What each may ask for is checked again in PillController.
@@ -627,6 +647,13 @@ app.whenReady().then(() => {
   ipcMain.on("pill:mute", (event, muted: unknown) => {
     if (fromPill(event)) pillController.onMute(muted);
   });
+  ipcMain.on("pill:hover", (event, inside: unknown) => {
+    if (fromPill(event)) pillController.onHover(inside);
+  });
+  ipcMain.on("pill:height", (event, height: unknown) => {
+    if (fromPill(event)) pillController.onContentHeight(height);
+  });
+  pillControllerRef = pillController;
   // Once a second: waits expire, a finished job fades, a held chime may be due.
   pillTimer = setInterval(() => pillController.tick(), 1_000);
 

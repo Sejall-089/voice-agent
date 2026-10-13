@@ -36,6 +36,11 @@ export interface PillControllerDeps {
   playChime: () => void;
   // Dictation, an instruction recording, or the app speaking is in progress.
   isBusy: () => boolean;
+  // Is the pointer over the pill's window right now? Optional, and asked once a tick as a
+  // CORRECTION to what the page reports: the window is resized under the pointer when the
+  // list opens and closes, and a `mouseleave` that never arrives would otherwise leave the
+  // list believing it is being looked at for ever. Null: cannot tell (no window yet).
+  pointerOver?: () => boolean | null;
   now?: () => number;
 }
 
@@ -77,7 +82,17 @@ export class PillController {
     this.deps.manager.expireDue();
     this.chime.flush();
     if (this.notice !== null && this.now() >= this.notice.until) this.notice = null;
+    const over = this.deps.pointerOver?.() ?? null;
+    if (over !== null && over !== this.state.hovering) {
+      this.dispatch({ type: "hover", inside: over, now: this.now() });
+    }
     this.dispatch({ type: "tick", now: this.now() });
+  }
+
+  // THE USER HAS MOVED ON — the hotkey was pressed, or a new instruction was given. The list
+  // closes. Called by main from the same place a job is detached; a no-op when it is closed.
+  collapse(): void {
+    this.dispatch({ type: "collapse" });
   }
 
   view(): PillView {
@@ -98,24 +113,44 @@ export class PillController {
       case "resume": {
         const result = this.deps.manager.resume(rawId);
         if (result === "busy") {
+          // The one action that did NOT happen: the list stays open, because the sentence
+          // saying why is in it.
           this.notice = { text: FOREGROUND_BUSY, until: this.now() + 6_000 };
           this.dispatch({ type: "tick", now: this.now() });
+          return;
         }
-        return;
+        break;
       }
       case "cancel":
         this.deps.manager.cancel(rawId);
-        return;
+        break;
       case "dismiss":
         this.deps.manager.acknowledge(rawId);
         this.dispatch({ type: "jobs", jobs: this.deps.manager.views(), now: this.now() });
-        return;
+        break;
     }
+    // A row's button was used: the list has done its job and gets out of the way — in
+    // particular out of the way of the dialog "Review…" is about to open.
+    this.dispatch({ type: "collapse" });
   }
 
+  // A click on the pill itself. The ONLY thing that opens the list.
   onExpand(raw: unknown): void {
     if (typeof raw !== "boolean") return;
-    this.dispatch({ type: "expand", expanded: raw });
+    this.dispatch({ type: "expand", expanded: raw, now: this.now() });
+  }
+
+  // The pointer entered or left the pill's window.
+  onHover(raw: unknown): void {
+    if (typeof raw !== "boolean") return;
+    this.dispatch({ type: "hover", inside: raw, now: this.now() });
+  }
+
+  // The page measured the open list. A number from the renderer: checked here and bounded in
+  // `pillSize`, so the most a wrong one can do is make the panel its maximum height.
+  onContentHeight(raw: unknown): void {
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0 || raw > 10_000) return;
+    this.dispatch({ type: "measured", height: raw });
   }
 
   onMute(raw: unknown): void {

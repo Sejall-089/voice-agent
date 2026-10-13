@@ -25,6 +25,15 @@ const pill = {
   expand(expanded: boolean): void {
     ipcRenderer.send("pill:expand", expanded);
   },
+  // pill → main: the pointer entered or left this window. The window cannot take focus, so
+  // this is what an open list uses in place of a blur to know it has been left.
+  hover(inside: boolean): void {
+    ipcRenderer.send("pill:hover", inside);
+  },
+  // pill → main: how tall the open list's content is, so the window can be sized to it.
+  contentHeight(height: number): void {
+    ipcRenderer.send("pill:height", height);
+  },
   // pill → main: mute or unmute the needs-you chime.
   mute(muted: boolean): void {
     ipcRenderer.send("pill:mute", muted);

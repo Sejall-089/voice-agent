@@ -175,22 +175,31 @@ describe("the pill's state reducer", () => {
     expect([...offered].sort()).toEqual(["cancel", "dismiss", "review"]);
   });
 
-  it("expand and mute are remembered; a hidden pill is never 'expanded'", () => {
+  // RE-JUSTIFIED when the rule changed (the list must always start collapsed). This test used
+  // to be titled "expand and mute are remembered", and it stopped at "a hidden pill is not
+  // drawn expanded" — which was true while the flag underneath stayed set, so the pill came
+  // back OPEN for the next job. It now asserts the flag itself is gone. Mute IS remembered;
+  // the list being open is not. The full set of rules is in tests/pill.collapse.test.ts.
+  it("mute is remembered; the open list is not — when the pill empties, it is closed for good", () => {
     let state = withJobs([job("running")]);
-    state = reducePill(state, { type: "expand", expanded: true });
+    state = reducePill(state, { type: "expand", expanded: true, now: T0 });
     state = reducePill(state, { type: "mute", muted: true });
     expect(pillView(state)).toMatchObject({ expanded: true, muted: true });
     state = reducePill(state, { type: "jobs", jobs: [], now: T0 });
     expect(pillView(state)).toMatchObject({ mode: "hidden", expanded: false, muted: true });
+    expect(state.expanded).toBe(false);
+    // The next job arrives: the pill is back, and it is collapsed.
+    state = reducePill(state, { type: "jobs", jobs: [job("running")], now: T0 + 1000 });
+    expect(pillView(state)).toMatchObject({ mode: "running", expanded: false });
   });
 
-  it("titles and details are clipped to one line", () => {
+  it("titles are one short line; details are one line of up to 420 characters", () => {
     const view = pillView(
       withJobs([job("failed", { instruction: `a\nvery ${"long ".repeat(40)}instruction`, result: "x".repeat(900) })]),
     );
     expect(view.items[0]?.title.length).toBeLessThanOrEqual(64);
     expect(view.items[0]?.title).not.toContain("\n");
-    expect(view.items[0]?.detail.length).toBeLessThanOrEqual(160);
+    expect(view.items[0]?.detail.length).toBeLessThanOrEqual(420);
   });
 });
 
