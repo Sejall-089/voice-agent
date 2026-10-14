@@ -612,7 +612,7 @@ export const sendMessageTool: Tool = {
     const raw = deps.context.selectedText;
     if (raw === null || raw.trim().length === 0) throw new UserFixableError(NOTHING_TO_SEND);
 
-    const formatted = (await deps.llm.complete(FORMAT_SYSTEM, raw)).trim();
+    const formatted = (await deps.llm.complete(FORMAT_SYSTEM, raw, "format")).trim();
     if (!isMessage(formatted)) throw new UserFixableError(NOT_A_MESSAGE);
 
     return { ...args, notes: formatted };

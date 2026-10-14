@@ -124,6 +124,7 @@ export async function composeReply(
   const text = await llm.complete(
     systemFor(request),
     sections.join("\n\n---\n\n"),
+    "compose",
   );
   return requireNonEmpty(
     text,

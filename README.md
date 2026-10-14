@@ -546,6 +546,13 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 Restart after changing `.env`, and after pulling new code: the main process is built once at
 startup.
 
+**What each model call costs.** Every call prints one `[llm]` line in the console: what it was
+for (`planning`, `retry`, `summarize`, `format`, `compose`, …), the model, prompt / cached /
+reasoning / output tokens, an estimated cost, and a running total for this run. The prices come
+from `llm-prices.json` in the repo root — edit it when a provider's price changes; a model not
+listed there is logged without a cost. Token counts only: no prompt, reply or key is ever
+printed. See spec.md §3c.
+
 ### Setting up Slack (bot token — optional, M22)
 
 Without this, Slack works as before through `SLACK_WEBHOOK_URL`: one webhook, one channel. With

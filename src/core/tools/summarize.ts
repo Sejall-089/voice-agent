@@ -34,6 +34,6 @@ export const summarizeTool: Tool = {
     }
     const style = typeof input["style"] === "string" ? input["style"] : null;
     const user = style ? `Summarize in this style: ${style}.\n\n${text}` : text;
-    return deps.llm.complete(SUMMARIZE_SYSTEM, user);
+    return deps.llm.complete(SUMMARIZE_SYSTEM, user, "summarize");
   },
 };

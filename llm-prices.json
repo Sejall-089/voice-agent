@@ -1,0 +1,8 @@
+{
+  "_note": "USD per 1,000,000 tokens. Used ONLY to estimate cost in the [llm] usage log line; nothing is billed or limited from this file. Edit it when a provider's price changes, and check each number against the provider's pricing page. A model that is not listed is logged with its tokens and no cost.",
+  "models": {
+    "gpt-5": { "input": 1.25, "cachedInput": 0.125, "output": 10.0 },
+    "gpt-5-mini": { "input": 0.25, "cachedInput": 0.025, "output": 2.0 },
+    "claude-sonnet-4-6": { "input": 3.0, "cachedInput": 0.3, "output": 15.0 }
+  }
+}

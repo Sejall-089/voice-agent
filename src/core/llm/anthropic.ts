@@ -9,6 +9,7 @@ import type {
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
 import { planToolFor } from "./plan.ts";
 import { classifyToolCalls } from "./toolChoice.ts";
+import { reportUsage, usageFromAnthropic, type LLMPurpose, type UsageSink } from "./usage.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
@@ -37,10 +38,14 @@ export class AnthropicLLMClient implements LLMClient {
   private readonly apiKey: string | undefined;
   private client: Anthropic | null = null;
 
-  constructor(apiKey: string | undefined = process.env["ANTHROPIC_API_KEY"]) {
+  // Told what each call used, after its response is read (core/llm/usage.ts).
+  private readonly onUsage: UsageSink | undefined;
+
+  constructor(apiKey: string | undefined = process.env["ANTHROPIC_API_KEY"], onUsage?: UsageSink) {
     // Read (but never log) the key. Missing key is surfaced later as a friendly error
     // inside chooseTool/complete, so the app doesn't crash at startup (spec.md §10).
     this.apiKey = apiKey;
+    this.onUsage = onUsage;
   }
 
   private getClient(): Anthropic {
@@ -58,6 +63,7 @@ export class AnthropicLLMClient implements LLMClient {
     context: CapturedContext,
     tools: ToolSchema[],
     previousTurn: ActionLogEntry | null,
+    purpose: LLMPurpose = "planning",
   ): Promise<ToolChoice> {
     const response = await this.getClient().messages.create({
       model: PLANNER_MODEL,
@@ -84,6 +90,7 @@ export class AnthropicLLMClient implements LLMClient {
       },
       messages: [{ role: "user", content: renderRequest(instruction, context, previousTurn) }],
     });
+    reportUsage(this.onUsage, usageFromAnthropic(purpose, PLANNER_MODEL, response.usage));
 
     // M17 LIVE-TESTING BUG, FIXED: this used to `return` on the FIRST tool_use block found,
     // silently discarding any further blocks in the same response. A model that answered with a
@@ -111,13 +118,14 @@ export class AnthropicLLMClient implements LLMClient {
     return { kind: "none", text: joinText(response.content) };
   }
 
-  async complete(system: string, user: string): Promise<string> {
+  async complete(system: string, user: string, purpose: LLMPurpose = "complete"): Promise<string> {
     const response = await this.getClient().messages.create({
       model: PLANNER_MODEL,
       max_tokens: 4096,
       system,
       messages: [{ role: "user", content: user }],
     });
+    reportUsage(this.onUsage, usageFromAnthropic(purpose, PLANNER_MODEL, response.usage));
     return joinText(response.content);
   }
 }

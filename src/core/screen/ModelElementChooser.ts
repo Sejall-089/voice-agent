@@ -52,6 +52,7 @@ export class ModelElementChooser implements ElementChooser {
       reply = await this.llm.complete(
         CHOOSE_CONTROL_SYSTEM,
         renderChooseRequest(candidates, target, windowTitle),
+        "point",
       );
     } catch (error) {
       throw classifyChooserFailure(error);

@@ -9,6 +9,7 @@ import type {
 import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
 import { PLAN_TOOL_NAME, planToolFor } from "./plan.ts";
 import { classifyToolCalls, type RawToolCall } from "./toolChoice.ts";
+import { reportUsage, usageFromOpenAI, type LLMPurpose, type UsageSink } from "./usage.ts";
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
@@ -48,10 +49,15 @@ export class OpenAILLMClient implements LLMClient {
   private readonly apiKey: string | undefined;
   private client: OpenAI | null = null;
 
-  constructor(apiKey: string | undefined = process.env["OPENAI_API_KEY"]) {
+  // Told what each call used, after its response is read (core/llm/usage.ts). Optional, and
+  // absent in every test that does not ask for it.
+  private readonly onUsage: UsageSink | undefined;
+
+  constructor(apiKey: string | undefined = process.env["OPENAI_API_KEY"], onUsage?: UsageSink) {
     // Read (but never log) the key. Missing key is surfaced later as a friendly error
     // inside chooseTool/complete, so the app doesn't crash at startup (spec.md §10).
     this.apiKey = apiKey;
+    this.onUsage = onUsage;
   }
 
   private getClient(): OpenAI {
@@ -69,6 +75,7 @@ export class OpenAILLMClient implements LLMClient {
     context: CapturedContext,
     tools: ToolSchema[],
     previousTurn: ActionLogEntry | null,
+    purpose: LLMPurpose = "planning",
   ): Promise<ToolChoice> {
     const response = await this.getClient().chat.completions.create({
       model: PLANNER_MODEL,
@@ -104,6 +111,7 @@ export class OpenAILLMClient implements LLMClient {
       // set.
       tool_choice: "auto",
     });
+    reportUsage(this.onUsage, usageFromOpenAI(purpose, PLANNER_MODEL, response.usage));
 
     const choice = response.choices[0];
     const message = choice?.message;
@@ -166,7 +174,7 @@ export class OpenAILLMClient implements LLMClient {
     return { kind: "none", text: message?.content ?? null };
   }
 
-  async complete(system: string, user: string): Promise<string> {
+  async complete(system: string, user: string, purpose: LLMPurpose = "complete"): Promise<string> {
     const response = await this.getClient().chat.completions.create({
       model: PLANNER_MODEL,
       max_completion_tokens: 4096,
@@ -175,6 +183,7 @@ export class OpenAILLMClient implements LLMClient {
         { role: "user", content: user },
       ],
     });
+    reportUsage(this.onUsage, usageFromOpenAI(purpose, PLANNER_MODEL, response.usage));
     return (response.choices[0]?.message.content ?? "").trim();
   }
 }

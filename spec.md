@@ -345,6 +345,35 @@ tool. Same status, same table, reason recorded in `result`, backlog uncorrupted.
 Note `complete()` (used inside handlers) can still truncate a long summary. That is visible
 to the user as short output rather than silent, so it is left alone for now.
 
+## 3c. Usage logging (added 2026-10-15)
+
+Every model call writes one console line: what it was for, the model, prompt / cached /
+reasoning / output tokens, an estimated cost, and a running total for this app run:
+
+```
+[llm] planning gpt-5: prompt 6800 (cached 6500), output 912 (reasoning 832), est $0.0103 | session: 1 call, output 912, est $0.0103
+```
+
+**Why.** The bill is almost all OUTPUT, and on `gpt-5` most of that is hidden reasoning spent
+before a tool call a few dozen tokens long. The response's `usage` block was otherwise dropped,
+so which call costs what could not be seen from the app.
+
+- **Purposes** (`LLMPurpose`, `core/llm/usage.ts`): `planning` (the first `chooseTool`),
+  `retry` (the one re-ask after a multi-call answer, §5b), `summarize`, `rewrite`, `format`
+  (`sendMessage`'s formatter), `compose` (`draftReply`, `reviseDraft`), `compose-note`
+  (`addToPage`), `point` (`pointAt`'s chooser). `jobStatus` makes no model call of its own. The
+  label is an optional last argument on `chooseTool` / `complete`; it is never sent to the model.
+- **Prices are data**, in `llm-prices.json` at the repo root (USD per million tokens: `input`,
+  `cachedInput`, `output`). A model with no entry is logged with its tokens and **no** cost,
+  never a guess; a missing or broken table is said once at startup. Cached input is billed at
+  its own rate; reasoning is already inside output and is not added twice.
+- **No behaviour change.** Usage is reported after the response has been read, to an optional
+  sink on each client; a throwing sink is swallowed. The request sent is identical with and
+  without it (pinned in `tests/llmUsage.test.ts`). Token counts and model names only — never a
+  prompt, a reply or a key. Nothing is persisted: a restart starts the total from zero.
+- **Not counted:** the OpenAI SDK's own automatic retries after a failed request (a failed
+  request has no usage block).
+
 ---
 
 ## 4. The OSShell interface (the portability contract)

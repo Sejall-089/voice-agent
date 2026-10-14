@@ -40,6 +40,7 @@ import { loadConnectorTools } from "../core/mcp/load.ts";
 import { bearerHttpTransport } from "../core/mcp/transport.ts";
 import { SdkMcpConnection } from "../core/mcp/SdkConnection.ts";
 import { createLLMClient } from "../core/llm/factory.ts";
+import { createUsageLog } from "../core/llm/usage.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
 import { SlackSender, webhookChannelWarning } from "../core/senders/SlackSender.ts";
@@ -254,7 +255,19 @@ app.whenReady().then(() => {
   // never electron or the concrete LLM client directly.
   //
   // The DB path is decided HERE and injected — /core never asks electron where it lives.
-  const llm = createLLMClient();
+  // Every model call's token counts and estimated cost, one console line each, with a running
+  // total for this run (core/llm/usage.ts). Prices are data: llm-prices.json beside
+  // connectors.json. Token counts and a model name only — never a prompt, a reply or the key.
+  let priceText: string | null = null;
+  try {
+    priceText = readFileSync(join(app.getAppPath(), "llm-prices.json"), "utf8");
+  } catch {
+    // No file: calls are still logged, without a cost.
+  }
+  const llm = createLLMClient(
+    undefined,
+    createUsageLog(priceText, (line) => console.log(`[llm] ${line}`)),
+  );
   // ONE database, three things in it: memory and the action log (SqliteMemory), the job
   // records, and the app's settings (M23). `createDatabase` also adds the columns M23 gave
   // `action_log` to a database from before it — guarded, additive, tested in tests/jobStore.test.ts.

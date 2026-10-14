@@ -45,7 +45,7 @@ export const rewriteTool: Tool = {
       ? input["tone"]
       : DEFAULT_TONE;
 
-    const rewritten = await deps.llm.complete(rewriteSystem(tone), text);
+    const rewritten = await deps.llm.complete(rewriteSystem(tone), text, "rewrite");
 
     const result = await deps.shell.executeAction({
       kind: "copyToClipboard",

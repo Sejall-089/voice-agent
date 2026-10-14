@@ -283,6 +283,7 @@ export class Planner {
         context,
         toToolSchemas(this.registry),
         previousTurn,
+        "retry",
       );
       if (choice.kind === "multiple") {
         return await this.refuseMultiple(instruction, choice.tools);

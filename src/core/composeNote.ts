@@ -85,7 +85,11 @@ export async function composeNote(
   }
   sections.push(`THE USER'S INSTRUCTION:\n${request.instruction}`);
 
-  const text = await llm.complete(systemFor(request), sections.join("\n\n---\n\n"));
+  const text = await llm.complete(
+    systemFor(request),
+    sections.join("\n\n---\n\n"),
+    "compose-note",
+  );
   return requireNonEmpty(
     text,
     "The model returned an empty note — nothing was written to the page.",

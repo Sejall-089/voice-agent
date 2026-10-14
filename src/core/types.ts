@@ -9,6 +9,7 @@ import type {
   OSShell,
 } from "../main/shell/OSShell.ts";
 import type { DraftStore } from "./draft.ts";
+import type { LLMPurpose } from "./llm/usage.ts";
 import type { SpokenText } from "./speech.ts";
 import type { SpeechStore } from "./speechStore.ts";
 import type { Risk, ToolRisk } from "./risk.ts";
@@ -92,9 +93,13 @@ export interface LLMClient {
     context: CapturedContext,
     tools: ToolSchema[],
     previousTurn: ActionLogEntry | null,
+    // What this call is for, for the usage log ONLY (core/llm/usage.ts) — it is never sent to
+    // the model and changes nothing about the request. Absent means "planning".
+    purpose?: LLMPurpose,
   ): Promise<ToolChoice>;
-  // Free-form generation used inside tool handlers (e.g. summarize).
-  complete(system: string, user: string): Promise<string>;
+  // Free-form generation used inside tool handlers (e.g. summarize). `purpose` is the same
+  // usage-log label; absent means an unlabelled "complete".
+  complete(system: string, user: string, purpose?: LLMPurpose): Promise<string>;
 }
 
 // --- The one external connector (spec §2), behind an interface like LLMClient ---
