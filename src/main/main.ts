@@ -39,7 +39,8 @@ import { buildRegistry } from "../core/registry.ts";
 import { loadConnectorTools } from "../core/mcp/load.ts";
 import { bearerHttpTransport } from "../core/mcp/transport.ts";
 import { SdkMcpConnection } from "../core/mcp/SdkConnection.ts";
-import { createLLMClient } from "../core/llm/factory.ts";
+import { createLLMClient, modelSettingsFor } from "../core/llm/factory.ts";
+import { describeModelSettings } from "../core/llm/modelSettings.ts";
 import { createUsageLog } from "../core/llm/usage.ts";
 import { createDatabase } from "../core/memory/db.ts";
 import { SqliteMemory } from "../core/memory/SqliteMemory.ts";
@@ -264,10 +265,23 @@ app.whenReady().then(() => {
   } catch {
     // No file: calls are still logged, without a cost.
   }
-  const llm = createLLMClient(
-    undefined,
-    createUsageLog(priceText, (line) => console.log(`[llm] ${line}`)),
-  );
+  // Throws at startup on an unknown LLM_PROVIDER, or an unknown LLM_*_MODEL / _REASONING_EFFORT
+  // (core/llm/modelSettings.ts) — never on the first instruction. Caught HERE and the app exits:
+  // left uncaught, the throw was an unhandled rejection inside whenReady and the process stayed
+  // alive with no window and no hotkey, which looks like a hang rather than a refusal.
+  let llm: ReturnType<typeof createLLMClient>;
+  try {
+    llm = createLLMClient(
+      undefined,
+      createUsageLog(priceText, (line) => console.log(`[llm] ${line}`)),
+    );
+  } catch (error) {
+    console.error(`[main] cannot start: ${error instanceof Error ? error.message : String(error)}`);
+    app.exit(1);
+    return;
+  }
+  const modelSettings = modelSettingsFor(process.env["LLM_PROVIDER"]);
+  if (modelSettings !== null) console.log(`[main] ${describeModelSettings(modelSettings)}`);
   // ONE database, three things in it: memory and the action log (SqliteMemory), the job
   // records, and the app's settings (M23). `createDatabase` also adds the columns M23 gave
   // `action_log` to a database from before it — guarded, additive, tested in tests/jobStore.test.ts.

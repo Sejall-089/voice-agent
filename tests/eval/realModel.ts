@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainThread } from "node:worker_threads";
 import { PLANNER_MODEL as ANTHROPIC_PLANNER_MODEL } from "../../src/core/llm/anthropic.ts";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { createLLMClient, modelSettingsFor } from "../../src/core/llm/factory.ts";
 import { PLANNER_MODEL as OPENAI_PLANNER_MODEL } from "../../src/core/llm/openai.ts";
 import { estimateCost, parsePriceTable, type PriceTable, type UsageSink } from "../../src/core/llm/usage.ts";
 import type { LLMClient } from "../../src/core/types.ts";
@@ -274,9 +274,25 @@ const readOrNull = (path: string): string | null => {
   }
 };
 
-export function plannerModel(provider: string | undefined): string {
-  return provider === "anthropic" ? ANTHROPIC_PLANNER_MODEL : OPENAI_PLANNER_MODEL;
+// The planning model a run would use — LLM_PLANNING_MODEL when it is set (modelSettings.ts), so
+// a dry run prices the model that would really answer. An unknown value is reported by the gate.
+export function plannerModel(provider: string | undefined, env: Env = {}): string {
+  const fallback = provider === "anthropic" ? ANTHROPIC_PLANNER_MODEL : OPENAI_PLANNER_MODEL;
+  try {
+    return modelSettingsFor(provider, env)?.planning.model ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
+
+const settingsProblem = (provider: string | undefined, env: Env): string | null => {
+  try {
+    modelSettingsFor(provider, env);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
 
 export function realModelGate(options: {
   // What is about to run, e.g. "jobStatus routing eval".
@@ -298,14 +314,17 @@ export function realModelGate(options: {
   const priceText = readOrNull(join(root, "llm-prices.json"));
   const prices = parsePriceTable(priceText).prices;
   const provider = env["LLM_PROVIDER"];
-  const model = plannerModel(provider);
+  const model = plannerModel(provider, env);
   const cost = estimateRunCost(options.plannedCalls, model, prices, parseDryEstimate(priceText));
   const priced = cost === null ? "cost unknown" : `est ~${usd(cost)}`;
+  const badSettings = settingsProblem(provider, env);
 
   let real = false;
   let line: string;
   if (!options.selected) {
     line = `[real-model] ${options.name}: dry — ${options.plannedCalls} planned ${model} calls, ${priced}. Not selected. To run: ${options.howToRun}`;
+  } else if (badSettings !== null) {
+    line = `[real-model] ${options.name}: NOT RUN — ${badSettings} No call was made.`;
   } else if (policy.refused !== null) {
     line = `[real-model] ${options.name}: NOT RUN — ${policy.refused}. No call was made.`;
   } else if (!policy.real) {
@@ -323,7 +342,7 @@ export function realModelGate(options: {
     client(makeClient) {
       if (!real) throw new Error(`${options.name} is a dry run; it has no model client`);
       return guardClient({
-        makeClient: makeClient ?? ((sink) => createLLMClient(provider, sink)),
+        makeClient: makeClient ?? ((sink) => createLLMClient(provider, sink, env)),
         counter: new FileCallCounter(
           runCounterDir(env, { pid: process.pid, ppid: process.ppid, isMainThread }, tmpdir()),
           policy.cap,

@@ -402,6 +402,37 @@ gate, `tests/eval/realModel.ts` (test infrastructure; nothing under `src/` impor
   `cap` times), the counter, and that every file under `tests/eval/` and `scripts/` that can
   build a model client builds it only inside the gate.
 
+
+## 3e. Model and reasoning effort per kind of call (added 2026-10-15)
+
+Selectable in `.env`, **with today's values as the defaults** — nothing changes unless a
+variable is set (`core/llm/modelSettings.ts`):
+
+| Variable | Applies to | Default |
+|---|---|---|
+| `LLM_PLANNING_MODEL` | `planning`, `retry` (every `chooseTool`) | the provider's model: `gpt-5` / `claude-sonnet-4-6` |
+| `LLM_PLANNING_REASONING_EFFORT` | the same | not sent (the API's default) |
+| `LLM_TASK_MODEL` | `summarize`, `rewrite`, `format`, `compose`, `compose-note`, `point`, unlabelled `complete` | the provider's model |
+| `LLM_TASK_REASONING_EFFORT` | the same | not sent |
+
+- **Two groups, not one per purpose:** planning decides what runs; task calls work inside a tool
+  that is already chosen. A cheaper setting is a sensible experiment for one and not the other.
+- **Closed lists, checked at startup.** Models: `gpt-5`, `gpt-5-mini` for openai,
+  `claude-sonnet-4-6` for anthropic — a model is added when it has been measured. Efforts:
+  `minimal`, `low`, `medium`, `high`, openai only (the Anthropic client requests no thinking, so
+  an effort there is refused rather than ignored). Anything else throws from `createLLMClient`,
+  which `main.ts` calls at startup, naming the variable and the allowed values. A blank value
+  means unset.
+- **An unset effort is left out of the request entirely**, not sent as null — the default
+  request is field for field what it was (`tests/modelSettings.test.ts`, against a request
+  written out by hand). The output caps (8192 / 4096, §3a) do not change with either setting.
+- The usage log (§3c) names the model that actually answered; `main.ts` prints
+  `[main] models: planning … ; tasks …` at startup. The eval gate (§3d) prices a dry run with
+  `LLM_PLANNING_MODEL` and refuses a real run on an unknown value.
+- **Measured (2026-10-14/15, one trial each), not adopted.** `gpt-5-mini` at minimal effort
+  answered in prose where a tool was expected on 8 of 39 broad-set cases (6 of 12 jobStatus
+  positives, "pause", and one plan written out as text). Every miss was loud — nothing ran —
+  and none dropped a step or changed an argument silently. Choosing a setting is the user's call.
 ---
 
 ## 4. The OSShell interface (the portability contract)

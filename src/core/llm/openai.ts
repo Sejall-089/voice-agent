@@ -10,10 +10,16 @@ import { CHOOSE_SYSTEM, renderRequest } from "./prompt.ts";
 import { PLAN_TOOL_NAME, planToolFor } from "./plan.ts";
 import { classifyToolCalls, type RawToolCall } from "./toolChoice.ts";
 import { reportUsage, usageFromOpenAI, type LLMPurpose, type UsageSink } from "./usage.ts";
+import {
+  PROVIDER_MODELS,
+  defaultModelSettings,
+  settingsFor,
+  type ModelSettings,
+} from "./modelSettings.ts";
 
-// Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
-// see factory.ts.
-export const PLANNER_MODEL = "gpt-5";
+// The default model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
+// see factory.ts; a different model or a reasoning effort per kind of call via modelSettings.ts.
+export const PLANNER_MODEL = PROVIDER_MODELS.openai.defaultModel;
 
 // Reasoning tokens come out of the same allowance as the tool call itself (§3a).
 //
@@ -53,11 +59,30 @@ export class OpenAILLMClient implements LLMClient {
   // absent in every test that does not ask for it.
   private readonly onUsage: UsageSink | undefined;
 
-  constructor(apiKey: string | undefined = process.env["OPENAI_API_KEY"], onUsage?: UsageSink) {
+  // Which model, at which effort, answers each kind of call. Defaults to what every call has
+  // always sent: PLANNER_MODEL, and no effort field at all.
+  private readonly settings: ModelSettings;
+
+  constructor(
+    apiKey: string | undefined = process.env["OPENAI_API_KEY"],
+    onUsage?: UsageSink,
+    settings: ModelSettings = defaultModelSettings("openai"),
+  ) {
     // Read (but never log) the key. Missing key is surfaced later as a friendly error
     // inside chooseTool/complete, so the app doesn't crash at startup (spec.md §10).
     this.apiKey = apiKey;
     this.onUsage = onUsage;
+    this.settings = settings;
+  }
+
+  // The model and, ONLY when one is set, the effort. An unset effort is left out of the request
+  // entirely rather than sent as null, so the default request is byte-for-byte what it was.
+  private modelFields(purpose: LLMPurpose): {
+    model: string;
+    reasoning_effort?: NonNullable<OpenAI.ChatCompletionCreateParams["reasoning_effort"]>;
+  } {
+    const { model, reasoningEffort } = settingsFor(this.settings, purpose);
+    return reasoningEffort === null ? { model } : { model, reasoning_effort: reasoningEffort };
   }
 
   private getClient(): OpenAI {
@@ -77,8 +102,9 @@ export class OpenAILLMClient implements LLMClient {
     previousTurn: ActionLogEntry | null,
     purpose: LLMPurpose = "planning",
   ): Promise<ToolChoice> {
+    const fields = this.modelFields(purpose);
     const response = await this.getClient().chat.completions.create({
-      model: PLANNER_MODEL,
+      ...fields,
       // Headroom, not a target: gpt-5 is a reasoning model and its reasoning tokens are
       // spent from THIS budget before any tool call is emitted. At 1024 a long reasoning
       // pass could consume the lot and return no tool call at all, which used to be
@@ -111,7 +137,7 @@ export class OpenAILLMClient implements LLMClient {
       // set.
       tool_choice: "auto",
     });
-    reportUsage(this.onUsage, usageFromOpenAI(purpose, PLANNER_MODEL, response.usage));
+    reportUsage(this.onUsage, usageFromOpenAI(purpose, fields.model, response.usage));
 
     const choice = response.choices[0];
     const message = choice?.message;
@@ -175,15 +201,16 @@ export class OpenAILLMClient implements LLMClient {
   }
 
   async complete(system: string, user: string, purpose: LLMPurpose = "complete"): Promise<string> {
+    const fields = this.modelFields(purpose);
     const response = await this.getClient().chat.completions.create({
-      model: PLANNER_MODEL,
+      ...fields,
       max_completion_tokens: 4096,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
     });
-    reportUsage(this.onUsage, usageFromOpenAI(purpose, PLANNER_MODEL, response.usage));
+    reportUsage(this.onUsage, usageFromOpenAI(purpose, fields.model, response.usage));
     return (response.choices[0]?.message.content ?? "").trim();
   }
 }
