@@ -343,6 +343,14 @@ While a chain is running, both hotkeys are blocked — and *say* they're blocked
 that silently does nothing is indistinguishable from a broken app. If a chain is parked at a
 confirm dialog, it tells you about the dialog, not about the chain: that's the one you can act on.
 
+**It won't file an issue about nothing.** If you say "file *this* bug…" and the plan it comes up
+with would file a Linear or GitHub issue with a made-up title, no description, and no step that
+actually reads the email or text you mean, it refuses before anything runs: *"I didn't file that
+issue. Nothing in my plan reads what you pointed at, so it would only have had a made-up title.
+Open the email or copy the text, then ask again."* An issue you dictate ("create a Linear issue
+titled login button is broken") is never refused for having no description. See spec.md §5b,
+"Content pointed at, never read".
+
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
 you later.

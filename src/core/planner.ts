@@ -21,7 +21,9 @@ import {
   MAX_QUESTIONS_PER_CHAIN,
   SAVED_HOLD_MS,
   canonicalToolName,
+  checkUnreadContent,
   isUnknownReferenceRefusal,
+  isUnreadContentRefusal,
   preflightReferences,
   previewHoldRemaining,
   previewPlan,
@@ -260,8 +262,16 @@ export class Planner {
     //    own in prose instead of a plan, so the user was shown something that looked like a
     //    question and was not one. The row stays in the log; it is only not handed to the model.
     //    Nothing is substituted for it: the turn before would be a staler context still.
+    //
+    //    The same for a create refused because nothing read what the user pointed at
+    //    (`isUnreadContentRefusal`): its "open the email or copy the text, then ask again" is an
+    //    instruction to the user, and shown to the model it is the same kind of text that M21
+    //    found turning the next answer into prose.
     const last = this.log.getLast();
-    const previousTurn = last !== null && isUnknownReferenceRefusal(last) ? null : last;
+    const previousTurn =
+      last !== null && (isUnknownReferenceRefusal(last) || isUnreadContentRefusal(last))
+        ? null
+        : last;
     let choice = await this.llm.chooseTool(
       instruction,
       context,
@@ -316,6 +326,17 @@ export class Planner {
     if (!tool) {
       return { ...(await this.refuse(instruction)), proposed: { tool: choice.name } };
     }
+
+    // A lone create carrying only a made-up title when the user pointed at something (core/
+    // chain.ts, `checkUnreadContent`). Before anything is asked or admitted — and after the
+    // multi-call retry above, so it judges whichever answer came back.
+    const unread = checkUnreadContent(
+      instruction,
+      context,
+      [{ tool: name, arguments: choice.input, describe: "" }],
+      this.registry,
+    );
+    if (!unread.ok) return await this.refuseUnread(instruction, choice.name, unread.reason);
 
     const asked = await this.askBeforeLoneCall(instruction, tool, choice.input);
     if (asked !== null) return asked;
@@ -673,6 +694,15 @@ export class Planner {
       return await this.refusePlan(instruction, proposed, check.reason);
     }
 
+    // A create that would carry only a made-up title, when the user pointed at something nothing
+    // in the plan reads (core/chain.ts, `checkUnreadContent`). Here, before the one-step branch
+    // below — so a one-step plan is judged too — and before any question, admission, narration
+    // or step. Refused as a plan: logged with the tool names, never through `logMiss`.
+    const unread = checkUnreadContent(instruction, context, steps, this.registry);
+    if (!unread.ok) {
+      return await this.refusePlan(instruction, proposed, unread.reason);
+    }
+
     // A one-step "plan". The prompt tells the model not to do this twice over, but if it does,
     // running it as an ordinary single call is better than narrating "One step:" at someone —
     // and it cannot carry a placeholder, because validation refuses a step referring to itself.
@@ -915,6 +945,27 @@ export class Planner {
       await this.shell.executeAction({ kind: "notify", payload: `Saved: ${said} = ${value}` });
       await this.sleep(SAVED_HOLD_MS);
     }
+  }
+
+  // A LONE create refused by `checkUnreadContent` (core/chain.ts). The same row a plan's refusal
+  // writes — `refused`, no tool, the tool name as the model sent it, never `logMiss` — without
+  // `refusePlan`'s `chain`, which would report "0 of 1" for something that was never a chain.
+  private async refuseUnread(
+    instruction: string,
+    sent: string,
+    reason: string,
+  ): Promise<PlannerOutcome> {
+    this.log.logAction({
+      ts: new Date().toISOString(),
+      instruction,
+      tool: null,
+      arguments: { plan: [sent] },
+      result: reason,
+      status: "refused",
+    });
+    this.shell.showResult(reason);
+    await this.say(toSpokenResult(reason));
+    return { status: "refused", tool: null, result: reason, proposed: { tool: sent } };
   }
 
   // The plan itself could not run — too many steps, a tool that isn't on the menu, a reference

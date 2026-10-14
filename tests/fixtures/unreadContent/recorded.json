@@ -1,0 +1,1847 @@
+[
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported in email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": ""
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report from selected text",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported via email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button unresponsive on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.summarize",
+        "arguments": {
+          "style": "short"
+        }
+      },
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "Issue reported from clipboard — needs triage",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported from clipboard",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.summarize",
+        "arguments": {
+          "style": "short"
+        }
+      },
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "Bug reported",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Release checklist — confirm issue body format",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5-mini/low",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Release checklist: confirm issue-template body format",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Issue from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step1}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "{step1}",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step1}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in the issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in the issue template"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy gpt-5/low",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Body format in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5/default",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5/default",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "{step1}"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5/default",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "Bug report"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step1}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5/default",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5/default",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5/default",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5-mini/low",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step1}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5-mini/low",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "proxy2 gpt-5-mini/low",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported in email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported in email: needs triage",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one-line title"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "{step1}",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report — needs triage",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button unresponsive on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "body format",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-mini",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Ticket from email: {step1}",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "Bug report from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "Bug report from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "file this bug email in Linear and tell the bugs channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug: login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the bugs channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "make a Linear ticket from this email, then post the link in #bugs",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug: login button does nothing on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Login button unresponsive on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "Login button unresponsive on mobile",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "compare-minimal",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in the issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "{step1}",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "{step1}",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Issue: {step1}",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Confirm body format renders in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel\n"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel\n"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Verify issue body format renders in template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini-minimal",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported via email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini-minimal",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported in email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini-minimal",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported via email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini-minimal",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Release checklist: verify body format in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini-minimal",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Release checklist: confirm body format for issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun channel",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "followup-mini-minimal",
+    "instruction": "create an issue on github for body format and send these notes to fun channel",
+    "clipboard": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel",
+    "steps": [
+      {
+        "tool": "github__create_issue",
+        "arguments": {
+          "title": "Release checklist: confirm body format renders in issue template",
+          "body": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "fun",
+          "notes": "Release checklist:\n- [ ] bump version\n- [ ] update changelog\n- [ ] run smoke tests on staging\n- [ ] confirm body format renders in the issue template\n- [ ] announce in the fun channel"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-gpt5",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-gpt5",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.summarize",
+        "arguments": {
+          "style": "one sentence"
+        }
+      },
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "{step1}"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New issue filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-gpt5",
+    "instruction": "log this as an issue and let #bugs know",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "functions.linear__create_issue",
+        "arguments": {
+          "title": "Bug report"
+        }
+      },
+      {
+        "tool": "functions.sendMessage",
+        "arguments": {
+          "channel": "#bugs",
+          "notes": "New bug filed: {step1}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-gpt5",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "summarize",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-gpt5",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-gpt5",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-minilow",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step1}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-minilow",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug report",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  },
+  {
+    "source": "baseline-minilow",
+    "instruction": "file this bug in Linear and tell the social channel",
+    "clipboard": null,
+    "steps": [
+      {
+        "tool": "readEmail",
+        "arguments": {}
+      },
+      {
+        "tool": "linear__create_issue",
+        "arguments": {
+          "title": "Bug reported from email",
+          "description": "{step1}"
+        }
+      },
+      {
+        "tool": "sendMessage",
+        "arguments": {
+          "channel": "the social channel",
+          "notes": "New bug filed: {step2}"
+        }
+      }
+    ]
+  }
+]

@@ -165,6 +165,9 @@ export function buildConnectorTools(
       // conditional spread, so a tool that pins none has no property at all and gets the
       // shell's default.
       ...(tool.confirmLabel === undefined ? {} : { confirmLabel: tool.confirmLabel }),
+      // Which arguments are a create's title and body, from the pinned definition (core/chain.ts,
+      // `checkUnreadContent`). Absent on every tool that creates nothing.
+      ...(tool.contentArg === undefined ? {} : { contentArg: tool.contentArg }),
       // Arguments are literals to SEND. Memory resolution rewrites any string that starts with
       // "the" or "my" — and this install's fact for "the team" is a Slack channel, which would
       // otherwise arrive at Linear as a team name. Same reasoning as `remember` and `openApp`.

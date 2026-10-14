@@ -37,6 +37,8 @@ export const readEmailTool: Tool = {
   inputSchema: { type: "object", properties: {} },
   risk: "safe",
   background: "foreground-only",
+  // Reads the email the user is looking at (core/chain.ts, `checkUnreadContent`).
+  readsContext: true,
   handler: async (_input: ToolInput, deps: ToolDeps): Promise<string> => {
     const email = await deps.gmail.readOpenEmail();
     if (email.body.trim().length === 0) {

@@ -35,6 +35,8 @@ export const rewriteTool: Tool = {
   },
   risk: "reversible",
   background: "foreground-only",
+  // Reads the clipboard the user copied (core/chain.ts, `checkUnreadContent`).
+  readsContext: true,
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const text = deps.context.selectedText;
     if (!text || text.trim().length === 0) {

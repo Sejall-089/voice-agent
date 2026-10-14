@@ -2,6 +2,7 @@ import { toSpokenLine } from "./speech.ts";
 import { checkReference } from "./memory/checkReference.ts";
 import type {
   ActionLogEntry,
+  CapturedContext,
   Memory,
   PlannedStep,
   Tool,
@@ -280,6 +281,147 @@ export function isUnknownReferenceRefusal(
     entry.result !== null &&
     entry.result.includes(UNKNOWN_REFERENCE)
   );
+}
+
+// --- Content the user pointed at, and nothing read it -----------------------------------------
+//
+// THE FAILURE. "File this bug in Linear and tell the social channel", with nothing telling the
+// model an email is open and nothing on the clipboard, sometimes came back as a plan that files
+// an issue titled "Bug report" with no description, and reads nothing. Recorded on gpt-5 at its
+// default effort and on gpt-5-mini at low. The plan preview shows the model's own words for each
+// step ("File the bug in Linear"), so nothing on screen says nothing was read; the confirm
+// dialog does say "(no description)", and a person approved exactly this live (SEJ-7, M19).
+//
+// THE RULE — refuse only when ALL FOUR hold (the planner calls this before anything is narrated,
+// asked, admitted or run, on every path: a plan, a one-step plan, a lone call):
+//
+//   1. the instruction POINTS at something: this / that / these / those, or "the email",
+//      "the bug", ... (`pointsAtSomething`). "Create a Linear issue titled X" points at nothing,
+//      so a create the user dictated is never refused for having no description.
+//   2. NOTHING IN THE PLAN USED IT (`usesPointedContent`): no step of a tool that reads what the
+//      user is pointing at (`Tool.readsContext`), and no argument that contains the captured
+//      clipboard text — a model that copied "these notes" into an argument has used them.
+//   3. a CREATE WITH NO CONTENT (`emptyCreates`): a tool that declares `contentArg`, its body
+//      absent or blank, and no `{stepN}` in any of its arguments (a title built from an earlier
+//      step was fed by that step, and the preview names the step).
+//   4. that create's TITLE IS NOT THE USER'S OWN WORDS (`titleIsTheirWords`): "file this: dark
+//      mode toggle resets" gives a title made of what the user said, which is content, not
+//      invention.
+//
+// Declarative, like everything else the planner gates on: it reads `contentArg` and
+// `readsContext` and never knows which tool it is looking at. Measured before it was built
+// against every recorded answer containing a create (77) and eight legitimate synthetic cases:
+// it refuses the four recorded misses and nothing else (tests/unreadContent.test.ts).
+//
+// The wording is fixed and from code — no model text in it (M21: anything a model writes can
+// imitate the app) — ASCII only, for the speech engine, and one paragraph, so the spoken form is
+// the whole of it.
+export const UNREAD_CONTENT =
+  "I didn't file that issue. Nothing in my plan reads what you pointed at, so it would only " +
+  "have had a made-up title. Open the email or copy the text, then ask again.";
+
+const POINTING =
+  /\b(this|that|these|those)\b|\bthe (email|message|mail|bug|report|thread|text|selection)\b/i;
+
+// Clause 1. Over the user's own words only.
+export function pointsAtSomething(instruction: string): boolean {
+  return POINTING.test(instruction);
+}
+
+// A clipboard shorter than this is ignored by clause 2's clipboard test: a stray two-letter
+// clipboard found inside some argument must not switch the whole check off.
+export const MIN_CLIPBOARD_CHARS = 8;
+
+const squash = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+type ContentDeclaration = Pick<Tool, "name" | "contentArg" | "readsContext">;
+
+const declared = (
+  tools: readonly ContentDeclaration[],
+  name: string,
+): ContentDeclaration | undefined => tools.find((tool) => tool.name === name);
+
+// Clause 2 — true when the plan DID use what the user pointed at: a step that reads it, or an
+// argument containing the clipboard's text (whitespace-normalised).
+export function usesPointedContent(
+  steps: readonly PlannedStep[],
+  tools: readonly ContentDeclaration[],
+  clipboard: string | null,
+): boolean {
+  for (const step of steps) {
+    const reads = declared(tools, step.tool)?.readsContext;
+    if (reads === true) return true;
+    if (typeof reads === "function" && reads(step.arguments)) return true;
+  }
+  const copied = clipboard === null ? "" : squash(clipboard);
+  if (copied.length < MIN_CLIPBOARD_CHARS) return false;
+  return steps.some((step) => {
+    let found = false;
+    forEachString(step.arguments, (text) => {
+      if (squash(text).includes(copied)) found = true;
+    });
+    return found;
+  });
+}
+
+// Clause 3 — every create step with no content: body absent or blank, and no `{stepN}` in any of
+// its arguments. Returned with the title it would have had, for clause 4.
+export function emptyCreates(
+  steps: readonly PlannedStep[],
+  tools: readonly ContentDeclaration[],
+): { step: number; title: string }[] {
+  const found: { step: number; title: string }[] = [];
+  steps.forEach((step, index) => {
+    const content = declared(tools, step.tool)?.contentArg;
+    if (content === undefined) return;
+    const body = step.arguments[content.body];
+    const blank =
+      body === undefined || body === null || (typeof body === "string" && body.trim() === "");
+    if (!blank || placeholdersIn(step.arguments).length > 0) return;
+    const title = step.arguments[content.title];
+    found.push({ step: index, title: typeof title === "string" ? title : "" });
+  });
+  return found;
+}
+
+const STOPWORDS = new Set([
+  "a", "an", "the", "in", "on", "of", "for", "to", "and", "with", "is", "it", "this", "that",
+  "from", "as", "at", "by", "be", "my",
+]);
+const wordsOf = (text: string): string[] => text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+
+// Clause 4's escape — true when every content word of the title is a word the user said. An
+// empty title is nobody's words.
+export function titleIsTheirWords(title: string, instruction: string): boolean {
+  const content = wordsOf(title).filter((word) => !STOPWORDS.has(word));
+  if (content.length === 0) return false;
+  const said = new Set(wordsOf(instruction));
+  return content.every((word) => said.has(word));
+}
+
+// All four clauses. `steps` must already carry canonical tool names (the planner's
+// `canonicalToolName`), or a `functions.`-prefixed create would not be recognised as one.
+export function checkUnreadContent(
+  instruction: string,
+  context: Pick<CapturedContext, "selectedText">,
+  steps: readonly PlannedStep[],
+  tools: readonly ContentDeclaration[],
+): PlanCheck {
+  if (!pointsAtSomething(instruction)) return { ok: true };
+  if (usesPointedContent(steps, tools, context.selectedText)) return { ok: true };
+  const invented = emptyCreates(steps, tools).filter(
+    (create) => !titleIsTheirWords(create.title, instruction),
+  );
+  return invented.length === 0 ? { ok: true } : { ok: false, reason: UNREAD_CONTENT };
+}
+
+// The row this refusal leaves, recognised by its fixed text — kept out of the NEXT planning
+// call's previous turn for the reason `isUnknownReferenceRefusal` is (M21: a refusal shown to the
+// model made it answer the next instruction in prose).
+export function isUnreadContentRefusal(
+  entry: Pick<ActionLogEntry, "status" | "tool" | "result">,
+): boolean {
+  return entry.status === "refused" && entry.tool === null && entry.result === UNREAD_CONTENT;
 }
 
 // Substitute the results of steps that have ALREADY RUN into this step's arguments.

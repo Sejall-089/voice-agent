@@ -1092,6 +1092,56 @@ example naming a tool it was not given would be the description contradicting it
 changes behaviour is live-only; `tests/eval/planChoice.eval.test.ts` (opt-in,
 `M19_PLAN_EVAL=1`) is the measurement, including a single-tool control for over-teaching.
 
+### Content pointed at, never read (added 2026-10-15)
+
+A plan sometimes filed an issue titled "Bug report", with no description, and with no step that
+reads the email or text the user pointed at — recorded on `gpt-5` at default effort (1 of 6) and
+`gpt-5-mini` at low (1 of 3), always with no email signal and an empty clipboard. The preview
+shows the model's own words for each step ("File the bug in Linear"), so nothing on screen said
+nothing was read; the dialog's "(no description)" was approved once live (SEJ-7, M19).
+
+`checkUnreadContent` (`core/chain.ts`, pure) refuses before anything is narrated, asked,
+admitted or run, when **all four** hold:
+
+1. the instruction **points**: `this / that / these / those`, or `the email / message / mail /
+   bug / report / thread / text / selection`. "Create a Linear issue titled X" points at
+   nothing, so a dictated create is never refused for having no description.
+2. **nothing in the plan used it**: no step whose tool declares `readsContext` (evaluated on that
+   step's arguments), and no argument containing the captured clipboard text
+   (whitespace-normalised; a clipboard under 8 characters is ignored, so a stray word cannot
+   switch the check off).
+3. a **create with no content**: a tool declaring `contentArg`, its body absent or blank, and no
+   `{stepN}` in any of its arguments.
+4. that create's **title is not the user's own words**: some content word of it does not appear
+   in the instruction ("file this: dark mode toggle resets" passes).
+
+**Declarations, so the planner never names a tool.** `Tool.contentArg` (`{ title, body }`) on
+`linear__create_issue` (`description`) and `github__create_issue` (`body`), pinned in the
+connector definitions. `Tool.readsContext` on `readEmail`, `readSchedule`, `summarize`,
+`rewrite`, `draftReply`, `reviseDraft`, `addToPage`, and on `sendMessage` only when it has no
+`notes` (it then sends the clipboard). Not on connector reads or `recall`: a tracker search or a
+memory lookup is not "this email", and "log this" planned as search > create("Bug report") is
+still refused.
+
+**Where.** In the planner, on all three paths: after `validatePlan` on a plan (before the
+one-step branch, so a one-step plan is judged too, and before `settleReferences` and `admit`),
+and on a lone call after the tool lookup, before `askBeforeLoneCall` and `admit`. It sits below
+the multi-call retry, so it judges whichever answer came back; a refusal is never retried. A
+detached job is refused the same way, before admission: a log row, no dialog, no question.
+
+**What the user gets.** One fixed, ASCII-only paragraph from code (no model text):
+"I didn't file that issue. Nothing in my plan reads what you pointed at, so it would only have
+had a made-up title. Open the email or copy the text, then ask again." Shown in the bar and
+spoken. Logged `refused`, `tool: null`, `arguments: { plan: [tool names as sent] }`, never
+through `logMiss` (nothing is missing from the menu). Like the unknown-reference refusal, the row
+is left out of the next planning call's previous turn (`isUnreadContentRefusal`).
+
+**Measured before it was built** against every recorded model answer containing a create (77,
+`tests/fixtures/unreadContent/recorded.json`) and eight legitimate synthetic cases: it refuses the
+four recorded misses (six entries) and nothing else. It does not catch the LOUD misses (a
+"summarize the clipboard, then create" plan is fed by `{step1}`, and its preview names the
+clipboard) or a lone create that drops a send (a different failure).
+
 ### Deliberately deferred
 
 No new tools; no conditional branching mid-chain ("if I'm free at 3, book X, otherwise Y" — a

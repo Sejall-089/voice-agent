@@ -44,6 +44,8 @@ export const readScheduleTool: Tool = {
   },
   risk: "safe",
   background: "ok",
+  // Reads the schedule the user is asking about (core/chain.ts, `checkUnreadContent`).
+  readsContext: true,
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const now = Date.now();
     const from = optionalString(input, "from") ?? new Date(now).toISOString();

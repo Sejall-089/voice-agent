@@ -30,6 +30,8 @@ export const reviseDraftTool: Tool = {
   },
   risk: "caution",
   background: "foreground-only",
+  // Reads the open email and its draft (core/chain.ts, `checkUnreadContent`).
+  readsContext: true,
   narrate: (): string => "Updating the draft in the reply box…",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const instruction = requiredInstruction(input);

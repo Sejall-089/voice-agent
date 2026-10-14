@@ -75,6 +75,9 @@ export const linearConnector: ConnectorDef = {
       // Something appears in a tracker other people read, under the user's name, with no undo
       // this app can offer. The dialog shows the whole of it first.
       risk: "dangerous",
+      // What the issue SAYS: the planner refuses a create with a made-up title and no
+      // description when the user pointed at something nothing in the plan read.
+      contentArg: { title: "title", body: "description" },
       requires: ["defaultTeam"],
       fixed: (settings) => ({ team: settings["defaultTeam"] ?? "" }),
       // The question first and on its own line: `toSpokenConfirm` says only the first paragraph,

@@ -897,6 +897,19 @@ export interface Tool extends ToolSchema {
   // placeholder here, which it is nowhere later — and returns a refusal in the tool's words, or
   // null. A refusal stops the whole plan: nothing runs and nothing is asked. Read-only.
   preflight?: (args: ToolInput, deps: StepCheckDeps) => Promise<string | null>;
+  // This tool CREATES something whose content matters, and these are the arguments that hold its
+  // title and its body (a connector's `create_issue`). Read by `checkUnreadContent`
+  // (core/chain.ts) to refuse a create that would carry only a made-up title when the user pointed
+  // at something nothing in the plan read. Declarative: the planner never knows which tool it is.
+  contentArg?: { readonly title: string; readonly body: string };
+  // Whether a step of this tool READS WHAT THE USER IS POINTING AT — the open email, the
+  // clipboard or selection, the schedule — so a plan containing it has used that content
+  // (`checkUnreadContent`). A function when it depends on the call: `sendMessage` reads the
+  // clipboard itself only when it was given no `notes`. Absent means it does not.
+  //
+  // Deliberately absent on tools that read something ELSE: a tracker search or memory lookup is
+  // not "this email", and must not excuse a create that invented its content.
+  readsContext?: boolean | ((args: ToolInput) => boolean);
   // How to describe this action to the user at the confirm gate. The planner calls this with the
   // RESOLVED args, so the user always approves the concrete action ("Send to #design-team?"),
   // never the vague one they typed ("send to the team"). `dangerous` tools should define it.

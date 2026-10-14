@@ -123,6 +123,10 @@ export interface ConnectorToolDef {
   // Anything specific in the sentence (an issue number, a repository) must come from `args` and
   // `settings`, which are ours, and never be lifted out of `text`.
   failure?: (text: string, args: ToolInput, settings: ConnectorSettings) => string | null;
+  // For a tool that CREATES something: which of its arguments are the title and the body. Copied
+  // onto the built Tool as `Tool.contentArg`, so the planner's `checkUnreadContent` can refuse a
+  // create carrying only a made-up title (core/chain.ts). Pinned here, never from the server.
+  contentArg?: { readonly title: string; readonly body: string };
 }
 
 // One app reachable over MCP.

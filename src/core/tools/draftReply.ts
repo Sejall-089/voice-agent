@@ -40,6 +40,8 @@ export const draftReplyTool: Tool = {
   },
   risk: "caution",
   background: "foreground-only",
+  // Reads the open email it replies to (core/chain.ts, `checkUnreadContent`).
+  readsContext: true,
   narrate: (): string => "Reading the open email and drafting a reply…",
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const instruction = requiredInstruction(input);

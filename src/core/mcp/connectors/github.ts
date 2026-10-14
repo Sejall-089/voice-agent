@@ -86,6 +86,9 @@ export const githubConnector: ConnectorDef = {
       // Something appears in a repository other people read, under the user's name, with no
       // undo this app can offer. The dialog shows the whole of it first.
       risk: "dangerous",
+      // What the issue SAYS: the planner refuses a create with a made-up title and no body when
+      // the user pointed at something nothing in the plan read.
+      contentArg: { title: "title", body: "body" },
       requires: ["owner", "repo"],
       fixed: (settings) => ({ method: "create", ...pinned(settings) }),
       // The question first and on its own line: `toSpokenConfirm` says only the first paragraph,
