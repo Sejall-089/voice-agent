@@ -14,8 +14,10 @@
 // cost you something. They register their own hotkey and never touch the app's; the app can
 // stay running.
 //
-// `dismissed-then-again` additionally makes two real planning calls on the API key in .env. It
-// executes no tool: both questions are dismissed, so no email is read and nothing is created.
+// `dismissed-then-again` additionally makes two real planning calls on the API key in .env —
+// but only with REAL_MODEL=1; without it, it prints what it would call and exits before opening
+// anything (tests/eval/realModel.ts). It executes no tool: both questions are dismissed, so no
+// email is read and nothing is created.
 //
 // WHY A RUNNER. The scripts are TypeScript that import the app's real WindowsShell and hotkey
 // handler, and they have to run inside Electron's MAIN process (a real BrowserWindow, real

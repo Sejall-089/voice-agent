@@ -4,5 +4,7 @@
     "gpt-5": { "input": 1.25, "cachedInput": 0.125, "output": 10.0 },
     "gpt-5-mini": { "input": 0.25, "cachedInput": 0.025, "output": 2.0 },
     "claude-sonnet-4-6": { "input": 3.0, "cachedInput": 0.3, "output": 15.0 }
-  }
+  },
+  "_dryRunNote": "What ONE real-model call is assumed to use when an eval or recon script prints its dry-run estimate (tests/eval/realModel.ts). From the OpenAI usage page, 2026-10: about 900 output tokens a request on gpt-5, 87.6% of input cached. An estimate for planning-sized calls, not a measurement of any one script.",
+  "dryRunEstimate": { "promptTokens": 6800, "cachedTokens": 5950, "outputTokens": 900 }
 }

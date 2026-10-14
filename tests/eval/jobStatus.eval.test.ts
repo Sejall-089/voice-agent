@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { afterAll, describe, expect, it } from "vitest";
 import { canonicalToolName } from "../../src/core/chain.ts";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { realModelGate } from "./realModel.ts";
 import { CONNECTORS, loadConnectorTools } from "../../src/core/mcp/load.ts";
 import { UnavailableConnection } from "../../src/core/mcp/SdkConnection.ts";
 import { captureContext } from "../../src/core/planner.ts";
@@ -20,7 +20,7 @@ import type { ToolChoice } from "../../src/core/types.ts";
 //
 // OPT-IN BY ITS OWN FLAG — a key being present is not permission to spend it:
 //
-//     M23_STATUS_EVAL=1 npx vitest run tests/eval/jobStatus.eval.test.ts
+//     M23_STATUS_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/jobStatus.eval.test.ts
 //
 // COST: 20 phrasings x TRIALS (default 3) = 60 `chooseTool` calls, plus the SDK's own retries.
 //
@@ -39,7 +39,7 @@ import type { ToolChoice } from "../../src/core/types.ts";
 const PROVIDER = process.env["LLM_PROVIDER"];
 const KEY =
   PROVIDER === "anthropic" ? process.env["ANTHROPIC_API_KEY"] : process.env["OPENAI_API_KEY"];
-const CONFIGURED = process.env["M23_STATUS_EVAL"] === "1" && Boolean(PROVIDER) && Boolean(KEY);
+const SELECTED = process.env["M23_STATUS_EVAL"] === "1" && Boolean(PROVIDER) && Boolean(KEY);
 const TRIALS = Math.max(1, Number(process.env["M23_STATUS_TRIALS"] ?? "3") || 3);
 
 interface Case {
@@ -131,8 +131,18 @@ function describeChoice(choice: ToolChoice): string {
 
 const rows: { phrase: string; kind: string; correct: number; chosen: string[] }[] = [];
 
+// DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): M23_STATUS_EVAL chooses this eval;
+// REAL_MODEL=1 is what spends, under the per-run cap.
+const GATE = realModelGate({
+  name: "jobStatus routing eval",
+  plannedCalls: CASES.length * TRIALS,
+  selected: SELECTED,
+  howToRun: "M23_STATUS_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/jobStatus.eval.test.ts",
+});
+const CONFIGURED = GATE.real;
+
 describe.skipIf(!CONFIGURED)("does the REAL model route job questions to jobStatus (M23)", () => {
-  const llm = CONFIGURED ? createLLMClient() : null;
+  const llm = CONFIGURED ? GATE.client() : null;
 
   it.each(CASES.map((entry) => [entry.phrase, entry] as const))(
     `%j, x${TRIALS}`,
@@ -192,10 +202,8 @@ describe.skipIf(!CONFIGURED)("does the REAL model route job questions to jobStat
 });
 
 describe("jobStatus routing eval", () => {
-  it("is skipped unless M23_STATUS_EVAL=1 and LLM_PROVIDER are set", () => {
-    if (!CONFIGURED) {
-      console.log("  jobStatus routing eval SKIPPED: M23_STATUS_EVAL is not 1 (it costs real API calls).");
-    }
+  it("is a dry run unless M23_STATUS_EVAL=1, LLM_PROVIDER and REAL_MODEL=1 are set", () => {
+    console.log(GATE.line);
     expect(true).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildRegistry, toToolSchemas } from "../../src/core/registry.ts";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { realModelGate } from "./realModel.ts";
 import { CONNECTORS, loadConnectorTools } from "../../src/core/mcp/load.ts";
 import { UnavailableConnection } from "../../src/core/mcp/SdkConnection.ts";
 import type { CapturedContext } from "../../src/core/types.ts";
@@ -22,7 +22,9 @@ import type { CapturedContext } from "../../src/core/types.ts";
 // OPT-IN BY ITS OWN FLAG, for the reason tests/eval/toolChoice.eval.test.ts learned the
 // expensive way: a key being present is not permission to spend it.
 //
-//     M19_PLAN_EVAL=1 npx vitest run tests/eval/planChoice.eval.test.ts
+//     M19_PLAN_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/planChoice.eval.test.ts
+//
+// (Without REAL_MODEL=1 it is a dry run: the call count and an estimated cost, and no call.)
 //
 // TWO CONTEXTS, AND THE DIFFERENCE BETWEEN THEM IS A FINDING. The first version of this file
 // handed the model an active window title ("... - Gmail"). The running app never does:
@@ -40,7 +42,7 @@ import type { CapturedContext } from "../../src/core/types.ts";
 const PROVIDER = process.env["LLM_PROVIDER"];
 const KEY =
   PROVIDER === "anthropic" ? process.env["ANTHROPIC_API_KEY"] : process.env["OPENAI_API_KEY"];
-const CONFIGURED = process.env["M19_PLAN_EVAL"] === "1" && Boolean(PROVIDER) && Boolean(KEY);
+const SELECTED = process.env["M19_PLAN_EVAL"] === "1" && Boolean(PROVIDER) && Boolean(KEY);
 
 const BUG_CHAIN = ["readEmail", "linear__create_issue", "sendMessage"];
 
@@ -245,7 +247,8 @@ const results: {
   note: string;
 }[] = [];
 
-describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19)", () => {
+// Every call a run makes, worked out BEFORE anything is called, so a dry run can say how many.
+function plannedRuns() {
   // WHICH RUN. One trial of a model's choice is an anecdote: the live-failing phrase passed its
   // first single trial here, having failed twice in the app. So a wording change is measured on
   // a small fixed set, several times, before and after.
@@ -339,12 +342,36 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
         : set === "verbs"
           ? [...longfix, ...verbControls]
           : selected.map((entry) => ({ ...entry, times: trials }));
-  const runs = counted.flatMap((entry) =>
+  return counted.flatMap((entry) =>
     Array.from({ length: entry.times }, (_, index) => ({ ...entry, trial: index + 1 })),
   );
-  for (const { phrase, expected, seen, trial } of runs) {
+}
+
+const RUNS = plannedRuns();
+
+// DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): M19_PLAN_EVAL chooses this eval;
+// REAL_MODEL=1 is what spends, under the per-run cap.
+const GATE = realModelGate({
+  name: `plan-choice eval (M19_PLAN_SET=${process.env["M19_PLAN_SET"] ?? "all"})`,
+  plannedCalls: RUNS.length,
+  selected: SELECTED,
+  howToRun: "M19_PLAN_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/planChoice.eval.test.ts",
+});
+const CONFIGURED = GATE.real;
+const llm = CONFIGURED ? GATE.client() : null;
+
+describe("plan-choice eval configuration", () => {
+  it("says what a real run would call and cost", () => {
+    console.log(GATE.line);
+    expect(typeof CONFIGURED).toBe("boolean");
+  });
+});
+
+describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19)", () => {
+  for (const { phrase, expected, seen, trial } of RUNS) {
     it(`[${seen.label}] #${trial} "${phrase}" -> ${expected.join(" > ")}`, async () => {
-      const choice = await createLLMClient().chooseTool(phrase, seen.context, MENU, null);
+      if (llm === null) throw new Error("the plan-choice eval is a dry run");
+      const choice = await llm.chooseTool(phrase, seen.context, MENU, null);
 
       // A chat reply IS a choice, and its words are the diagnosis — the planner logs a miss
       // with no text, so this is the only place they are ever recorded.

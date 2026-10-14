@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildRegistry, toToolSchemas } from "../../src/core/registry.ts";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { realModelGate } from "./realModel.ts";
 import { loadConnectorTools } from "../../src/core/mcp/load.ts";
 import { UnavailableConnection } from "../../src/core/mcp/SdkConnection.ts";
 import type { ActionLogEntry, CapturedContext, ToolChoice } from "../../src/core/types.ts";
@@ -27,7 +27,7 @@ import type { ActionLogEntry, CapturedContext, ToolChoice } from "../../src/core
 //
 // OPT-IN BY ITS OWN FLAG — a key being present is not permission to spend it:
 //
-//     M21_REFERENCE_EVAL=1 npx vitest run tests/eval/unknownReference.eval.test.ts
+//     M21_REFERENCE_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/unknownReference.eval.test.ts
 //
 // EVERY CASE IS RUN SEVERAL TIMES (CLAUDE.md: one trial is an anecdote) and passes at 4 of 5.
 // THE CONTEXT IS WRITTEN OUT PER CASE, clipboard included. That is not tidiness: the first
@@ -60,7 +60,7 @@ import type { ActionLogEntry, CapturedContext, ToolChoice } from "../../src/core
 // 5 per cell: enough to show the direction (0 to 5), not enough to promise 5 of 5 forever.
 
 const PROVIDER = process.env["LLM_PROVIDER"];
-const ENABLED = process.env["M21_REFERENCE_EVAL"] === "1" && PROVIDER !== undefined;
+const SELECTED = process.env["M21_REFERENCE_EVAL"] === "1" && PROVIDER !== undefined;
 const TRIALS = Number(process.env["EVAL_TRIALS"] ?? 5);
 const PASS_AT = Math.ceil(TRIALS * 0.8);
 
@@ -229,6 +229,17 @@ const CASES: Case[] = [
   },
 ];
 
+// DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): M21_REFERENCE_EVAL chooses this eval;
+// REAL_MODEL=1 is what spends, under the per-run cap.
+const GATE = realModelGate({
+  name: "unknown-reference eval",
+  plannedCalls: CASES.length * TRIALS,
+  selected: SELECTED,
+  howToRun: "M21_REFERENCE_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/unknownReference.eval.test.ts",
+});
+const ENABLED = GATE.real;
+const llm = ENABLED ? GATE.client() : null;
+
 const summary: string[] = [];
 
 describe.skipIf(!ENABLED)(`unknown-reference eval (${PROVIDER ?? "no provider"}, ${TRIALS} trials each)`, () => {
@@ -240,7 +251,7 @@ describe.skipIf(!ENABLED)(`unknown-reference eval (${PROVIDER ?? "no provider"},
     it(
       `[${testCase.group}] ${testCase.name}`,
       async () => {
-        const llm = createLLMClient();
+        if (llm === null) throw new Error("the unknown-reference eval is a dry run");
         const verdicts: Verdict[] = [];
         for (let i = 0; i < TRIALS; i++) {
           const choice = await llm.chooseTool(testCase.instruction, testCase.context, TOOLS, testCase.previous);
@@ -259,8 +270,8 @@ describe.skipIf(!ENABLED)(`unknown-reference eval (${PROVIDER ?? "no provider"},
   }
 });
 
-describe.skipIf(ENABLED)("unknown-reference eval", () => {
-  it("is skipped unless M21_REFERENCE_EVAL=1 and LLM_PROVIDER are set", () => {
-    console.log("  unknown-reference eval SKIPPED: M21_REFERENCE_EVAL is not 1 (it costs real API calls).");
+describe("unknown-reference eval", () => {
+  it("says whether it runs for real (M21_REFERENCE_EVAL=1, LLM_PROVIDER, REAL_MODEL=1) and what it would cost", () => {
+    console.log(GATE.line);
   });
 });

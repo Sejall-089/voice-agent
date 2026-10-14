@@ -13,7 +13,7 @@ import { reportUsage, usageFromOpenAI, type LLMPurpose, type UsageSink } from ".
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
-const PLANNER_MODEL = "gpt-5";
+export const PLANNER_MODEL = "gpt-5";
 
 // Reasoning tokens come out of the same allowance as the tool call itself (§3a).
 //

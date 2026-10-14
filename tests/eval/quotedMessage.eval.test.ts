@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildRegistry, toToolSchemas } from "../../src/core/registry.ts";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { realModelGate } from "./realModel.ts";
 import { loadConnectorTools } from "../../src/core/mcp/load.ts";
 import { UnavailableConnection } from "../../src/core/mcp/SdkConnection.ts";
 import type { CapturedContext, ToolChoice } from "../../src/core/types.ts";
@@ -21,7 +21,7 @@ import type { CapturedContext, ToolChoice } from "../../src/core/types.ts";
 //
 // OPT-IN BY ITS OWN FLAG:
 //
-//     M21_QUOTED_EVAL=1 npx vitest run tests/eval/quotedMessage.eval.test.ts
+//     M21_QUOTED_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/quotedMessage.eval.test.ts
 //
 // THE CONTEXT IS WRITTEN OUT PER CASE, clipboard included (CLAUDE.md: what the model was shown
 // is part of the result). Each case is run EVAL_TRIALS times (default 5) and passes at 4 of 5.
@@ -47,7 +47,7 @@ import type { CapturedContext, ToolChoice } from "../../src/core/types.ts";
 // actual clipboard, which nothing recorded.
 
 const PROVIDER = process.env["LLM_PROVIDER"];
-const ENABLED = process.env["M21_QUOTED_EVAL"] === "1" && PROVIDER !== undefined;
+const SELECTED = process.env["M21_QUOTED_EVAL"] === "1" && PROVIDER !== undefined;
 const TRIALS = Number(process.env["EVAL_TRIALS"] ?? 5);
 const PASS_AT = Math.ceil(TRIALS * 0.8);
 
@@ -124,6 +124,17 @@ const CASES: Case[] = [
   },
 ];
 
+// DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): M21_QUOTED_EVAL chooses this eval;
+// REAL_MODEL=1 is what spends, under the per-run cap.
+const GATE = realModelGate({
+  name: "quoted-message eval",
+  plannedCalls: CASES.length * TRIALS,
+  selected: SELECTED,
+  howToRun: "M21_QUOTED_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/quotedMessage.eval.test.ts",
+});
+const ENABLED = GATE.real;
+const llm = ENABLED ? GATE.client() : null;
+
 const summary: string[] = [];
 
 describe.skipIf(!ENABLED)(`quoted-message eval (${PROVIDER ?? "no provider"}, ${TRIALS} trials each)`, () => {
@@ -133,7 +144,7 @@ describe.skipIf(!ENABLED)(`quoted-message eval (${PROVIDER ?? "no provider"}, ${
     it(
       testCase.name,
       async () => {
-        const llm = createLLMClient();
+        if (llm === null) throw new Error("the quoted-message eval is a dry run");
         const seen: { ok: boolean; saw: string }[] = [];
         for (let i = 0; i < TRIALS; i++) {
           const choice = await llm.chooseTool(testCase.instruction, testCase.context, TOOLS, null);
@@ -151,8 +162,8 @@ describe.skipIf(!ENABLED)(`quoted-message eval (${PROVIDER ?? "no provider"}, ${
   }
 });
 
-describe.skipIf(ENABLED)("quoted-message eval", () => {
-  it("is skipped unless M21_QUOTED_EVAL=1 and LLM_PROVIDER are set", () => {
-    console.log("  quoted-message eval SKIPPED: M21_QUOTED_EVAL is not 1 (it costs real API calls).");
+describe("quoted-message eval", () => {
+  it("says whether it runs for real (M21_QUOTED_EVAL=1, LLM_PROVIDER, REAL_MODEL=1) and what it would cost", () => {
+    console.log(GATE.line);
   });
 });

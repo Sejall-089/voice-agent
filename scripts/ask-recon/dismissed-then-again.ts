@@ -1,9 +1,11 @@
 // Recon: dismiss one question, give the same instruction again — does a REAL question appear?
 //
-//   node scripts/ask-recon/run.mjs dismissed-then-again
+//   node scripts/ask-recon/run.mjs dismissed-then-again               (dry: prints, calls nothing)
+//   REAL_MODEL=1 node scripts/ask-recon/run.mjs dismissed-then-again  (the real run)
 //
-// !! SENDS REAL KEYSTROKES (Ctrl+Alt+Shift+F9, Escape) AND FLASHES A WINDOW for up to a minute.
-// !! MAKES TWO REAL PLANNING CALLS on the key in .env. See run.mjs. Do not type while it runs.
+// !! WITH REAL_MODEL=1: SENDS REAL KEYSTROKES (Ctrl+Alt+Shift+F9, Escape) AND FLASHES A WINDOW
+// !! for up to a minute, and MAKES TWO REAL PLANNING CALLS on the key in .env. See run.mjs.
+// !! Do not type while it runs.
 //
 // WHY THIS EXISTS. Reported live (M21): "a chain asks which channel I mean; while the question
 // is open I pressed the instruction hotkey; the question vanished and a fresh, empty bar
@@ -53,7 +55,7 @@ import { createRunInstruction } from "../../src/main/runInstruction.ts";
 import { Planner } from "../../src/core/planner.ts";
 import { buildRegistry } from "../../src/core/registry.ts";
 import { InMemoryChainState } from "../../src/core/chainState.ts";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { realModelGate } from "../../tests/eval/realModel.ts";
 import { createDatabase } from "../../src/core/memory/db.ts";
 import { SqliteMemory } from "../../src/core/memory/SqliteMemory.ts";
 import { loadConnectorTools } from "../../src/core/mcp/load.ts";
@@ -87,6 +89,20 @@ class GmailWithAnEmailOpen extends UnavailableGmail {
     return Promise.resolve(true);
   }
 }
+
+// DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): without it, this prints the two planning
+// calls it would make and their estimated cost, and exits before any window or key press. With
+// it, both calls go through the per-run cap and print a running count. `repoRoot` is passed
+// because this file runs bundled, where `import.meta.url` does not exist.
+const GATE = realModelGate({
+  name: "ask-recon dismissed-then-again",
+  plannedCalls: 2,
+  selected: true,
+  howToRun: "REAL_MODEL=1 node scripts/ask-recon/run.mjs dismissed-then-again",
+  repoRoot: REPO,
+});
+console.log(GATE.line);
+if (!GATE.real) process.exit(0);
 
 // A window that will not go away is the worst thing this script can leave behind, so it cannot:
 // whatever happens below — a hang, a throw, a model that never answers — it exits.
@@ -137,7 +153,7 @@ void app.whenReady().then(async () => {
 
   const chain = new InMemoryChainState();
   const planner = new Planner(
-    createLLMClient(),
+    GATE.client(),
     shell,
     buildRegistry({ gmail: true, connectors }),
     memory,

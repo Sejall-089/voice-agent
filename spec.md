@@ -374,6 +374,34 @@ so which call costs what could not be seen from the app.
 - **Not counted:** the OpenAI SDK's own automatic retries after a failed request (a failed
   request has no usage block).
 
+## 3d. Real-model spend in evals and recon scripts (added 2026-10-15)
+
+OpenAI credits ran out during M22 and the opt-in evals were the likely cause: each eval was
+opt-in by its own flag, and several flags at once, or a raised trial count, was a full pass
+nobody had priced. Every eval and recon script that can call a real model now goes through one
+gate, `tests/eval/realModel.ts` (test infrastructure; nothing under `src/` imports it):
+
+- **Dry by default.** Without `REAL_MODEL=1` it prints the planned call count and an estimated
+  cost and makes no call. The per-eval flag (`M23_STATUS_EVAL=1`, …) still chooses which eval;
+  `REAL_MODEL=1` is what spends. A recon script exits before opening any window.
+- **Hard cap: 60 real calls per run**, across every test file of one vitest run. Files run in
+  separate processes, so each call claims a numbered slot file in a per-run temp folder,
+  created with the exclusive flag — two processes cannot take the same number, and no call is
+  sent without a slot. An eval that plans more calls than the cap is refused up front.
+  `REAL_MODEL_MAX_CALLS=<n>` sets a different cap; above 60 it also needs
+  `REAL_MODEL_ABOVE_CAP=1`, and without it the run is refused outright rather than capped at 60.
+- **A running count and cost**, one line per real call (§3c's usage, priced from
+  `llm-prices.json`).
+- **Refused from `.env`.** Any `REAL_MODEL…` setting in `.env` refuses the run: a standing
+  permission in a file is how a key that was "always present" became permission to spend it.
+- The dry estimate uses `dryRunEstimate` in `llm-prices.json` (a planning-sized call: 6,800
+  prompt tokens, 5,950 cached, 900 output — from the 2026-10 usage page). `complete`-only evals
+  are overstated by it.
+- **Not counted:** the SDK's own automatic retries after a failed request.
+- `tests/realModelGuard.test.ts` pins the policy, the cap (a fake provider is asked exactly
+  `cap` times), the counter, and that every file under `tests/eval/` and `scripts/` that can
+  build a model client builds it only inside the gate.
+
 ---
 
 ## 4. The OSShell interface (the portability contract)

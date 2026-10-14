@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { afterAll, describe, expect, it } from "vitest";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { realModelGate } from "./realModel.ts";
 import { FORMAT_SYSTEM, isMessage } from "../../src/core/tools/sendMessage.ts";
 
 // WHAT DOES THE REAL FORMATTER DO WITH TEXT THAT IS NOT NOTES? (M21)
@@ -19,7 +19,7 @@ import { FORMAT_SYSTEM, isMessage } from "../../src/core/tools/sendMessage.ts";
 //
 // OPT-IN BY ITS OWN FLAG:
 //
-//     M21_FORMATTER_EVAL=1 npx vitest run tests/eval/sendFormatter.eval.test.ts
+//     M21_FORMATTER_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/sendFormatter.eval.test.ts
 //
 // COST: 5 inputs, 14 `complete` calls in all. Each case passes at 4 of 5 (or 2 of 3).
 //
@@ -37,7 +37,7 @@ import { FORMAT_SYSTEM, isMessage } from "../../src/core/tools/sendMessage.ts";
 // unit test. Every refusal in both runs was the literal word NO_NOTES; the pattern half of
 // `isMessage` was never the thing that caught one. Small trial counts: a direction, not a rate.
 
-const ENABLED = process.env["M21_FORMATTER_EVAL"] === "1" && process.env["LLM_PROVIDER"] !== undefined;
+const SELECTED = process.env["M21_FORMATTER_EVAL"] === "1" && process.env["LLM_PROVIDER"] !== undefined;
 
 interface Case {
   name: string;
@@ -62,6 +62,18 @@ const CASES: Case[] = [
   { name: "a note that is a question for the team", input: "can someone review PR 212 before friday?", trials: 2, message: true },
 ];
 
+// DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): M21_FORMATTER_EVAL chooses this eval;
+// REAL_MODEL=1 is what spends, under the per-run cap. These are `complete` calls — shorter than
+// a planning call, so the dry estimate (sized for planning) overstates them.
+const GATE = realModelGate({
+  name: "send formatter eval",
+  plannedCalls: CASES.reduce((sum, testCase) => sum + testCase.trials, 0),
+  selected: SELECTED,
+  howToRun: "M21_FORMATTER_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/sendFormatter.eval.test.ts",
+});
+const ENABLED = GATE.real;
+const llm = ENABLED ? GATE.client() : null;
+
 const summary: string[] = [];
 
 describe.skipIf(!ENABLED)("send formatter eval", () => {
@@ -71,7 +83,7 @@ describe.skipIf(!ENABLED)("send formatter eval", () => {
     it(
       testCase.name,
       async () => {
-        const llm = createLLMClient();
+        if (llm === null) throw new Error("the send formatter eval is a dry run");
         const replies: string[] = [];
         for (let i = 0; i < testCase.trials; i++) replies.push(await llm.complete(FORMAT_SYSTEM, testCase.input));
 
@@ -87,8 +99,8 @@ describe.skipIf(!ENABLED)("send formatter eval", () => {
   }
 });
 
-describe.skipIf(ENABLED)("send formatter eval", () => {
-  it("is skipped unless M21_FORMATTER_EVAL=1 and LLM_PROVIDER are set", () => {
-    console.log("  send formatter eval SKIPPED: M21_FORMATTER_EVAL is not 1 (it costs real API calls).");
+describe("send formatter eval", () => {
+  it("says whether it runs for real (M21_FORMATTER_EVAL=1, LLM_PROVIDER, REAL_MODEL=1) and what it would cost", () => {
+    console.log(GATE.line);
   });
 });

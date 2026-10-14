@@ -2,7 +2,7 @@ import "dotenv/config";
 import { describe, it, expect, afterAll } from "vitest";
 import { Planner } from "../../src/core/planner.ts";
 import { buildRegistry } from "../../src/core/registry.ts";
-import { createLLMClient } from "../../src/core/llm/factory.ts";
+import { realModelGate } from "./realModel.ts";
 import { createDatabase } from "../../src/core/memory/db.ts";
 import { SqliteMemory } from "../../src/core/memory/SqliteMemory.ts";
 import { MockShell } from "../../src/main/shell/MockShell.ts";
@@ -77,7 +77,17 @@ const KEY =
 // The same reasoning `POINTING_ENABLED` exists for (spec.md §3): a credential that is present
 // for another purpose must never be read as permission to spend it.
 const OPTED_IN = process.env["M18_TOOL_CHOICE_EVAL"] === "1";
-const CONFIGURED = OPTED_IN && Boolean(PROVIDER) && Boolean(KEY);
+const SELECTED = OPTED_IN && Boolean(PROVIDER) && Boolean(KEY);
+
+// AND DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): the flag above chooses this eval;
+// REAL_MODEL=1 is what spends, under the per-run cap.
+const GATE = realModelGate({
+  name: "tool-choice eval",
+  plannedCalls: CASES.length,
+  selected: SELECTED,
+  howToRun: "M18_TOOL_CHOICE_EVAL=1 REAL_MODEL=1 npm run eval",
+});
+const CONFIGURED = GATE.real;
 
 // THE MENU IS THE ONE THIS INSTALL ACTUALLY OFFERS, not the base registry the other two eval
 // files use. That is a deliberate departure: tool choice gets HARDER as the menu grows, and
@@ -108,7 +118,7 @@ async function choose(phrase: string): Promise<string> {
     context: { selectedText: null, activeApp: null, activeWindowTitle: null },
   });
 
-  const planner = new Planner(createLLMClient(), shell, MENU, memory, memory);
+  const planner = new Planner(GATE.client(), shell, MENU, memory, memory);
   const outcome = await planner.run(phrase);
   return outcome.tool ?? `(none: ${outcome.status})`;
 }
@@ -186,7 +196,6 @@ const SELECTION_PHRASES: readonly Case[] = [
 ];
 
 const SELECTION_FILE = process.env["M18_SELECTION_FILE"];
-const SELECTION_OPTED_IN = CONFIGURED && process.env["M18_SELECTION_EVAL"] === "1";
 const RUNS = 3;
 
 function loadFixture(path: string | undefined): string | null {
@@ -216,7 +225,8 @@ interface Pick {
 const picks: Pick[] = [];
 
 async function pickOnce(phrase: string, selectedText: string | null): Promise<{ picked: string; said: string | null }> {
-  const choice = await createLLMClient().chooseTool(
+  if (selectionClient === null) throw new Error("the selected-text eval is a dry run");
+  const choice = await selectionClient.chooseTool(
     phrase,
     { selectedText, activeApp: null, activeWindowTitle: null },
     toToolSchemas(MENU),
@@ -232,6 +242,17 @@ async function pickOnce(phrase: string, selectedText: string | null): Promise<{ 
   }
   return { picked: `(${choice.kind})`, said: null };
 }
+
+// Every call this block makes, counted from its own loops: 5 x 1 + 5 x 3 + 5 x 3 = 35.
+const SELECTION_GATE = realModelGate({
+  name: "selected-text eval",
+  plannedCalls: SELECTIONS.reduce((sum, selection) => sum + selection.runs * SELECTION_PHRASES.length, 0),
+  selected: SELECTED && process.env["M18_SELECTION_EVAL"] === "1",
+  howToRun:
+    'M18_TOOL_CHOICE_EVAL=1 M18_SELECTION_EVAL=1 M18_SELECTION_FILE=<path> REAL_MODEL=1 npx vitest run tests/eval/toolChoice.eval.test.ts -t "selected text"',
+});
+const SELECTION_OPTED_IN = SELECTION_GATE.real;
+const selectionClient = SELECTION_OPTED_IN ? SELECTION_GATE.client() : null;
 
 describe.skipIf(!SELECTION_OPTED_IN)("selected text vs a clear action instruction (M18 live finding)", () => {
   it("has the user's selection file to test with", () => {
@@ -293,18 +314,12 @@ describe.skipIf(!SELECTION_OPTED_IN)("selected text vs a clear action instructio
   });
 });
 
-// A standing note rather than a test, so a silent skip is never mistaken for a pass. The usual
-// reason it skips is that nobody opted in — which is the intended default, since every run of
-// this file costs real API calls.
+// A standing note rather than a test, so a silent skip is never mistaken for a pass: what each
+// block would call and cost, and what it takes to run it for real (tests/eval/realModel.ts).
 describe("tool-choice eval configuration", () => {
-  it("says out loud whether the real-model eval ran", () => {
-    if (!CONFIGURED) {
-      const why = !OPTED_IN
-        ? "M18_TOOL_CHOICE_EVAL is not 1 (this is the default — it costs real API calls)"
-        : `LLM_PROVIDER=${PROVIDER ?? "unset"} has no matching API key`;
-      console.log(`\n  tool-choice eval SKIPPED: ${why}.`);
-      console.log("  To run it:  M18_TOOL_CHOICE_EVAL=1 npm run eval\n");
-    }
+  it("says out loud whether the real-model eval ran, and what it would cost", () => {
+    console.log(GATE.line);
+    console.log(SELECTION_GATE.line);
     expect(typeof CONFIGURED).toBe("boolean");
   });
 });

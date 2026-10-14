@@ -912,6 +912,23 @@ token, M22, name a test channel instead: the message goes to the channel you nam
 npm run eval
 ```
 
+**Nothing under `tests/eval/` or `scripts/` calls a real model unless you say so twice.** The
+evals that measure the real model (tool choice, plan choice, jobStatus routing, and so on) and
+the recon scripts that call one are **dry by default**: each prints how many real calls it
+would make and roughly what they would cost, then calls nothing. To run one for real, give its
+own flag **and** `REAL_MODEL=1` on the command line, e.g.
+`M23_STATUS_EVAL=1 REAL_MODEL=1 npx vitest run tests/eval/jobStatus.eval.test.ts`.
+
+- **A hard cap of 60 real calls per run**, counted across every test file in the run. An eval
+  that plans more than the cap is refused before its first call. `REAL_MODEL_MAX_CALLS=<n>`
+  lowers it; raising it above 60 also needs `REAL_MODEL_ABOVE_CAP=1`.
+- **A running count.** Every real call prints its number, its estimated cost and the run's
+  total so far.
+- **`REAL_MODEL` is refused if it is written in `.env`.** It belongs on the command line of the
+  run that means it.
+- The dry estimate assumes a planning-sized call (`dryRunEstimate` in `llm-prices.json`). Plain
+  `npm test` makes no real-model calls; see spec.md §3d.
+
 The eval harness in [`tests/eval/`](tests/eval/) is the demo, as an asserted scenario. It is **one
 continuous thread of state** — not six isolated tests — and prints as a narrative:
 

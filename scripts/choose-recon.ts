@@ -17,9 +17,10 @@
 // discipline as scripts/notion-recon.mjs and scripts/tts-recon.mjs. A probe written against a
 // copy of the prompt would measure the copy.
 //
-//   npx vite-node scripts/choose-recon.ts               # all cases, 3 trials each
-//   npx vite-node scripts/choose-recon.ts --trials 5
-//   npx vite-node scripts/choose-recon.ts --case file-menu
+//   npx vite-node scripts/choose-recon.ts               # DRY: prints the call count and cost
+//   REAL_MODEL=1 npx vite-node scripts/choose-recon.ts  # all cases, 3 trials each, for real
+//   REAL_MODEL=1 npx vite-node scripts/choose-recon.ts --trials 5
+//   REAL_MODEL=1 npx vite-node scripts/choose-recon.ts --case file-menu
 //
 // PROVIDER: whatever LLM_PROVIDER says (openai here, gpt-5), through the app's own factory — so
 // this measures the client the app actually uses, not a hand-rolled request.
@@ -30,6 +31,7 @@ import { renderChooseRequest } from "../src/core/screen/prompt.ts";
 import { resolveChoice } from "../src/core/screen/resolve.ts";
 import { OpenAILLMClient } from "../src/core/llm/openai.ts";
 import { TREES } from "../tests/FakeElements.ts";
+import { realModelGate } from "../tests/eval/realModel.ts";
 import type { ChoiceResult } from "../src/core/types.ts";
 
 function fromEnvFile(key: string): string | undefined {
@@ -168,13 +170,28 @@ const CASES: Case[] = [
   },
 ];
 
+// DRY UNLESS REAL_MODEL=1 (tests/eval/realModel.ts): without it, this prints how many real calls
+// it would make and their estimated cost, and exits. With it, every call goes through the
+// per-run cap and prints a running count and cost. (These are `complete` calls over candidate
+// lists, so the estimate — sized for a planning call — is rough.)
+const gate = realModelGate({
+  name: "choose-recon",
+  plannedCalls: CASES.filter((c) => !ONLY || c.id === ONLY).length * TRIALS,
+  selected: true,
+  howToRun: "REAL_MODEL=1 npx vite-node scripts/choose-recon.ts",
+});
+console.log(gate.line);
+if (!gate.real) process.exit(0);
+
 const apiKey = process.env["OPENAI_API_KEY"] ?? fromEnvFile("OPENAI_API_KEY");
 if (!apiKey) {
   console.error("No OPENAI_API_KEY (env or .env). This probe needs a real key.");
   process.exit(1);
 }
 
-const chooser = new ModelElementChooser({ llm: new OpenAILLMClient(apiKey) });
+const chooser = new ModelElementChooser({
+  llm: gate.client((sink) => new OpenAILLMClient(apiKey, sink)),
+});
 
 // What actually happened on one trial, in terms a person can score.
 function describe(

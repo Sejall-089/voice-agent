@@ -13,7 +13,7 @@ import { reportUsage, usageFromAnthropic, type LLMPurpose, type UsageSink } from
 
 // Model for this provider (spec.md §3). Provider itself is chosen via LLM_PROVIDER —
 // see factory.ts.
-const PLANNER_MODEL = "claude-sonnet-4-6";
+export const PLANNER_MODEL = "claude-sonnet-4-6";
 
 // Headroom for any preamble the model writes before the tool_use block (§3a). A cap the
 // model does not reach costs nothing — raising it does not cost more unless the model actually
