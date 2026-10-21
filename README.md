@@ -484,7 +484,9 @@ hotkey again, it carries on in the background while you say the next thing.
   running, what finished or failed.
 - **Three jobs run at once**; a fourth queues.
 - **Closing the app does not resume anything.** Whatever was still going is marked
-  *interrupted* next time, and says whether its step may have gone through.
+  *interrupted* next time, and says whether its step may have gone through. The pill shows it if
+  it was in the background, or if one of its steps was running when the app closed — even one
+  that never left the bar. One cut off before anything ran is recorded but not shown.
 
 The chime never plays while you are dictating, recording an instruction, or the app is
 speaking; it waits, and plays once afterwards only if something is still waiting. One copy of

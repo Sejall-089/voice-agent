@@ -242,6 +242,111 @@ describe("a restart: interrupted, never resumed", () => {
     });
   }
 
+  // Live finding after M23: a job that never left the bar, killed with the app, showed nowhere
+  // after a restart. Now it is shown ONLY if a step had started — the write-ahead marker is set,
+  // so something may have happened that the user never saw the end of. Cut off while planning or
+  // at its confirm, nothing ran: it is recorded as interrupted and not shown.
+  //
+  // Each attached record below has `background: false` asserted BEFORE the restart, so a pass
+  // cannot come from a fixture that was background all along.
+  for (const [name, make] of [
+    ["InMemoryJobStore", () => {
+      const store = new InMemoryJobStore();
+      return { store, stored: (id: string) => store.records.get(id) };
+    }],
+    ["SqliteJobStore", () => {
+      const db = createDatabase(":memory:");
+      const store = new SqliteJobStore(db);
+      return {
+        store,
+        stored: (id: string) =>
+          db.prepare<[string], { state: string; background: number }>("SELECT state, background FROM jobs WHERE id = ?").get(id),
+      };
+    }],
+  ] as const) {
+    it(`${name}: an ATTACHED job is shown after a restart only if a step was running`, () => {
+      const { store, stored } = make();
+      store.save(record({ id: "attached-mid-step", background: false, state: "running", step: 1, total: 2, tool: "createIssue", inFlightTool: "createIssue", inFlightStep: 1 }));
+      store.save(record({ id: "attached-planning", background: false, state: "running" }));
+      store.save(record({ id: "attached-at-confirm", background: false, state: "running", step: 1, total: 1, tool: "sendMessage" }));
+      store.save(record({ id: "detached-between-steps", background: true, state: "running", step: 2, total: 2, tool: "sendMessage" }));
+      for (const id of ["attached-mid-step", "attached-planning", "attached-at-confirm"]) {
+        expect(Boolean(stored(id)?.background)).toBe(false);
+      }
+
+      expect(store.markInterrupted(5000)).toBe(4);
+      const shown = new Map(store.loadUnacknowledged(0).map((job) => [job.id, job]));
+
+      expect(shown.get("attached-mid-step")).toMatchObject({ state: "interrupted", background: true });
+      expect(shown.get("attached-mid-step")?.result).toContain("may or may not have gone through");
+      // Nothing ran: recorded, not shown.
+      expect(shown.has("attached-planning")).toBe(false);
+      expect(shown.has("attached-at-confirm")).toBe(false);
+      expect(stored("attached-planning")).toMatchObject({ state: "interrupted" });
+      expect(stored("attached-at-confirm")).toMatchObject({ state: "interrupted" });
+      expect(Boolean(stored("attached-planning")?.background)).toBe(false);
+      expect(Boolean(stored("attached-at-confirm")?.background)).toBe(false);
+      // A detached job is unchanged: shown, with no "may have" claim for a step that never ran.
+      expect(shown.get("detached-between-steps")).toMatchObject({ state: "interrupted", background: true });
+      expect(shown.get("detached-between-steps")?.result).not.toContain("may or may not");
+    });
+  }
+
+  it("an attached job cut off mid-step survives a REAL close and reopen, and only that one is shown", () => {
+    const path = tempDb();
+    const first = createDatabase(path);
+    const before = new SqliteJobStore(first);
+    before.save(record({ id: "mid-step", background: false, state: "running", step: 1, total: 1, tool: "sendMessage", inFlightTool: "sendMessage", inFlightStep: 1 }));
+    before.save(record({ id: "planning", background: false, state: "running" }));
+    first.close();
+
+    const second = createDatabase(path);
+    const store = new SqliteJobStore(second);
+    expect(store.markInterrupted(5000)).toBe(2);
+    second.close();
+
+    const third = createDatabase(path);
+    expect(new SqliteJobStore(third).loadUnacknowledged(0)).toMatchObject([{ id: "mid-step", state: "interrupted", background: true }]);
+    expect(third.prepare("SELECT id, state, background FROM jobs ORDER BY id").all()).toEqual([
+      { id: "mid-step", state: "interrupted", background: 1 },
+      { id: "planning", state: "interrupted", background: 0 },
+    ]);
+    third.close();
+  });
+
+  // END TO END through the manager, one attached job per run (a second submission would detach
+  // the first). The app "dies" at the stated point; a new manager over the same store restores.
+  const killedAttached = async (stage: "planning" | "at-confirm" | "mid-step") => {
+    const store = new InMemoryJobStore();
+    const before = new JobManager({ store, now: () => 1000 });
+    const id = before.submit("file this bug and tell the team");
+    if (stage !== "planning") {
+      const gate = before.gateFor(id);
+      await gate.admit({ tools: ["createIssue"], statusOnly: false });
+      await gate.enterStep({ tool: "createIssue", index: 1, total: 1, foregroundOnly: false });
+      await gate.beforeConfirm(); // attached: the bar's own dialog, nothing waits on the pill
+      if (stage === "mid-step") gate.handlerStarting();
+    }
+    expect(before.get(id)).toMatchObject({ attached: true, background: false });
+    const after = new JobManager({ store, now: () => 2000 });
+    expect(after.restore()).toBe(1);
+    return { id, store, after };
+  };
+
+  it("END TO END: an attached job killed MID-STEP is in the pill after a restart, saying it may have gone through", async () => {
+    const { id, after } = await killedAttached("mid-step");
+    expect(after.views().map((job) => job.id)).toEqual([id]);
+    expect(after.get(id)?.result).toContain("may or may not have gone through");
+  });
+
+  it("END TO END: an attached job killed while PLANNING, or AT ITS CONFIRM, is recorded but not shown", async () => {
+    for (const stage of ["planning", "at-confirm"] as const) {
+      const { id, store, after } = await killedAttached(stage);
+      expect(after.views()).toEqual([]);
+      expect(store.records.get(id)).toMatchObject({ state: "interrupted", background: false });
+    }
+  });
+
   it("survives a real close and reopen of the file", () => {
     const path = tempDb();
     const first = createDatabase(path);

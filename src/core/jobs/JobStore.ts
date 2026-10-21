@@ -14,8 +14,11 @@ export interface JobRecord {
   // "status": a question about the jobs themselves. Recorded, never listed.
   kind: "work" | "status";
   state: JobState;
-  // Was this job ever detached from the command bar? Only background jobs are shown in the
-  // pill or reported by `jobStatus`: one the user watched finish in the bar is not news.
+  // Is this job shown as background work? Only these are shown in the pill or reported by
+  // `jobStatus`: one the user watched finish in the bar is not news. Set when the job is
+  // detached from the bar — and at a restart, for an attached job the app closed on while one
+  // of its steps was running (`markInterrupted`): that one may have done something the user
+  // never saw the end of. An attached job cut off before any step ran stays false.
   background: boolean;
   // The user has dismissed it from the pill.
   acknowledged: boolean;
@@ -45,6 +48,12 @@ export interface JobStore {
   // Startup only: every job that was still live when the app last stopped becomes
   // `interrupted`, with a sentence saying whether its step may have gone through. Returns how
   // many. NOTHING IS RESUMED — this is a relabelling and no handler is reachable from it.
+  //
+  // One that was cut off WITH A STEP RUNNING (the write-ahead marker set) is also made
+  // `background`, so it is shown even if it never left the bar (live finding after M23: an
+  // attached job killed mid-step showed nowhere). Planning, or waiting at a confirm, the marker
+  // is not set: such a job is recorded as interrupted and shown only if it was already
+  // background. Its sentence already says "may or may not have gone through".
   markInterrupted(now: number): number;
   // Jobs worth showing after a restart: background and unacknowledged, and either ended
   // since `since` — or failed, expired or interrupted at ANY time. Those three wait for the
@@ -53,6 +62,11 @@ export interface JobStore {
 }
 
 const LIVE: readonly JobState[] = ["queued", "running", "needs-you"];
+
+// The write-ahead marker is set: the app closed while a handler was running.
+function stepWasRunning(record: { inFlightTool: string | null; inFlightStep: number | null }): boolean {
+  return record.inFlightTool !== null && record.inFlightStep !== null;
+}
 const WAITS_TO_BE_SEEN: readonly JobState[] = ["failed", "expired", "interrupted"];
 
 export class InMemoryJobStore implements JobStore {
@@ -68,6 +82,7 @@ export class InMemoryJobStore implements JobStore {
       if (!LIVE.includes(record.state)) continue;
       record.result = interruptedText(record);
       record.state = "interrupted";
+      if (stepWasRunning(record)) record.background = true;
       record.pauseReason = null;
       record.pauseSince = null;
       record.updatedAt = now;
@@ -170,12 +185,16 @@ export class SqliteJobStore implements JobStore {
       .prepare<[], Row>(`SELECT * FROM jobs WHERE state IN ('queued', 'running', 'needs-you')`)
       .all();
     const update = this.db.prepare(
-      `UPDATE jobs SET state = 'interrupted', result = ?, pause_reason = NULL,
+      `UPDATE jobs SET state = 'interrupted', result = ?, background = ?, pause_reason = NULL,
                        pause_since = NULL, updated_at = ?
         WHERE id = ?`,
     );
     const tx = this.db.transaction(() => {
-      for (const row of live) update.run(interruptedText(fromRow(row)), now, row.id);
+      for (const row of live) {
+        const record = fromRow(row);
+        const background = record.background || stepWasRunning(record) ? 1 : 0;
+        update.run(interruptedText(record), background, now, row.id);
+      }
     });
     tx();
     return live.length;

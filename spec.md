@@ -1363,8 +1363,11 @@ and both are drawn as text. Everything the page sends is checked again in main
 (`pill/PillController.ts`): an unknown action, an unknown job, or an action that row is not
 currently offering is dropped.
 
-Only **background** jobs appear — one that was detached at some point. A job the user watched
-finish in the bar is not listed, and neither is a status question.
+Only **background** jobs appear — one that was detached at some point, or, after a restart,
+one the app closed on while a step was running even if it never left the bar (its write-ahead
+marker was set, so it may have done something the user never saw the end of). A job the user
+watched finish in the bar is not listed, nor one cut off before any step ran (planning, or at
+its confirm: recorded as interrupted, not shown), and neither is a status question.
 
 Where it goes is a pure function of the work area in DIP (`core/jobs/pill.ts`, `pillBounds`),
 with no scale factor in it.
@@ -3693,6 +3696,16 @@ Post-v0:
       `tests/background.test.ts`, `tests/singleInstance.test.ts`, `tests/connectingNotice.test.ts`,
       `src/renderer/pill/render.test.ts` (jsdom), plus a detached-confirm block in
       `tests/WindowsShell.capture.test.ts`.
+
+      **Fixed after the build — an attached job killed mid-step** (live finding, 2026-10-21). A
+      job that never left the bar and was killed with the app showed nowhere after a restart.
+      `markInterrupted` now also makes a job `background` when its write-ahead step marker is
+      set (§5c); one cut off while planning or at its confirm is recorded as interrupted and
+      not shown. **Known limit, not fixed:** the marker is set around EVERY handler, read-only
+      ones included, so an app closed during `readEmail` or a long summary shows "may or may not
+      have gone through" for a step that could not have sent anything — the same false alarm a
+      detached job already has. Fixing it would need the step's risk tier recorded when the
+      marker is set. Revisit only if it proves annoying in daily use.
 
       **The `jobStatus` routing eval, against the real model** (asked for; run ONCE,
       2026-10-13; `tests/eval/jobStatus.eval.test.ts`, `M23_STATUS_EVAL=1`). Provider
