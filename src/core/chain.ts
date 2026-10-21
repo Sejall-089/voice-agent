@@ -29,6 +29,10 @@ import type {
 // hit by a model that had misunderstood the request.
 export const MAX_STEPS = 3;
 
+// A plan longer than that. Says what to do instead, in words a person can act on (live finding
+// after M23: four actions in one instruction). Plain ASCII, so it is spoken as written.
+export const OVER_STEP_CAP = `That's more than ${MAX_STEPS} steps. Say the first three, then the rest.`;
+
 // `{step1}` — a whole earlier result, dropped into a text argument.
 //
 // Detection is LENIENT on purpose while the documented form is strict. `{ step 1 }` is not what
@@ -109,13 +113,10 @@ export function validatePlan(
     return { ok: false, reason: "I ended up with no steps to run." };
   }
 
+  // Decided by the PLAN's length alone — never by counting actions in the instruction's words,
+  // which would refuse in code something the model may have planned correctly.
   if (steps.length > MAX_STEPS) {
-    return {
-      ok: false,
-      reason:
-        `That works out as ${steps.length} steps, and I only run up to ${MAX_STEPS} in one go. ` +
-        `Try it as separate instructions.`,
-    };
+    return { ok: false, reason: OVER_STEP_CAP };
   }
 
   for (const [index, step] of steps.entries()) {
@@ -475,6 +476,15 @@ export function previewPlan(steps: readonly PlannedStep[]): string {
 // Each description goes through the shared cleaner rather than being spoken raw: it is model
 // text, and a describe containing an em dash or a bullet would otherwise reach the engine as
 // the one thing M14 established it garbles.
+// The line added to a plan's preview when it ran only after the model was asked again because
+// it had answered with the provider's parallel wrapper (core/llm/toolChoice.ts). The wrapper
+// packed several actions into one "step"; the plan that came back on the retry may have left
+// one out to stay inside the step cap, and nothing else would show it. Plain ASCII, one
+// sentence each, so it is shown and spoken (Piper) as written.
+export function plannedStepsNote(count: number): string {
+  return `I planned ${count} steps. If you asked for more, say the rest after.`;
+}
+
 export function spokenPlan(steps: readonly PlannedStep[]): string {
   const parts = steps.map((step, index) => {
     const said = toSpokenLine(labelFor(step));

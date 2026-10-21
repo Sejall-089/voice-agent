@@ -390,7 +390,7 @@ describe("a plan that cannot run is refused before anything is announced", () =>
     expect(outcome.status).toBe("refused");
     expect(outcome.chain).toEqual({ completed: 0, total: 4 });
     expect(shell.actions.filter((a) => a.kind === "notify")).toEqual([]);
-    expect(shell.results[0]).toMatch(/only run up to 3/i);
+    expect(shell.results[0]).toBe("That's more than 3 steps. Say the first three, then the rest.");
     // Logged as refused, NOT as a miss: spec §8's miss list is a backlog of tools worth
     // building, and "that was four steps" is not a missing tool.
     expect(log.misses).toEqual([]);

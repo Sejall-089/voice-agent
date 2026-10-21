@@ -86,8 +86,8 @@ describe("validatePlan on plans that must be refused before anything runs", () =
 
     const check = validatePlan(plan, TOOLS);
     expect(check.ok).toBe(false);
-    expect(check.ok === false && check.reason).toMatch(/only run up to 3/i);
-    expect(check.ok === false && check.reason).toMatch(/separate instructions/i);
+    // Says what to do instead, and is decided by the plan's length — the instruction is not read.
+    expect(check.ok === false && check.reason).toBe("That's more than 3 steps. Say the first three, then the rest.");
   });
 
   it("refuses a tool that is not in the registry it was given", () => {
@@ -512,7 +512,7 @@ describe("preflightReferences", () => {
       { label: "the same words on a turn that was not refused", entry: row("ok", null, LOGGED) },
       { label: "a plan refused for an unknown tool", entry: row("refused", null, 'My plan for that used a tool I don\'t have ("teleport"), so I didn\'t start it.') },
       { label: "a plan refused for an empty argument", entry: row("refused", null, 'Step 2 of my plan left "channel" empty, so I didn\'t start it.') },
-      { label: "a plan refused for being too long", entry: row("refused", null, "That works out as 4 steps, and I only run up to 3 in one go. Try it as separate instructions.") },
+      { label: "a plan refused for being too long", entry: row("refused", null, "That's more than 3 steps. Say the first three, then the rest.") },
       { label: "a miss, which has no result at all", entry: row("no_tool", null, null) },
     ])("does not match $label", ({ entry }) => {
       expect(isUnknownReferenceRefusal(entry)).toBe(false);

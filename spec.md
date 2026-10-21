@@ -3707,6 +3707,24 @@ Post-v0:
       detached job already has. Fixing it would need the step's risk tier recorded when the
       marker is set. Revisit only if it proves annoying in daily use.
 
+      **Fixed after the build — the provider's parallel wrapper as a plan step** (live finding,
+      2026-10-22, gpt-5-mini at low effort). "summarize this and send to fun then create a issue
+      of body in linear and write in notion" (four actions) came back as one plan,
+      `["functions.summarize", "multi_tool_use.parallel"]`, and was refused as an unknown tool.
+      Now a lone call or a plan step named exactly `multi_tool_use.parallel` is the multi-call
+      case: asked once more with the fixed `PLAN_RETRY_INSTRUCTION`, then refused by
+      `refuseMultiple` (names logged, never `logMiss` — a top-level wrapper used to reach it).
+      Never unwrapped. Any other unknown name is refused as before, with no retry. A plan that
+      ran only after that retry adds "I planned N steps. If you asked for more, say the rest
+      after." to its preview, said as its own utterance — the only sign of an action dropped to
+      fit the cap. A plan over the cap now says "That's more than 3 steps. Say the first three,
+      then the rest." (by step count alone; the instruction's words are not counted). **Not
+      changed, deliberately:** the `plan` tool's "At most 3 steps" — a prompt change needs an
+      eval; revisit if dropped actions show up in daily use. Mutations, each caught: no
+      plan-step check (7 tests), no top-level check (6), a loose match (5), retry on any
+      unknown name (2), second answer unchecked (5), note always shown (3), never shown (1),
+      note merged into the plan's speech (1), cap off by one (6).
+
       **The `jobStatus` routing eval, against the real model** (asked for; run ONCE,
       2026-10-13; `tests/eval/jobStatus.eval.test.ts`, `M23_STATUS_EVAL=1`). Provider
       `openai` (`gpt-5`), 20 phrasings × 3 trials = 60 `chooseTool` calls, the full menu with

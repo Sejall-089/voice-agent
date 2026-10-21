@@ -380,3 +380,167 @@ describe("as a job — attached and detached", () => {
     expect(w.shell.results).toEqual([]);
   });
 });
+
+// THE PROVIDER'S PARALLEL WRAPPER (live finding after M23). gpt-5-mini answered "summarize this and
+// send to fun then create a issue of body in linear and write in notion" with ONE plan call:
+// ["functions.summarize", "multi_tool_use.parallel"] — three actions packed into a "step" named
+// for the wrapper. It is the multi-call case in another shape: retried once with the same fixed
+// text, then refused as one. Exact name only; never unwrapped; never a miss.
+describe("multi_tool_use.parallel: the multi-call case in another shape", () => {
+  const WRAPPER = "multi_tool_use.parallel";
+  const LIVE = "summarize this and send to fun then create a issue of body in linear and write in notion";
+  const wrapperAsStep = planWith([{ tool: "functions.readThing" }, { tool: WRAPPER, arguments: { tool_uses: [] } }]);
+  const wrapperAsCall: ToolChoice = { kind: "tool", name: WRAPPER, input: { tool_uses: [] } };
+  const noteFor = (n: number) => `I planned ${n} steps. If you asked for more, say the rest after.`;
+  const previews = (h: ReturnType<typeof harness>) =>
+    h.shell.actions.filter((action) => action.kind === "notify").map((action) => String(action.payload));
+
+  it("as a PLAN STEP: retried once with the fixed text, and the plan that comes back runs", async () => {
+    const h = harness([wrapperAsStep, plan("readThing", "noteThing")]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.map((ask) => ask.instruction)).toEqual([LIVE, withPlanRetry(LIVE)]);
+    expect(h.ran).toEqual(["readThing", "noteThing"]);
+    expect(outcome).toMatchObject({ status: "ok", chain: { completed: 2, total: 2 } });
+  });
+
+  it("as a TOP-LEVEL call: retried once too — and no longer reaches logMiss", async () => {
+    const h = harness([wrapperAsCall, { kind: "tool", name: "readThing", input: {} }]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.length).toBe(2);
+    expect(h.ran).toEqual(["readThing"]);
+    expect(outcome).toMatchObject({ status: "ok", tool: "readThing" });
+    expect(h.log.misses).toEqual([]);
+  });
+
+  it.each([
+    ["step, then step", wrapperAsStep, wrapperAsStep],
+    ["call, then call", wrapperAsCall, wrapperAsCall],
+    ["step, then call", wrapperAsStep, wrapperAsCall],
+  ] as const)("TWICE (%s): refused as multi-call, exactly 2 provider calls, nothing run, no miss", async (_label, first, second) => {
+    const h = harness([first, second]);
+    let missCalls = 0;
+    const originalMiss = h.log.logMiss.bind(h.log);
+    h.log.logMiss = (instruction: string): void => {
+      missCalls += 1;
+      originalMiss(instruction);
+    };
+    const outcome = await h.planner.run(LIVE);
+
+    expect(h.llm.asked.length).toBe(2);
+    expect(h.ran).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(outcome.status).toBe("refused");
+    expect(h.shell.results).toEqual([`${MULTIPLE_TOOL_CALLS}\n\nWhat I heard: “${LIVE}”`]);
+    expect(missCalls).toBe(0);
+    // Logged with the NAMES of the last answer, as the model wrote them.
+    const names = second.kind === "plan" ? second.steps.map((step) => step.tool) : [WRAPPER];
+    expect(h.log.entries).toEqual([expect.objectContaining({ status: "refused", arguments: { calls: names } })]);
+  });
+
+  it("an ARBITRARY unknown name is still an ordinary unknown tool: refused with NO retry", async () => {
+    for (const unknown of [
+      planWith([{ tool: "readThing" }, { tool: "teleport" }]),
+      planWith([{ tool: "readThing" }, { tool: "parallel" }]),
+      planWith([{ tool: "readThing" }, { tool: "functions.multi_tool_use.parallel" }]),
+      planWith([{ tool: "readThing" }, { tool: "Multi_Tool_Use.Parallel" }]),
+    ]) {
+      const h = harness([unknown]);
+      const outcome = await h.planner.run(LIVE);
+      expect(h.llm.asked.length).toBe(1);
+      expect(outcome.status).toBe("refused");
+      expect(h.shell.results[0]).toContain("used a tool I don't have");
+      expect(h.ran).toEqual([]);
+    }
+    // And at the top level, as a miss — exactly as before.
+    const h = harness([{ kind: "tool", name: "teleport", input: {} }]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.length).toBe(1);
+    expect(outcome.status).toBe("no_tool");
+    expect(h.log.misses).toEqual([LIVE]);
+  });
+
+  it("a 4-STEP plan is refused with the new wording, and nothing runs or is narrated", async () => {
+    const h = harness([plan("readThing", "noteThing", "readThing", "noteThing")]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.length).toBe(1);
+    expect(outcome).toMatchObject({ status: "refused", chain: { completed: 0, total: 4 } });
+    expect(h.shell.results).toEqual(["That's more than 3 steps. Say the first three, then the rest."]);
+    expect(previews(h)).toEqual([]);
+    expect(h.ran).toEqual([]);
+    expect(h.log.misses).toEqual([]);
+  });
+
+  it("a valid 3-step plan is unaffected: one ask, runs, and its preview carries no extra line", async () => {
+    const h = harness([plan("readThing", "noteThing", "readThing")]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.length).toBe(1);
+    expect(h.ran).toEqual(["readThing", "noteThing", "readThing"]);
+    expect(outcome).toMatchObject({ status: "ok", chain: { completed: 3, total: 3 } });
+    expect(previews(h)).toHaveLength(1);
+    expect(previews(h)[0]).not.toContain("I planned");
+    expect(h.shell.spoken.join(" ")).not.toContain("I planned");
+  });
+
+  describe("the 'I planned N steps' line — the only sign a dropped action would leave", () => {
+    it("SHOWN after a wrapper retry: the preview's last line, and said on its own", async () => {
+      const h = harness([wrapperAsStep, plan("readThing", "noteThing", "readThing")]);
+      await h.planner.run(LIVE);
+      expect(previews(h)).toHaveLength(1);
+      expect(previews(h)[0]?.split("\n").at(-1)).toBe(noteFor(3));
+      // Its own utterance, so the plan's length cap on speech can never cut it off.
+      expect(h.shell.spoken).toContain(noteFor(3));
+      // ASCII, so Piper says it as written.
+      expect(noteFor(3)).toMatch(/^[\x20-\x7e]+$/);
+    });
+
+    it("NOT shown for a normal plan", async () => {
+      const h = harness([plan("readThing", "noteThing")]);
+      await h.planner.run(LIVE);
+      expect(previews(h).join("\n")).not.toContain("I planned");
+      expect(h.shell.spoken.join(" ")).not.toContain("I planned");
+    });
+
+    it("NOT shown when a retry returns a single tool — after a wrapper or a native multi-call", async () => {
+      for (const first of [wrapperAsCall, MULTI]) {
+        const h = harness([first, { kind: "tool", name: "readThing", input: {} }]);
+        await h.planner.run(LIVE);
+        expect(h.ran).toEqual(["readThing"]);
+        expect(previews(h).join("\n")).not.toContain("I planned");
+        expect(h.shell.spoken.join(" ")).not.toContain("I planned");
+      }
+    });
+
+    it("NOT shown when a NATIVE multi-call retry returns a plan: it is for the wrapper only", async () => {
+      const h = harness([MULTI, plan("readThing", "noteThing")]);
+      await h.planner.run(LIVE);
+      expect(h.ran).toEqual(["readThing", "noteThing"]);
+      expect(previews(h).join("\n")).not.toContain("I planned");
+    });
+  });
+
+  it("as a DETACHED job: the wrapper is retried in the background, and a second one is refused into the job's record", async () => {
+    const ran: string[] = [];
+    const tools: Tool[] = ["readThing", "noteThing"].map((name) => ({
+      name,
+      description: name,
+      inputSchema: { type: "object", properties: {}, required: [] },
+      risk: "safe",
+      background: "ok",
+      handler: (): Promise<string> => {
+        ran.push(name);
+        return Promise.resolve(`${name} done`);
+      },
+    }));
+    const w = jobWorld({ script: { [LIVE]: wrapperAsStep, [withPlanRetry(LIVE)]: wrapperAsStep }, tools });
+    const running = w.run(LIVE);
+    w.manager.detachAttached();
+    await running;
+
+    expect(w.llm.chooseCalls).toBe(2);
+    expect(ran).toEqual([]);
+    expect(w.shell.results).toEqual([]);
+    expect(w.manager.get("job1")?.state).toBe("failed");
+    expect(w.log.entries[0]).toMatchObject({ status: "refused", detached: true, arguments: { calls: ["functions.readThing", WRAPPER] } });
+    expect(w.log.misses).toEqual([]);
+  });
+});

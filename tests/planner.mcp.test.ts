@@ -681,7 +681,7 @@ describe("the registry stays closed", () => {
     );
     const outcome = await h.planner.run("file this bug and check for duplicates");
     expect(outcome.status).toBe("refused");
-    expect(h.shell.results.at(-1)).toContain("I only run up to 3 in one go");
+    expect(h.shell.results.at(-1)).toBe("That's more than 3 steps. Say the first three, then the rest.");
     expect(h.gmail.calls).toEqual([]);
     expect(h.server.connections).toBe(0);
   });
@@ -962,7 +962,10 @@ describe("a tool name carrying the provider's 'functions.' prefix", () => {
     "Functions.linear__create_issue",
     "functions.Linear__Create_Issue",
     "functions.linear__create_issue ",
-    "multi_tool_use.parallel",
+    // "multi_tool_use.parallel" was here until the wrapper became its own rule (live finding
+    // after M23): it is now asked about once more and refused as a multi-call answer, still with
+    // nothing run — tests/planner.multicall.test.ts. A near-miss of it is still just unknown:
+    "functions.multi_tool_use.parallel",
     "parallel",
   ]) {
     it(`still refuses a plan naming ${JSON.stringify(name)}, quoting it as sent, with nothing run`, async () => {
@@ -1009,7 +1012,9 @@ describe("a refused plan is recorded as the model sent it", () => {
   const BAD = [
     step("functions.readEmail", {}, "read"),
     step("functions.nope", { title: "A SECRET TITLE", description: "{step1}" }, "file it"),
-    step("multi_tool_use.parallel", { notes: "PRIVATE NOTES" }, "tell them"),
+    // Any unknown name here except the provider's parallel wrapper, which is a multi-call answer
+    // now and is logged as one (tests/planner.multicall.test.ts).
+    step("parallel", { notes: "PRIVATE NOTES" }, "tell them"),
   ];
 
   it("logs every step's tool name, raw and in order — and no arguments", async () => {
@@ -1021,7 +1026,7 @@ describe("a refused plan is recorded as the model sent it", () => {
     expect(row?.tool).toBeNull();
     // RAW: the first step WOULD have resolved, and is still recorded as it was typed.
     expect(row?.arguments).toEqual({
-      plan: ["functions.readEmail", "functions.nope", "multi_tool_use.parallel"],
+      plan: ["functions.readEmail", "functions.nope", "parallel"],
     });
     // The row is fed into the next planning prompt, so nothing the user said rides along.
     expect(JSON.stringify(row)).not.toContain("A SECRET TITLE");

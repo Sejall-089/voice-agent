@@ -11,7 +11,7 @@ import { UnavailableChooser } from "./screen/UnavailableChooser.ts";
 import { InMemoryDraftStore } from "./draft.ts";
 import { InMemorySpeechStore } from "./speechStore.ts";
 import { highestTier, needsConfirm, needsNarration, resolveRisk } from "./risk.ts";
-import { MULTIPLE_TOOL_CALLS, withPlanRetry } from "./llm/toolChoice.ts";
+import { MULTIPLE_TOOL_CALLS, parallelWrapperCalls, withPlanRetry } from "./llm/toolChoice.ts";
 import { OPEN_GATE } from "./jobs/gate.ts";
 import type { GateAnswer, JobGate } from "./jobs/gate.ts";
 import { CANCELLED_BEFORE_START, CANCELLED_BY_YOU, EXPIRED } from "./jobs/messages.ts";
@@ -26,6 +26,7 @@ import {
   isUnreadContentRefusal,
   preflightReferences,
   previewHoldRemaining,
+  plannedStepsNote,
   previewPlan,
   resolveStepArgs,
   spokenPlan,
@@ -287,6 +288,13 @@ export class Planner {
     //     answer decided before step 1. Whatever comes back is an ordinary answer and goes down
     //     the ordinary path below: a plan meets the same validation as any plan. A second
     //     multi-call answer is refused, by name, and never truncated to its first call.
+    //
+    //     The provider's parallel wrapper (`multi_tool_use.parallel`) is the same case in another
+    //     shape — a lone call by that name, or a plan with a step by that name — and is turned
+    //     into it here, after EACH ask, so it is retried and refused like any multi-call answer.
+    //     Never unwrapped, and never through `logMiss`: it is not a tool anyone could build.
+    const wrapped = parallelWrapperCalls(choice);
+    if (wrapped !== null) choice = { kind: "multiple", tools: wrapped };
     if (choice.kind === "multiple") {
       choice = await this.llm.chooseTool(
         withPlanRetry(instruction),
@@ -295,6 +303,8 @@ export class Planner {
         previousTurn,
         "retry",
       );
+      const wrappedAgain = parallelWrapperCalls(choice);
+      if (wrappedAgain !== null) choice = { kind: "multiple", tools: wrappedAgain };
       if (choice.kind === "multiple") {
         return await this.refuseMultiple(instruction, choice.tools);
       }
@@ -315,7 +325,9 @@ export class Planner {
     //     exactly the order a lone instruction does. There is deliberately no second
     //     implementation of the gate for chains to drift away from.
     if (choice.kind === "plan") {
-      return await this.runChain(instruction, choice.steps, context);
+      // After a wrapper retry the model had packed several actions into one "step", and its new
+      // plan may have quietly left one out to fit — so the preview says how many it planned.
+      return await this.runChain(instruction, choice.steps, context, wrapped !== null);
     }
     // The name is canonicalised first (M19, core/chain.ts): a model that wrote the provider's
     // own "functions." prefix in front of a real menu name meant that tool. The result is still
@@ -674,6 +686,7 @@ export class Planner {
     instruction: string,
     proposed: readonly PlannedStep[],
     context: CapturedContext,
+    afterWrapperRetry = false,
   ): Promise<PlannerOutcome> {
     // Each step's tool name is canonicalised before anything else looks at it (M19): the same
     // one rule the single-step path applies, so `functions.readEmail` in a plan means
@@ -750,9 +763,15 @@ export class Planner {
     try {
       // Decision 2: the whole plan, up front, for transparency. NOT approval — the gates still
       // fire per step, on real arguments, when execution reaches them.
+      //
+      // After a wrapper retry, one more line, on screen and said on its own (so the plan's
+      // length cap on speech can never cut it off): the only sign a dropped action would leave.
+      const note = afterWrapperRetry ? plannedStepsNote(steps.length) : null;
       const previewShownAt = Date.now();
-      await this.shell.executeAction({ kind: "notify", payload: previewPlan(steps) });
+      const preview = previewPlan(steps);
+      await this.shell.executeAction({ kind: "notify", payload: note === null ? preview : `${preview}\n${note}` });
       await this.say(toSpokenNarration(spokenPlan(steps)));
+      if (note !== null) await this.say(toSpokenNarration(note));
 
       // LIVE-TESTING FIX: hold the preview on screen for a minimum read time before step 1 may
       // replace it. Without this, a chain whose steps all finish fast (no real waiting between

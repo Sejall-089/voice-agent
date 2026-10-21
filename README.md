@@ -319,7 +319,10 @@ says so plainly rather than reporting a success it didn't have:
 
 Some plans are refused before anything runs at all — more than three steps, a tool this install
 doesn't have, or a step trying to use a result from a step that hasn't happened yet. Better to
-decline the plan than to announce one that was always going to die halfway.
+decline the plan than to announce one that was always going to die halfway. Four actions in one
+instruction get *"That's more than 3 steps. Say the first three, then the rest."* If the model
+packs several actions into one made-up "parallel" step instead, it is asked once more; a plan
+that comes back that way says *"I planned N steps. If you asked for more, say the rest after."*
 
 **It checks the names in a plan before it starts, and asks about a channel it doesn't know
 (M21).** "File this bug on GitHub and tell the bugs channel" used to create the issue and only

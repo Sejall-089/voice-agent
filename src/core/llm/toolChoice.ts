@@ -59,6 +59,28 @@ export const PLAN_RETRY_INSTRUCTION =
   "other: answer with ONE call to the `plan` tool that lists every step in order. If it needs " +
   "only one tool, call that one tool. Never make more than one tool call.)";
 
+// The provider's own parallel-call wrapper, leaking out as if it were a tool (live finding after
+// M23, and twice in M17). The action log holds `{"plan": ["functions.summarize",
+// "multi_tool_use.parallel"]}` for "summarize this and send to fun then create a issue of body in
+// linear and write in notion": four actions, three of them packed into one "step" named this.
+export const PARALLEL_WRAPPER = "multi_tool_use.parallel";
+
+// Is this answer the wrapper — a lone call named it, or a plan with a step named it? If so, the
+// names to refuse it under (a plan's step names, as the model wrote them), else null.
+//
+// It is the multi-call case in another shape, and the planner treats it as one: asked once more
+// with PLAN_RETRY_INSTRUCTION, then refused. It is NEVER unwrapped into steps here: what the
+// wrapper bundles has no order and no dependencies anyone can trust, and running it would be
+// running a plan nobody checked. EXACT string only — not "parallel", not a "functions." form,
+// and not any other unknown name, which stays an ordinary unknown tool, refused with no retry.
+export function parallelWrapperCalls(choice: ToolChoice): string[] | null {
+  if (choice.kind === "tool" && choice.name === PARALLEL_WRAPPER) return [PARALLEL_WRAPPER];
+  if (choice.kind === "plan" && choice.steps.some((step) => step.tool === PARALLEL_WRAPPER)) {
+    return choice.steps.map((step) => step.tool);
+  }
+  return null;
+}
+
 // The instruction as it is sent on that one retry: the user's own words, untouched, then the
 // fixed text.
 export function withPlanRetry(instruction: string): string {
