@@ -2076,3 +2076,201 @@ describe("WindowsShell.confirm — a detached job's dialog leaves the bar alone 
     expect(sent.indexOf("chime:stop")).toBeLessThan(sent.indexOf("voice:start"));
   });
 });
+
+// THE KEYBOARD GOES BACK TO THE BAR after a detached dialog — if, and only if, the bar had it.
+//
+// Live finding after M23, then measured with real windows: the user was typing an instruction,
+// clicked "Review…" in the pill, answered the dialog, and the next keystroke went nowhere.
+// Windows hands the foreground back to the dialog's OWNER when it closes — the pill, which is
+// built never to take focus — and nothing gave it back to the bar. The text and the caret were
+// never touched.
+//
+// The fake dialog below does what the OS does to the bar: the moment the dialog opens, the bar
+// loses focus. Whether focus comes BACK is then entirely up to the shell.
+describe("WindowsShell — the bar gets the keyboard back after a detached dialog (M23 follow-up)", () => {
+  let pill: FakeWindow;
+  let pillFocusCalls = 0;
+  beforeEach(() => {
+    pill = makeWindow();
+    pillFocusCalls = 0;
+    pill.focus = (): void => {
+      pillFocusCalls += 1;
+    };
+    shell.attachDetachedDialogOwner(() => pill as unknown as Electron.BrowserWindow);
+  });
+
+  function holdDialog() {
+    const answers: { answer: (value: { response: number }) => void; fail: (error: Error) => void }[] = [];
+    dialogShowMessageBox.mockImplementation(
+      () =>
+        new Promise<{ response: number }>((resolve, reject) => {
+          // What Windows does: the dialog takes the keyboard from whatever had it.
+          window.focused = false;
+          answers.push({ answer: resolve, fail: reject });
+        }),
+    );
+    return {
+      answer: (response: number): void => answers.shift()?.answer({ response }),
+      fail: (): void => answers.shift()?.fail(new Error("dialog exploded")),
+      open: (): number => answers.length,
+    };
+  }
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const focusRequests = (): number => window.sent.filter((entry) => entry.channel === "commandbar:focus").length;
+  // The user is typing an instruction: the bar is open and has the keyboard.
+  const typing = (): Promise<string> => {
+    const capture = shell.showInput();
+    expect(window.isFocused()).toBe(true);
+    return capture;
+  };
+
+  it.each([
+    ["approved", 0],
+    ["cancelled", 1],
+  ])("bar open and focused -> dialog %s -> the bar has the keyboard again, and the box is asked to take it", async (_name, response) => {
+    const dialog = holdDialog();
+    const capture = typing();
+    const asking = shell.confirm("Send to #fun?", { detached: true });
+    await tick();
+    expect(window.isFocused()).toBe(false); // the dialog has it
+
+    dialog.answer(response);
+    await asking;
+    expect(window.isFocused()).toBe(true);
+    expect(focusRequests()).toBe(1);
+    // Nothing that would clear what was typed: no reset, no show, and the capture is still open.
+    expect(window.sent.map((entry) => entry.channel)).not.toContain("commandbar:reset");
+    expect(window.sent.filter((entry) => entry.channel === "commandbar:show")).toHaveLength(1); // the original opening only
+    expect(shell.isInputCapturing()).toBe(true);
+    ipcMain.emit("commandbar:submit", {}, "remind me to call");
+    await expect(capture).resolves.toBe("remind me to call");
+  });
+
+  it("Escape in the dialog is a cancel, and gives the keyboard back the same way", async () => {
+    // Escape is the dialog's own Cancel (cancelId 1): it arrives here as response 1.
+    const dialog = holdDialog();
+    void typing();
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    expect(escapeHandler()).toBeUndefined(); // the dialog owns Escape while it is up
+    dialog.answer(1);
+    await expect(asking).resolves.toBe(false);
+    expect(window.isFocused()).toBe(true);
+    expect(focusRequests()).toBe(1);
+  });
+
+  it("a dialog that THROWS still gives the keyboard back", async () => {
+    const dialog = holdDialog();
+    void typing();
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    dialog.fail();
+    await expect(asking).rejects.toThrow("dialog exploded");
+    expect(window.isFocused()).toBe(true);
+    expect(focusRequests()).toBe(1);
+  });
+
+  it("TWO QUEUED DIALOGS: the keyboard comes back ONCE, after the last — not between them", async () => {
+    const dialog = holdDialog();
+    void typing();
+    const first = shell.confirm("First?", { detached: true });
+    const second = shell.confirm("Second?", { detached: true });
+    await tick();
+
+    dialog.answer(0);
+    await first;
+    await tick();
+    // The second dialog is up now. Focus was NOT handed to the bar in between: it would have
+    // been taken straight back, and the bar would have flashed active under a dialog.
+    expect(dialog.open()).toBe(1);
+    expect(focusRequests()).toBe(0);
+    expect(window.isFocused()).toBe(false);
+
+    dialog.answer(1);
+    await second;
+    expect(window.isFocused()).toBe(true);
+    expect(focusRequests()).toBe(1);
+  });
+
+  it("BAR CLOSED: nothing is focused — the app does not pull the keyboard to itself", async () => {
+    const dialog = holdDialog();
+    expect(window.isVisible()).toBe(false);
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    dialog.answer(0);
+    await asking;
+    expect(window.isFocused()).toBe(false);
+    expect(window.isVisible()).toBe(false);
+    expect(focusRequests()).toBe(0);
+  });
+
+  it("BAR OPEN BUT NOT FOCUSED (the user was in another app): nothing is focused", async () => {
+    const dialog = holdDialog();
+    window.showInactive(); // e.g. a result on screen while the user works elsewhere
+    expect(window.isFocused()).toBe(false);
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    dialog.answer(0);
+    await asking;
+    expect(window.isFocused()).toBe(false);
+    expect(focusRequests()).toBe(0);
+  });
+
+  it("the bar was focused when the dialog opened but was CLOSED before it was answered: nothing is reopened or focused", async () => {
+    const dialog = holdDialog();
+    void typing();
+    const asking = shell.confirm("Send?", { detached: true });
+    await tick();
+    window.hide(); // closed while the dialog was up
+    dialog.answer(1);
+    await asking;
+    expect(window.isVisible()).toBe(false);
+    expect(window.isFocused()).toBe(false);
+    expect(focusRequests()).toBe(0);
+  });
+
+  it("the record does not leak into the next dialog: a later one with the bar unfocused restores nothing", async () => {
+    const dialog = holdDialog();
+    void typing();
+    const first = shell.confirm("First?", { detached: true });
+    await tick();
+    dialog.answer(0);
+    await first;
+    expect(focusRequests()).toBe(1);
+
+    window.focused = false; // the user went to another app
+    const later = shell.confirm("Later?", { detached: true });
+    await tick();
+    dialog.answer(0);
+    await later;
+    expect(window.isFocused()).toBe(false);
+    expect(focusRequests()).toBe(1);
+  });
+
+  it("AN ATTACHED CONFIRM IS UNCHANGED: the bar is hidden, restored inactive, never focused or sent a focus request", async () => {
+    const dialog = holdDialog();
+    void typing();
+    const asking = shell.confirm("Send?");
+    await tick();
+    expect(window.isVisible()).toBe(false); // M19: hidden for the dialog's lifetime
+    dialog.answer(0);
+    await asking;
+    expect(window.isVisible()).toBe(true);
+    expect(window.isFocused()).toBe(false); // showInactive, as before
+    expect(focusRequests()).toBe(0);
+  });
+
+  it("THE PILL NEVER TAKES FOCUS: the dialog hangs off it, and nothing ever focuses it", async () => {
+    for (const setup of ["focused bar", "closed bar", "unfocused bar"]) {
+      const dialog = holdDialog();
+      if (setup === "focused bar") void typing();
+      if (setup === "unfocused bar") window.showInactive();
+      const asking = shell.confirm("Send?", { detached: true });
+      await tick();
+      dialog.answer(0);
+      await asking;
+      window.hide();
+    }
+    expect(pillFocusCalls).toBe(0);
+  });
+});

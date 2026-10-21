@@ -231,6 +231,26 @@ describe("the flows that read and write the box still work", () => {
     expect(box().value).toBe("");
   });
 
+  it("FOCUS after a background job's dialog: the box takes focus, the text is unchanged, the caret is at the END and nothing is selected", async () => {
+    enter("remind me to call");
+    // Where the caret might have been left: mid-text, or with a selection.
+    act(() => box().setSelectionRange(3, 9));
+    act(() => box().blur());
+    expect(document.activeElement).not.toBe(box());
+
+    bridge.fire("focus");
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    });
+
+    expect(document.activeElement).toBe(box());
+    expect(box().value).toBe("remind me to call");
+    expect([box().selectionStart, box().selectionEnd]).toEqual([17, 17]);
+    // And the next keystroke lands after the text rather than replacing anything.
+    enter(`${box().value} mum`);
+    expect(box().value).toBe("remind me to call mum");
+  });
+
   it("FOCUS: the focus request from main does not clear a half-typed answer", () => {
     bridge.fire("ask", "Which channel?");
     enter("#bu");

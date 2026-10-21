@@ -66,7 +66,19 @@ export function CommandBar(): JSX.Element {
         focusInput();
       }
     });
-    const offFocusInput = window.api.onFocusInput(focusInput);
+    // Back to the box WITHOUT resetting it: a waiting question's half-typed answer, or an
+    // instruction that was being typed when a background job's dialog took the keyboard. The
+    // caret goes to the END of the text and nothing is selected — a selection would be replaced
+    // by the next keystroke.
+    const offFocusInput = window.api.onFocusInput(() => {
+      requestAnimationFrame(() => {
+        const box = inputRef.current;
+        if (box === null) return;
+        box.focus();
+        const end = box.value.length;
+        box.setSelectionRange(end, end);
+      });
+    });
     // The result supersedes the narration: once the action has happened, saying what it was
     // about to do is just stale.
     const offEcho = window.api.onEcho((value) => {

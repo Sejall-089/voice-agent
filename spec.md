@@ -1285,6 +1285,18 @@ fully covered by a visible bar. A yes given to a dialog whose job was cancelled 
 while it was open (the queue cannot take a request back) is discarded: nothing runs. A job that was detached without being resumed for a confirm cannot open
 a dialog at all: its request resolves "not approved" without one being shown.
 
+**Where the keyboard goes after a detached dialog** (live finding after M23). When an owned
+dialog closes, Windows gives the foreground to its owner — the pill, which never takes focus —
+so the bar was left without the keyboard and a half-typed instruction needed a click to go on.
+The shell now records, when the first of a run of queued detached dialogs opens, whether the bar
+was open **and** focused. When the last of them closes (approve, cancel, Esc or a dialog that
+throws) and the bar is still open, it focuses the bar and asks the renderer to put the caret at
+the end of the text, selecting nothing; the text and the waiting capture are untouched. If the
+bar was closed or another app had the keyboard, nothing is focused and the foreground stays
+wherever Windows puts it (measured: the pill). An attached confirm is unchanged. Pinned by
+`tests/WindowsShell.capture.test.ts` and `CommandBar.test.tsx`; the real-window half is
+`scripts/ask-recon/focus-after-dialog.ts`.
+
 ### The status pill
 
 A frameless, non-focusable, always-on-top window at the bottom right of the primary display's

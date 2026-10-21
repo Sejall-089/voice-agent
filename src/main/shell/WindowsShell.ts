@@ -116,6 +116,16 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // Something was delivered to the bar while a detached job's dialog was up and the bar was
   // not on screen. Shown once that dialog is gone.
   private showAfterDetachedDialog = false;
+  // Was the bar open AND focused when a detached dialog opened? Recorded once, at the first
+  // dialog of a run of queued ones, and acted on when the last of them has closed; null when no
+  // detached dialog is outstanding.
+  //
+  // WHY THIS EXISTS (measured, live finding after M23). The detached dialog hangs off the status
+  // pill. When it closes, Windows hands the foreground back to the dialog's OWNER — the pill —
+  // even though the pill is built never to take focus. The bar, which had the keyboard a moment
+  // earlier with an instruction half typed in it, never got it back: the next keystroke went
+  // nowhere and the user had to click the box. The text and the caret were untouched throughout.
+  private barFocusedBeforeDialog: boolean | null = null;
   // The single open question (`askUser`), if any — its resolver, held on the instance for the
   // reason `pendingInput` is: nothing per-call to strand. Non-null IS "a question is waiting",
   // and it is assigned synchronously, so the hotkey guards can never see the bar asking while
@@ -893,6 +903,12 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       if (owner === null || owner.isDestroyed()) {
         throw new Error("There is no status pill to show this confirmation from.");
       }
+      // Where the keyboard is NOW, before the dialog takes it — once, for the first dialog of a
+      // run: by the second, the first has already moved focus away. (A click on the pill does
+      // not move focus: the pill cannot be activated, so the bar still has it here.)
+      if (this.barFocusedBeforeDialog === null) {
+        this.barFocusedBeforeDialog = this.window.isVisible() && this.window.isFocused();
+      }
     } else {
       // THE BAR GETS OUT OF THE WAY, DELIBERATELY (M19 live fix).
       //
@@ -970,6 +986,23 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // covers a bar that was visible throughout (a detached dialog) or that something else made
     // visible while the dialog was up, when registerEscape() was refusing.
     if (this.window.isVisible()) this.registerEscape();
+
+    // GIVE THE KEYBOARD BACK — only after the LAST queued dialog, only after a detached one, and
+    // only if the bar had it when the first of them opened and is still open now. Otherwise
+    // nothing is taken: the user was in another app, or the bar was closed, and the app must
+    // not pull focus to itself over that. (Measured: Windows leaves the foreground on the pill
+    // in that case too. That is the OS's choice and is left alone here.)
+    if (!this.confirmPending) {
+      const restore =
+        request.detached && this.barFocusedBeforeDialog === true && this.window.isVisible();
+      this.barFocusedBeforeDialog = null;
+      if (restore) {
+        this.window.focus();
+        // The renderer puts the caret back at the END of what was typed, selecting nothing —
+        // the same message the instruction hotkey uses to return to a waiting question.
+        this.window.webContents.send("commandbar:focus");
+      }
+    }
   }
 }
 

@@ -4,6 +4,7 @@
 //   node scripts/ask-recon/run.mjs dismissed-then-again
 //   node scripts/ask-recon/run.mjs result-links          (flashes a window; sends no OS keys)
 //   node scripts/ask-recon/run.mjs pill-collapse [png dir]   (MOVES THE MOUSE AND CLICKS, ~45 s; no keys)
+//   node scripts/ask-recon/run.mjs focus-after-dialog [png dir]   (MOUSE, CLICKS, and keys into its own windows only, ~40 s)
 //
 // !! THESE SEND REAL KEYSTROKES TO YOUR DESKTOP AND FLASH WINDOWS. !!
 //
@@ -40,18 +41,20 @@ const [name, ...args] = process.argv.slice(2);
 
 const entry = join(here, `${name}.ts`);
 if (!name || !existsSync(entry)) {
-  console.error("usage: node scripts/ask-recon/run.mjs <hotkey-during-question|dismissed-then-again|result-links|pill-collapse> [args]");
+  console.error("usage: node scripts/ask-recon/run.mjs <hotkey-during-question|dismissed-then-again|result-links|pill-collapse|focus-after-dialog> [args]");
   process.exit(2);
 }
-// `pill-collapse` loads the status pill's page and preload instead of the bar's. It alone
-// also honours BUILD_DIR — a build somewhere other than out/ (`electron-vite build --outDir
-// <dir>`) — so it can be run without rebuilding out/ under a running `npm run dev`. The other
+// `pill-collapse` loads the status pill's page and preload instead of the bar's;
+// `focus-after-dialog` loads both. Those two also honour BUILD_DIR — a build somewhere other than out/ (`electron-vite build --outDir
+// <dir>`) — so they can be run without rebuilding out/ under a running `npm run dev`. The other
 // three scripts read out/ directly.
 const buildDir = process.env.BUILD_DIR ?? join(repo, "out");
 const needed =
   name === "pill-collapse"
     ? ["preload/pill.js", "renderer/pill.html"]
-    : ["preload/preload.js", "renderer/index.html"];
+    : name === "focus-after-dialog"
+      ? ["preload/pill.js", "renderer/pill.html", "preload/preload.js", "renderer/index.html"]
+      : ["preload/preload.js", "renderer/index.html"];
 for (const built of needed) {
   if (!existsSync(join(buildDir, built))) {
     console.error(`missing ${built} - run \`npm run build\` first`);
