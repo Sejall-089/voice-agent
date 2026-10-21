@@ -7,8 +7,8 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M22; **M23, background jobs, is built and open**: not run live, not closed. After it, the
-  next one is whatever is agreed and added to that list). Do not jump ahead. Each
+  M23, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
+  added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
   If a task seems to need anything still OUT of scope (auto-clicking or any vision-driven
@@ -201,6 +201,19 @@ patterns behind them — each cost a real debugging session.
   also found what first-run green hides: the formatter eval showed a `NO_NOTES` instruction
   refusing a genuine one-line note, 0 of 2 — a fault no fixture could have. **If a test has
   never failed, make it fail once before trusting it, and record which mutation it caught.**
+
+### M23
+
+- **Removing a refusal can expose a worse outcome — a retry included (M23).** The model packed
+  three actions into one plan step named `multi_tool_use.parallel`, and the app refused it as
+  an unknown tool. The fix — treat it as a multi-call answer and ask once more — was right, and
+  it removed the only thing standing between the user and a quieter failure: a retried plan
+  that fits the 3-step cap by *dropping* an action would run, narrated and confirmed, with
+  nothing saying an action had gone. The refusal had been the guard. So the retry shipped with
+  a visible line ("I planned N steps. If you asked for more, say the rest after.") on any plan
+  that ran only after it — and live, the real model never produced such a plan (2 of 3 trials:
+  the wrapper again). As M19's lesson says: before turning a refusal into a second chance, ask
+  what the second answer can go on to do, and make the bad case visible if it cannot be stopped.
 
 ## Scope added mid-milestone
 

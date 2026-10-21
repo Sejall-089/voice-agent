@@ -552,6 +552,8 @@ check, same memory resolution, same confirm gate. Nothing ever runs without your
 | `DICTATE_HOTKEY` | Optional. Pins the **dictation** combo (M12) — separate from `HOTKEY` above. Needs `WHISPER_*` set too, or there's no transcriber to dictate with. |
 | `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` · `GOOGLE_REFRESH_TOKEN` | Tasks 12-14 (M13). All three, or the calendar tools aren't offered at all. The refresh token comes from `npm run calendar:connect` — it's a **secret**, and the app never logs it or puts it in an error. |
 | `CHROME_DEBUG_URL` | Tasks 8-11 (the Gmail reply tools **and** the Notion tool — one debug Chrome, both). Optional — leave it blank and none of those four tools are ever offered at all. |
+| `LINEAR_API_KEY` | Optional (M19). The Linear connector's key; blank, and the Linear tools are never offered. A **secret**. See "Setting up Linear". |
+| `GITHUB_TOKEN` | Optional (M20). A fine-grained token with **Issues: Read and write** on one repository, named in `connectors.json`; blank, and the GitHub tools are never offered. A **secret**. See "Setting up GitHub". |
 
 **Two things about `.env` that cost a debugging session (M21):**
 
@@ -963,7 +965,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (345 tests): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (2824 tests across 124 files, plus 95 opt-in real-model evals that skip themselves): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -974,14 +976,17 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M23 (background jobs, the status pill, the needs-you chime) is built and NOT closed: it has
-not been run live.** Everything it claims rests on tests against fakes and on recon scripts run
-on one machine; no person has yet used it. See `spec.md` §9 (M23) for exactly which is which.
+**M23 (background jobs, the status pill, the needs-you chime) is closed (22 Oct 2026), after a
+live run by a person, with named gaps.** A person watched 12 of the checklist's boxes; 25 more are
+covered by a scripted run against the real app or by tests; 5 were not run. One live finding
+(a stale "confirmation waiting" line) is fixed; one long-speech timing bug is recorded as an
+open limit. **2824 tests green across 124 files, 95 skipped** (the opt-in real-model evals). See
+`docs/M23-live-checklist.md` and `spec.md` §9 (M23).
 
 **M22 (Slack bot-token mode) is closed (13 Oct 2026), after a live run by a person.** Messages
 go to the channel you name, checked against Slack's own channel list before any dialog; webhook
-mode is unchanged. 2242 tests green across 98 files, 75 skipped (the opt-in real-model evals);
-it was 2206 across 95 at M22's close, before the follow-ups after it.
+mode is unchanged. It was 2206 tests across 95 files at M22's close, and 2242 across 98 after
+the follow-ups after it.
 What was watched, what is covered by script or test only, and what the live run found are in
 `docs/m22-live-checklist.md`; the design and its known limits are in `spec.md` §6f.
 
@@ -1129,7 +1134,7 @@ same failure class the app already catches cleanly as "I ran out of room," just 
 exercised by a request this size. Raised the token budget (4096 → 8192) so a plan attempt has
 enough headroom to actually finish forming and reach the cap that's supposed to catch it.
 
-**Verified deterministically (798 tests across the suite; these among them):** tool routing, the registry guard against hallucinated
+**Verified deterministically (798 tests across the suite at M17 — history; these among them):** tool routing, the registry guard against hallucinated
 tools, memory resolution, version-on-conflict, decay, the correction loop end to end, the confirm
 gate (**"no" provably sends nothing** — the fake sender is asserted to have received zero calls),
 failure-after-confirm, graceful refusal, and `LLM_PROVIDER` selection/error handling.

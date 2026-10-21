@@ -439,6 +439,7 @@ variable is set (`core/llm/modelSettings.ts`):
   answered in prose where a tool was expected on 8 of 39 broad-set cases (6 of 12 jobStatus
   positives, "pause", and one plan written out as text). Every miss was loud — nothing ran —
   and none dropped a step or changed an argument silently. Choosing a setting is the user's call.
+- **Decision (cost), as of 2026-10-15: planning on `gpt-5-mini` at `low`, tasks on `gpt-5` at `low`, in the user's `.env`; rollback by deleting those `.env` lines.**
 ---
 
 ## 4. The OSShell interface (the portability contract)
@@ -1189,8 +1190,9 @@ deterministic prompt. `/core` still reads no globals it hasn't been handed.
 
 ## 5c. Background jobs (M23) — the same chain, without the bar
 
-**In progress: built and tested against fakes and three recon scripts; not run live, not
-closed. §9 has the build order and what each claim rests on.**
+**Closed 2026-10-22, after a live run by a person (`docs/M23-live-checklist.md`: 12 boxes
+ticked, 30 open), with named gaps. §9 has the build order, what each claim rests on, the
+mutation table, the gaps and the open limits.**
 
 Every instruction is one **job**. A job runs the planner an instruction always ran — one
 planning call, a fixed plan of up to three steps, the same per-step gates (§5, §5b). Nothing
@@ -3591,8 +3593,10 @@ Post-v0:
       for two old places that put `error.message` in front of the user; bot-mode wording in
       `sendMessage`; the pre-flight, ask flow, `remember` and "the X channel"; then wording and
       docs. A mutation pass after each code prompt; every surviving mutation got a test.
-- [ ] **M23 — background jobs, a status pill and a needs-you chime.** **In progress; not
-      closed, not run live.** Scope is §2's M23 entry; the design is §5c.
+- [x] **M23 — background jobs, a status pill and a needs-you chime.** **Closed 2026-10-22,
+      after a live run by a person (12 boxes ticked, 30 open — `docs/M23-live-checklist.md`),
+      with named gaps.** Scope is §2's M23 entry; the design is §5c. The close-out record, with
+      the gaps it is closed with, is at the end of this entry.
 
       **Build order** (agreed 2026-10-13; everything agreed after the first plan is folded in
       here, per CLAUDE.md "Scope added mid-milestone"):
@@ -3628,10 +3632,8 @@ Post-v0:
       10. The `jobStatus` routing eval against the real model (asked for: ~20 phrasings × 3
           trials, once), a headless three-job simulation, then `/milestone-closeout`.
 
-      **Built (2026-10-13): every item above. Not closed.** No mutation pass has been run yet —
-      several of the new suites were green the first time they ran, which by CLAUDE.md proves
-      nothing until each rule has been broken once. No live checklist exists yet. Both are
-      `/milestone-closeout`'s Phase A.
+      **Built (2026-10-13): every item above.** The full mutation pass and the live checklist
+      followed at close-out (2026-10-21/22) — see the close-out record at the end of this entry.
 
       **What the three recon scripts measured** (this machine, Electron 33, 1920×1080 at 150%,
       2026-10-13) — each run *before* the code that depends on it:
@@ -3689,6 +3691,25 @@ Post-v0:
       - `MockShell.isForegroundFree` knows only dialogs and questions, not captures or
         recordings, so the "busy" resume rule is tested against the real shell's own unit test
         and not end to end.
+
+      **Found live after the build and NOT fixed — open limit** (measured 2026-10-21, decided
+      not to build):
+      - **The user's own app does not get the keyboard back after a detached dialog.** When the
+        dialog closes while the user is in another app, Windows leaves the foreground on the
+        pill (the dialog's owner, which cannot take focus or type), and the user has to click
+        back into their app. (When the *bar* was focused it does get it back — §5c.)
+      - Measured on this machine, real windows: the only approach that worked was a **new
+        helper process started after the dialog closes**, 5 of 5. It needs ~0.5 s to start,
+        and keys typed in that time go to the pill and are lost. `SetForegroundWindow` from the
+        existing input helper failed; so did the same with `AttachThreadInput`, from a helper
+        started when the dialog opens, and Electron's `pill.blur()` (which handed the
+        foreground to the taskbar).
+      - Not shown, and so not claimed: that a check run before the restore would reliably leave
+        alone a window the user switched to during the dialog (a helper started with a third
+        window in front still succeeded, so the OS's foreground lock is no guard); elevated
+        windows were not tested; `ForegroundLockTimeout` on this machine is at its maximum
+        (2147483647), so a machine with the default may behave differently.
+      - Revisit only if it proves annoying in daily use.
 
       **Tests at the end of the build** (2026-10-13): **2488 passed across 112 files, 95
       skipped** (the opt-in real-model evals, 20 of them new), typecheck clean on both configs.
@@ -3789,7 +3810,111 @@ Post-v0:
       | `getLast()` stops skipping detached rows | 2 |
       | an "attached" permit honoured after a detach | **survived** — the check was unreachable (a job holding that permit cannot be detached, which is tested), so the line was removed rather than left as a rule nothing can exercise |
 
-**v0 status: complete.** **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
+      **Also after the build — the pill's event log** (8c5ba4f, 2026-10-14): one console line
+      per pill event, with its reason, after a live report nothing had recorded; and each job
+      state's time in the pill, with `seen_at` saved with the job (§5c, "How long a job stays").
+
+      **CLOSE-OUT RECORD (2026-10-21/22). CLOSED 2026-10-22, with these gaps:** 0.4 with real
+      Linear, §10 (M21's two Linear items), 5.2 and 9.2 not run; the 30-minute expiry, a second
+      monitor or another display scale, and the `checkUnreadContent` refusal path not watched;
+      and the open limits recorded in this entry — the foreground not returned to the user's own
+      app after a detached dialog, the read-only false alarm on a restart, a spoken result over
+      15 s, and the `plan` tool's "At most 3 steps" left unchanged.
+
+      **Tests:** **2824 passed across 124 files, 95 skipped** (the opt-in real-model evals),
+      plain `npm test` with the app closed and the native build rebuilt for node by `pretest`;
+      typecheck clean on both configs. **Eval:** the wrapper phrase, 3 trials on gpt-5-mini
+      low, run by the user through the spend gate (`wrapper-trials.mjs`, 6 calls, ~$0.015);
+      nothing else against the real model at close-out.
+
+      **The full mutation pass** (2026-10-22, Edit tool, one rule at a time, focused suites, each
+      reverted; no survivors). With the first pass above and the fixes after the build, every
+      rule M23 added has been broken at least once:
+
+      | Rule broken | Tests that failed |
+      |---|---|
+      | the cap lets a fourth job run | 6 |
+      | the 30-minute expiry never fires | 8 |
+      | a foreground-only resume ignores "the foreground is not free" | 2 |
+      | a job holding the foreground is detached anyway | 2 |
+      | the hotkey guard (`attachedBlocks`) never blocks | 5 |
+      | status runs listed in `views()` | 1 (the pill's own filter also holds it) |
+      | a yes for a job cancelled during its dialog is honoured | 2 |
+      | context re-read at planning instead of captured at submission | 1 (the snapshot test) |
+      | interrupted mid-step loses "may or may not have gone through" | 6 |
+      | interrupted while planning loses "nothing was run" | 3 |
+      | the SQLite store reloads dismissed jobs | 1 |
+      | old unseen failures are not reloaded | 1 |
+      | the migration adds a column without looking first | 8 |
+      | a done job never fades | 4 |
+      | a cancelled job is shown | 4 |
+      | failed/expired: no hour after being seen | 11 |
+      | an interrupted job is hidden | 3 |
+      | a waiting job can fall off the ten-row list | 1 |
+      | the pulse repeats on every re-send | 1 |
+      | the pulse outlives the wait | 1 |
+      | an emptied list is not closed | 3 |
+      | a job starting to wait opens the list | 10 |
+      | `pillBounds` drops the margin | 8 |
+      | the chime ignores busy | 8 |
+      | the chime ignores mute | 4 |
+      | no two-second coalescing | 5 |
+      | mute not read at startup | 1 |
+      | "Connecting to…" shown for any job | 3 |
+      | a second instance carries on | 1 |
+      | a multi-call answer refused without the one retry | 30 |
+      | *fixes after the build:* the keyboard after a detached dialog | 3 (restore regardless; after every dialog; caret not moved) |
+      | `predev` and the stamp | 3 (skip whenever locked; any error is a lock; always clear) |
+      | an attached job killed mid-step | 3 (in-memory flip, SQLite flip, flip regardless) |
+      | the parallel wrapper and the cap wording | 9, then 2 more for 76ad0c3 (always generic: 4; always cap: 5) |
+      | the "confirmation waiting" line | 2 (never clear: 7; clear everything: 4) |
+
+      Single-test rules, worth knowing: the status-run filter, the snapshot, the SQLite reload
+      rules, the ten-row cap, both pulse rules, mute at startup, and the second instance.
+
+      **Before the live pass, everything scriptable was run against the real app**
+      (2026-10-21/22): real hotkeys, real clicks on the pill, real keys into the app's own
+      dialogs; a scratch `--user-data-dir` per instance; a fake OpenAI server and a fake Slack
+      webhook injected through the child's environment (`OPENAI_BASE_URL`, `SLACK_WEBHOOK_URL`);
+      Linear, GitHub, Calendar and Chrome off — Linear and GitHub cannot be faked without a code
+      change (their URLs are fixed in `core/mcp/connectors/`). It covered §0–§8 of the checklist
+      and the screen-capture exclusion; per-box results are in the checklist.
+
+      **Live (2026-10-22, by a person; `docs/M23-live-checklist.md`, 12 ticked, 30 open).**
+      *Watched:* Review… keeps a half-typed instruction and gives the keyboard back; dialogs with
+      the mouse, a normal confirm and Review…; the chime heard (volume fine) and held back during
+      dictation; "are my agents done yet?" against the pill; kills mid-step (with "may or may
+      not have gone through") and while planning (shown nowhere); a failed job still red after a
+      restart; a second `npm run dev` saying "I'm already running"; the hotkey blocked during a
+      slow foreground step; the stale-line fix re-watched. The Gmail → Linear → Slack chain
+      reached its Linear dialog (not approved). *Covered by script or test only:* 25 boxes,
+      including mid-send kills, the cap, mute across a restart, the list's closing rules, both
+      focus cases and the queued-dialog cancel. *Not run:* 0.4 with real Linear, §10 (M21's two
+      Linear items), 5.2, 9.2 (the "I planned N steps" note was never produced by the real
+      model), the 30-minute expiry, a second monitor or another scale, and the
+      `checkUnreadContent` refusal path.
+
+      **Findings.** (1) A stale "There's a confirmation waiting" line after a detached dialog
+      closed in an open bar — **fixed in 515b0a6**, re-watched: pass. (2) A long spoken result
+      ends early — **open limit below, out of M23**. (3) The wrapper, live: the wrapper both
+      times in 2 trials of 3, then a 4-step plan in the third; nothing ran, nothing was dropped;
+      **76ad0c3** now gives the wrapper-twice case the over-cap sentence. **The retry text did
+      not move gpt-5-mini low in 2 of 3 — revisit only with an eval; not changed.** (4) Three
+      checklist wordings (2.8, 2.9, 4.2) were wrong, and are corrected.
+
+      **Open limit, found at close-out and NOT fixed (out of M23): a spoken result longer than
+      15 s is treated as finished at 15 s.** `WindowsShell.play` waits for the renderer's
+      `speech:ended` under `RENDERER_REPLY_TIMEOUT_MS` (15 s), a bound meant for a reply, not for
+      playback. Measured twice in the real app: an utterance of 15 831 ms; at 15.0 s the shell
+      logged `[WindowsShell] playback did not report back: The recorder didn't respond.` (the
+      message also names the wrong device), `isSpeaking()` went false, and a held needs-you
+      chime played **733 ms before the speech ended** (the first run: 15.4 s, 335 ms early).
+      Shorter results (13.8 s measured) are unaffected. Not measured: a second queued
+      utterance would presumably start over the end of the first, since the player stops
+      whatever is playing. Pre-dates M23 (M14's timeout); M23's chime is what exposes it.
+
+**v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
+current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
 993, in five new files: 17 for the connection and failure classification
 (`mcpConnection.test.ts`), 16 for the config loader (`mcpConfig.test.ts`), 50 for the adapter,

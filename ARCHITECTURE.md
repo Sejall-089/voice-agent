@@ -692,6 +692,38 @@ was asked for, and each dialog's button names its own action ("Create issue", th
 
 ---
 
+## 4g. Background jobs — the same chain, without the bar (M23)
+
+Every instruction is a **job**, run by the same planner with the same per-step gates. What M23
+adds is that a job no longer has to hold the command bar until it finishes: pressing the hotkey
+while it is still working **detaches** it, and it carries on in the background, shown in a
+small always-on-top **status pill**.
+
+```mermaid
+flowchart LR
+    Hotkey["Hotkey<br/>(not blocked)"] --> Detach["JobManager.detachAttached()"]
+    Job["Job (planner run)<br/>JobShell · JobLog · gate"] -->|attached| Bar["Command bar"]
+    Job -->|detached| Record["Job record<br/>(SQLite jobs table)"]
+    Record --> Pill["Status pill<br/>PillController · PillWindow"]
+    Job -->|before a confirm or a<br/>foreground-only step| Wait["needs-you<br/>(pauses; chime)"]
+    Pill -->|Review… / Resume| Wait
+    Wait --> Broker["ConfirmBroker<br/>one dialog at a time"]
+```
+
+- **JobManager** (`core/jobs/`) is the state machine: queued / running / needs-you / done /
+  failed / cancelled / expired / interrupted, three executing at once, 30-minute expiry checked
+  at the click. **JobRunner** builds one planner per job, with a **JobShell** that sends a
+  detached job's narration and results to its record instead of the bar, the speaker or the
+  previous turn.
+- **ConfirmBroker** (`main/shell/`) queues every confirm, attached and detached: one dialog on
+  screen at a time. A detached dialog hangs off the pill, so it never hides the bar or ends a
+  capture.
+- **The pill** draws a pure reducer's view (`core/jobs/pill.ts`) and cannot take focus; every
+  action it sends is checked again in main. **The chime** waits for the microphone and the
+  app's own voice.
+- **Restart:** live jobs become `interrupted` and are never resumed; a write-ahead marker around
+  each handler decides between "may or may not have gone through" and "nothing was sent".
+
 ## 5. Memory data model
 
 Two tables. `facts` carries the epistemic metadata (confidence, version, active) so
@@ -747,6 +779,9 @@ itself — and it's the seam where this app plugs into the larger personal-OS en
 - **Known before it starts, or asked.** A plan that names something the app does not know is
   stopped before step 1, not at the step that needed it. Where a typed answer would fix it, the
   app asks, through a question the hotkeys know is open — never by a model replying in prose.
+- **Nobody is surprised by a dialog (M23).** A job working in the background never opens a
+  confirm on someone who is typing: it waits, and the user opens the dialog from the pill. One
+  dialog is on screen at a time, and nothing a job did before the app closed is ever resumed.
 - **Links are opened by main, on its own check.** The result bar draws only `https` links to an
   exact, short list of hosts, and main validates a URL again before opening it. The bar's own
   window never navigates.
