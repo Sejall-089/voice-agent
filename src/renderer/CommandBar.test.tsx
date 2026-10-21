@@ -258,6 +258,15 @@ describe("the flows that read and write the box still work", () => {
     expect(box().value).toBe("#bu");
   });
 
+  it("STATUS: a null takes the line down, and leaves the typed text alone", () => {
+    enter("hello to all channels");
+    bridge.fire("status", "There's a confirmation waiting — answer it on screen.");
+    expect(host.querySelector(".command-status")?.textContent).toBe("There's a confirmation waiting — answer it on screen.");
+    bridge.fire("status", null);
+    expect(host.querySelector(".command-status")).toBeNull();
+    expect(box().value).toBe("hello to all channels");
+  });
+
   it("the refusal's second paragraph is drawn in the result area as its own line of text", () => {
     const refusal = "I tried to decide more than one thing in a single step.\n\nWhat I heard: “do two things”";
     bridge.fire("echo", refusal);

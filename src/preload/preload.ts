@@ -18,8 +18,9 @@ const api = {
   },
   // main → renderer: narration for a `caution` action — what the app is about to do inside
   // another app, sent before it does it (M10).
-  onStatus(callback: (text: string) => void): () => void {
-    const listener = (_e: IpcRendererEvent, text: string): void => callback(text);
+  // `null` takes the line down (a "confirmation waiting" that is no longer true).
+  onStatus(callback: (text: string | null) => void): () => void {
+    const listener = (_e: IpcRendererEvent, text: string | null): void => callback(text);
     ipcRenderer.on("commandbar:status", listener);
     return () => ipcRenderer.removeListener("commandbar:status", listener);
   },

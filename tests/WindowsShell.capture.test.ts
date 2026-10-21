@@ -2274,3 +2274,125 @@ describe("WindowsShell — the bar gets the keyboard back after a detached dialo
     expect(pillFocusCalls).toBe(0);
   });
 });
+
+// "There's a confirmation waiting" — shown while it is true, taken down once it is not (live
+// finding after M23). The user's sequence: a detached job's dialog up, the bar OPEN with a
+// half-typed instruction, the hotkey pressed (blocked, so the bar says a confirmation is
+// waiting), the dialog cancelled — and the bar still said so, with nothing waiting. Nothing ever
+// took the line down: closing a dialog does not reset a bar it never hid. The real-window half
+// (what the renderer then draws) is scripts/ask-recon/confirm-waiting-line.ts.
+
+describe("WindowsShell — the 'confirmation waiting' line comes down when nothing is waiting", () => {
+  beforeEach(() => {
+    const pill = makeWindow();
+    shell.attachDetachedDialogOwner(() => pill as unknown as Electron.BrowserWindow);
+  });
+
+  function holdDialog() {
+    const answers: { answer: (value: { response: number }) => void; fail: (error: Error) => void }[] = [];
+    dialogShowMessageBox.mockImplementation(
+      () => new Promise<{ response: number }>((resolve, reject) => answers.push({ answer: resolve, fail: reject })),
+    );
+    return {
+      answer: (response: number): void => answers.shift()?.answer({ response }),
+      fail: (): void => answers.shift()?.fail(new Error("dialog exploded")),
+    };
+  }
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  // Every status line sent to the bar, in order; null is "take it down".
+  const statusLines = (): unknown[] => window.sent.filter((e) => e.channel === "commandbar:status").map((e) => e.args[0]);
+  // The real hotkey handler, as main.ts wires it, minus the microphone.
+  const pressHotkey = (): void =>
+    createOnInstructionHotkey({ shell, dictation: null, voice: null, speech: null, chain: null, runInstruction: () => Promise.resolve() })();
+
+  async function blockedPressDuringADialog(detached = true) {
+    const dialog = holdDialog();
+    void shell.showInput(); // the bar is open, an instruction half typed
+    const asking = shell.confirm("Create a Linear issue?", { detached });
+    await tick();
+    pressHotkey();
+    return { dialog, asking };
+  }
+
+  it("a hotkey pressed while a dialog is up PUTS THE LINE IN THE OPEN BAR, and it stays while the dialog does", async () => {
+    const { dialog, asking } = await blockedPressDuringADialog();
+    expect(statusLines()).toEqual([CONFIRM_WAITING]);
+    await tick();
+    expect(statusLines()).toEqual([CONFIRM_WAITING]); // not taken down while it is true
+    dialog.answer(1);
+    await asking;
+  });
+
+  it.each([
+    ["approved", 0],
+    ["cancelled", 1],
+    ["Escape (the dialog's cancelId)", 1],
+  ])("the dialog %s -> the line is taken down", async (_name, response) => {
+    const { dialog, asking } = await blockedPressDuringADialog();
+    dialog.answer(response);
+    await asking;
+    expect(statusLines()).toEqual([CONFIRM_WAITING, null]);
+  });
+
+  it("a dialog that THROWS -> the line is taken down too", async () => {
+    const { dialog, asking } = await blockedPressDuringADialog();
+    dialog.fail();
+    await expect(asking).rejects.toThrow("dialog exploded");
+    expect(statusLines()).toEqual([CONFIRM_WAITING, null]);
+  });
+
+  it("an ATTACHED dialog the same way: the line does not come back with the bar", async () => {
+    const { dialog, asking } = await blockedPressDuringADialog(false);
+    dialog.answer(1);
+    await asking;
+    expect(statusLines()).toEqual([CONFIRM_WAITING, null]);
+  });
+
+  it("TWO QUEUED DIALOGS: taken down only after the LAST — while the second is up it is still true", async () => {
+    const dialog = holdDialog();
+    void shell.showInput();
+    const first = shell.confirm("First?", { detached: true });
+    const second = shell.confirm("Second?", { detached: true });
+    await tick();
+    pressHotkey();
+    dialog.answer(0);
+    await first;
+    await tick();
+    expect(statusLines()).toEqual([CONFIRM_WAITING]);
+    dialog.answer(1);
+    await second;
+    expect(statusLines()).toEqual([CONFIRM_WAITING, null]);
+  });
+
+  it("A DIFFERENT STATUS set meanwhile SURVIVES the dialog closing", async () => {
+    const { dialog, asking } = await blockedPressDuringADialog();
+    shell.narrate("Reading the open email and drafting a reply…"); // something else, still true
+    dialog.answer(1);
+    await asking;
+    expect(statusLines()).toEqual([CONFIRM_WAITING, "Reading the open email and drafting a reply…"]);
+  });
+
+  it("a RESULT that replaced it meanwhile is not followed by a stray clear", async () => {
+    const { dialog, asking } = await blockedPressDuringADialog();
+    shell.showResult("Sent to #fun."); // the renderer drops the status line for a result
+    dialog.answer(1);
+    await asking;
+    expect(statusLines()).toEqual([CONFIRM_WAITING]);
+  });
+
+  it("a NEW INSTRUCTION submitted in the same bar takes it down (while the dialog is still up)", async () => {
+    const { dialog, asking } = await blockedPressDuringADialog();
+    ipcMain.emit("commandbar:submit", {}, "hello to all channels");
+    expect(statusLines()).toEqual([CONFIRM_WAITING, null]);
+    dialog.answer(1);
+    await asking;
+    expect(statusLines()).toEqual([CONFIRM_WAITING, null]); // and nothing more when it closes
+  });
+
+  it("any other status is never taken down by a submit", async () => {
+    void shell.showInput();
+    shell.narrate("Reading the open email…");
+    ipcMain.emit("commandbar:submit", {}, "do it");
+    expect(statusLines()).toEqual(["Reading the open email…"]);
+  });
+});

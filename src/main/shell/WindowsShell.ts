@@ -19,6 +19,7 @@ import type { InputInjector } from "./InputInjector.ts";
 import { virtualKeyFor } from "./mediaKeys.ts";
 import { approveLabel } from "./confirmLabel.ts";
 import { ConfirmBroker } from "./ConfirmBroker.ts";
+import { CONFIRM_WAITING } from "../instructionHotkey.ts";
 import type { CapturedContext, ConfirmOptions, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
 import type { VoiceShell, VoiceState } from "./VoiceShell.ts";
@@ -126,6 +127,11 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // earlier with an instruction half typed in it, never got it back: the next keystroke went
   // nowhere and the user had to click the box. The text and the caret were untouched throughout.
   private barFocusedBeforeDialog: boolean | null = null;
+  // The status line the bar is showing right now, as far as this shell has told it — set by
+  // `narrate`, and forgotten wherever the renderer drops its status (a result, a reset, a new
+  // opening of the bar). Read for ONE purpose: to take down CONFIRM_WAITING once nothing is
+  // waiting (live finding after M23: it outlived a cancelled detached dialog in an open bar).
+  private barStatus: string | null = null;
   // The single open question (`askUser`), if any — its resolver, held on the instance for the
   // reason `pendingInput` is: nothing per-call to strand. Non-null IS "a question is waiting",
   // and it is assigned synchronously, so the hotkey guards can never see the bar asking while
@@ -143,6 +149,9 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     ipcMain.on("commandbar:close", () => this.hide());
     ipcMain.on("commandbar:submit", (_event, text: unknown) => {
       const typed = typeof text === "string" ? text : "";
+      // A new instruction (or an answer) starts here: an old "confirmation waiting" is not
+      // about it. (A new OPENING of the bar is covered by the renderer's own reset on show.)
+      this.clearConfirmWaiting();
       // ONE submit channel, routed by what is open. The two can never both be: a question is
       // refused while a capture is pending, and the instruction hotkey is blocked by a question.
       if (this.pendingAsk !== null) this.endAsk(typed);
@@ -335,6 +344,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     this.window.show();
     this.window.focus();
     this.window.webContents.send("commandbar:show");
+    this.barStatus = null; // the renderer clears its status on show
 
     return new Promise<string>((resolve) => {
       this.pendingInput = resolve;
@@ -449,6 +459,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // alone; `confirm()` brings the bar back, already showing this, once the answer is in.
     if (this.confirmPending) {
       this.window.webContents.send("commandbar:echo", text);
+      this.barStatus = null; // a result replaces the status line in the renderer
       if (!this.window.isVisible()) {
         this.noteHiddenDelivery();
       } else if (this.confirms.showing()?.detached === true && !this.window.isFocused()) {
@@ -465,6 +476,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
       this.window.showInactive();
     }
     this.window.webContents.send("commandbar:echo", text);
+    this.barStatus = null;
     // A never-focused bar (the voice path) gets no blur, so it would sit there forever.
     if (!this.window.isFocused()) {
       this.scheduleAutoHide();
@@ -504,6 +516,17 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     if (!this.window.isVisible() && !this.confirmPending) this.window.showInactive();
     this.cancelAutoHide();
     this.window.webContents.send("commandbar:status", text);
+    this.barStatus = text;
+  }
+
+  // Take the "there's a confirmation waiting" line down — and ONLY that line, and only while it
+  // is still the one on screen. Anything that has replaced it since (a result, a refusal, a
+  // question, another narration) is left alone; so is "Thinking…", which is its own channel.
+  // Called when the last queued dialog has closed, and when the bar's text is submitted.
+  private clearConfirmWaiting(): void {
+    if (this.barStatus !== CONFIRM_WAITING) return;
+    this.barStatus = null;
+    this.window.webContents.send("commandbar:status", null);
   }
 
   // A RESULT reached a bar that is hidden while a dialog is up. For an ATTACHED dialog that is the
@@ -762,6 +785,7 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     this.endCapture();
     this.endAsk(null);
     this.window.webContents.send("commandbar:reset");
+    this.barStatus = null;
     this.window.hide();
   }
 
@@ -993,6 +1017,9 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // not pull focus to itself over that. (Measured: Windows leaves the foreground on the pill
     // in that case too. That is the OS's choice and is left alone here.)
     if (!this.confirmPending) {
+      // Nothing is waiting any more, so the line that said so comes down — whichever way the
+      // last dialog ended. While any dialog is still up (or queued) it stays: it is true.
+      this.clearConfirmWaiting();
       const restore =
         request.detached && this.barFocusedBeforeDialog === true && this.window.isVisible();
       this.barFocusedBeforeDialog = null;

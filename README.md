@@ -481,7 +481,9 @@ hotkey again, it carries on in the background while you say the next thing.
   **chime** plays.
 - **Click the pill** to see the list. **Review…** opens the same confirm dialog as always — the
   pill itself never approves anything. **Resume** brings back a job that needs your screen.
-  You can cancel a job, dismiss a finished one, or mute the chime there.
+  You can cancel a job, dismiss a finished one, or mute the chime there. Pressing the hotkey
+  while that dialog is up says *"There's a confirmation waiting"* in the bar; the line goes
+  away once the dialog is answered, or as soon as you run something new from the bar.
 - **A wait nobody answers expires after 30 minutes** — "expired, not run". The step is never
   run on its own.
 - **Ask "are my agents done yet?"** and it tells you: what is waiting for you, what is still

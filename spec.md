@@ -1303,6 +1303,17 @@ wherever Windows puts it (measured: the pill). An attached confirm is unchanged.
 `tests/WindowsShell.capture.test.ts` and `CommandBar.test.tsx`; the real-window half is
 `scripts/ask-recon/focus-after-dialog.ts`.
 
+**"There's a confirmation waiting" comes down when nothing is** (live finding after M23). A
+hotkey pressed while any dialog is up is blocked and says so in the bar — in an already-open
+bar too, which a detached dialog never hides. Nothing used to take that line down: a status
+line goes only when a result, a reset or a new opening of the bar replaces it, so after the
+dialog was cancelled the open bar still said a confirmation was waiting. The shell now
+remembers the status line it last sent and, if it is still exactly that sentence, clears it
+when the last queued dialog closes (approve, cancel, Esc or a throw) and when the bar's text is
+submitted. Any other status — a narration, a result, a question — is left alone, and so is
+"Thinking…", which is its own channel. Pinned by `tests/WindowsShell.capture.test.ts`; the
+real-window half is `scripts/ask-recon/confirm-waiting-line.ts`.
+
 ### The status pill
 
 A frameless, non-focusable, always-on-top window at the bottom right of the primary display's
