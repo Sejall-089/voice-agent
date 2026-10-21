@@ -323,6 +323,7 @@ decline the plan than to announce one that was always going to die halfway. Four
 instruction get *"That's more than 3 steps. Say the first three, then the rest."* If the model
 packs several actions into one made-up "parallel" step instead, it is asked once more; a plan
 that comes back that way says *"I planned N steps. If you asked for more, say the rest after."*
+If it packs them again, the answer is the same "more than 3 steps" sentence.
 
 **It checks the names in a plan before it starts, and asks about a channel it doesn't know
 (M21).** "File this bug on GitHub and tell the bugs channel" used to create the issue and only

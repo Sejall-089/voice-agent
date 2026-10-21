@@ -3714,7 +3714,10 @@ Post-v0:
       Now a lone call or a plan step named exactly `multi_tool_use.parallel` is the multi-call
       case: asked once more with the fixed `PLAN_RETRY_INSTRUCTION`, then refused by
       `refuseMultiple` (names logged, never `logMiss` — a top-level wrapper used to reach it).
-      Never unwrapped. Any other unknown name is refused as before, with no retry. A plan that
+      Never unwrapped. Any other unknown name is refused as before, with no retry. When BOTH
+      answers were the wrapper (the model was packing actions to fit the cap), the refusal uses
+      the over-cap wording below rather than the multi-call one; a genuine multi-call answer,
+      either time, keeps the multi-call wording (changed 2026-10-22 after the live trials). A plan that
       ran only after that retry adds "I planned N steps. If you asked for more, say the rest
       after." to its preview, said as its own utterance — the only sign of an action dropped to
       fit the cap. A plan over the cap now says "That's more than 3 steps. Say the first three,

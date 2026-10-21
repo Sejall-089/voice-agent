@@ -388,6 +388,8 @@ describe("as a job — attached and detached", () => {
 // text, then refused as one. Exact name only; never unwrapped; never a miss.
 describe("multi_tool_use.parallel: the multi-call case in another shape", () => {
   const WRAPPER = "multi_tool_use.parallel";
+  // Written out, not imported: a test must not agree with the code by reading the same constant.
+  const CAP = "That's more than 3 steps. Say the first three, then the rest.";
   const LIVE = "summarize this and send to fun then create a issue of body in linear and write in notion";
   const wrapperAsStep = planWith([{ tool: "functions.readThing" }, { tool: WRAPPER, arguments: { tool_uses: [] } }]);
   const wrapperAsCall: ToolChoice = { kind: "tool", name: WRAPPER, input: { tool_uses: [] } };
@@ -416,7 +418,7 @@ describe("multi_tool_use.parallel: the multi-call case in another shape", () => 
     ["step, then step", wrapperAsStep, wrapperAsStep],
     ["call, then call", wrapperAsCall, wrapperAsCall],
     ["step, then call", wrapperAsStep, wrapperAsCall],
-  ] as const)("TWICE (%s): refused as multi-call, exactly 2 provider calls, nothing run, no miss", async (_label, first, second) => {
+  ] as const)("TWICE (%s): refused with the STEP-CAP wording — the model was packing steps — exactly 2 provider calls, nothing run, no miss", async (_label, first, second) => {
     const h = harness([first, second]);
     let missCalls = 0;
     const originalMiss = h.log.logMiss.bind(h.log);
@@ -430,11 +432,45 @@ describe("multi_tool_use.parallel: the multi-call case in another shape", () => 
     expect(h.ran).toEqual([]);
     expect(h.shell.confirmMessages).toEqual([]);
     expect(outcome.status).toBe("refused");
-    expect(h.shell.results).toEqual([`${MULTIPLE_TOOL_CALLS}\n\nWhat I heard: “${LIVE}”`]);
+    // Live, gpt-5-mini low, 2 trials of 3: the wrapper both times. What the user can act on is
+    // "say fewer at once", not "I decided more than one thing".
+    expect(h.shell.results).toEqual([`${CAP}\n\nWhat I heard: “${LIVE}”`]);
+    expect(h.shell.spoken).toEqual([CAP]);
     expect(missCalls).toBe(0);
-    // Logged with the NAMES of the last answer, as the model wrote them.
+    // Logged as before — the NAMES of the last answer, as the model wrote them — with the wording.
     const names = second.kind === "plan" ? second.steps.map((step) => step.tool) : [WRAPPER];
-    expect(h.log.entries).toEqual([expect.objectContaining({ status: "refused", arguments: { calls: names } })]);
+    expect(h.log.entries).toEqual([expect.objectContaining({ status: "refused", arguments: { calls: names }, result: CAP })]);
+  });
+
+  it.each([
+    ["a native multi-call, then the wrapper", MULTI, "wrapper"],
+    ["the wrapper, then a native multi-call", "wrapper", MULTI],
+  ] as const)("MIXED (%s): the GENERIC multi-call wording — only a wrapper both times means packing", async (_label, first, second) => {
+    const h = harness([first === "wrapper" ? wrapperAsStep : first, second === "wrapper" ? wrapperAsStep : second]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.length).toBe(2);
+    expect(h.ran).toEqual([]);
+    expect(outcome.status).toBe("refused");
+    expect(h.shell.results).toEqual([`${MULTIPLE_TOOL_CALLS}\n\nWhat I heard: “${LIVE}”`]);
+    expect(h.log.misses).toEqual([]);
+  });
+
+  it("a GENUINE multi-call answer twice keeps the generic wording, unchanged", async () => {
+    const h = harness([MULTI, MULTI]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.length).toBe(2);
+    expect(outcome.status).toBe("refused");
+    expect(h.shell.results).toEqual([`${MULTIPLE_TOOL_CALLS}\n\nWhat I heard: “${LIVE}”`]);
+    expect(h.log.entries).toEqual([expect.objectContaining({ status: "refused", result: MULTIPLE_TOOL_CALLS })]);
+  });
+
+  it("the wrapper, then a 4-STEP plan (live, trial 3): the step-cap wording, nothing run", async () => {
+    const h = harness([wrapperAsStep, plan("readThing", "noteThing", "readThing", "noteThing")]);
+    const outcome = await h.planner.run(LIVE);
+    expect(h.llm.asked.length).toBe(2);
+    expect(h.ran).toEqual([]);
+    expect(outcome.status).toBe("refused");
+    expect(h.shell.results).toEqual([CAP]);
   });
 
   it("an ARBITRARY unknown name is still an ordinary unknown tool: refused with NO retry", async () => {
@@ -540,7 +576,8 @@ describe("multi_tool_use.parallel: the multi-call case in another shape", () => 
     expect(ran).toEqual([]);
     expect(w.shell.results).toEqual([]);
     expect(w.manager.get("job1")?.state).toBe("failed");
-    expect(w.log.entries[0]).toMatchObject({ status: "refused", detached: true, arguments: { calls: ["functions.readThing", WRAPPER] } });
+    expect(w.log.entries[0]).toMatchObject({ status: "refused", detached: true, arguments: { calls: ["functions.readThing", WRAPPER] }, result: CAP });
+    expect(w.manager.get("job1")?.lines.at(-1)).toContain(CAP);
     expect(w.log.misses).toEqual([]);
   });
 });

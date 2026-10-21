@@ -19,6 +19,7 @@ import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts"
 import { emailOpenHint } from "./contextHints.ts";
 import {
   MAX_QUESTIONS_PER_CHAIN,
+  OVER_STEP_CAP,
   SAVED_HOLD_MS,
   canonicalToolName,
   checkUnreadContent,
@@ -306,7 +307,12 @@ export class Planner {
       const wrappedAgain = parallelWrapperCalls(choice);
       if (wrappedAgain !== null) choice = { kind: "multiple", tools: wrappedAgain };
       if (choice.kind === "multiple") {
-        return await this.refuseMultiple(instruction, choice.tools);
+        // The wrapper BOTH times means the model was packing actions into one "step" to fit
+        // the step cap, so the user is told the thing they can act on — say fewer at once —
+        // not that something was decided twice (live, gpt-5-mini low: 2 trials of 3). A
+        // genuine multi-call answer, either time, keeps the multi-call wording.
+        const packing = wrapped !== null && wrappedAgain !== null;
+        return await this.refuseMultiple(instruction, choice.tools, packing ? OVER_STEP_CAP : MULTIPLE_TOOL_CALLS);
       }
     }
 
@@ -1116,18 +1122,19 @@ export class Planner {
   private async refuseMultiple(
     instruction: string,
     tools: readonly string[],
+    reason: string = MULTIPLE_TOOL_CALLS,
   ): Promise<PlannerOutcome> {
     this.log.logAction({
       ts: new Date().toISOString(),
       instruction,
       tool: null,
       arguments: { calls: [...tools] },
-      result: MULTIPLE_TOOL_CALLS,
+      result: reason,
       status: "refused",
     });
-    const shown = `${MULTIPLE_TOOL_CALLS}\n\nWhat I heard: “${instruction.trim()}”`;
+    const shown = `${reason}\n\nWhat I heard: “${instruction.trim()}”`;
     this.shell.showResult(shown);
-    await this.say(toSpokenResult(MULTIPLE_TOOL_CALLS));
+    await this.say(toSpokenResult(reason));
     return { status: "refused", tool: null, result: shown, proposed: { calls: tools } };
   }
 
