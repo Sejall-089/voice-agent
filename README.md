@@ -488,7 +488,10 @@ hotkey again, it carries on in the background while you say the next thing.
 
 The chime never plays while you are dictating, recording an instruction, or the app is
 speaking; it waits, and plays once afterwards only if something is still waiting. One copy of
-the app runs at a time: starting it again just tells you it is already running.
+the app runs at a time: starting it again just tells you it is already running. That holds for
+a second `npm run dev` too: its pre-step skips the SQLite rebuild when the running app has the
+binary open (it could not be replaced anyway), and if something else has it open — a test run —
+it stops with a sentence saying so instead.
 
 Design: `spec.md` §5c. What is tested, what three recon scripts measured, and what still needs
 a person: `spec.md` §9, M23.

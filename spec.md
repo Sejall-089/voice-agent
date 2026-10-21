@@ -159,7 +159,13 @@ two-tracker choice and the failure wording are NOT yet run live (§9):**
   involved, and it is never played over a recording, a dictation or the app's own voice.
 - **`jobStatus`**, a `safe` tool: "are my agents done yet?" is answered from the job records by
   a fixed template. No other tool is added.
-- **One running instance.** A second launch focuses the first and exits.
+- **One running instance.** A second launch focuses the first and exits. Under `npm run dev`
+  that needed one more step (live finding after M23): `predev` force-rebuilt the SQLite binary,
+  which Windows will not delete while the running app has it loaded, so npm stopped before a
+  second Electron reached the lock. `scripts/predev.mjs` now skips the rebuild when the binary
+  is in use **and** recorded as the Electron build (every rebuild clears a stamp first and
+  writes what it built only on success, `node_modules/better-sqlite3/.native-target`); held and
+  anything else, it fails with a sentence saying so. Real launch: `scripts/second-launch-recon.mjs`.
 - **Still out**: resuming a job after a restart, a job that plans again after seeing a result
   (the open-ended loop below is unchanged), scheduling, answering a confirm by voice, a tray
   icon, and any pill control beyond open-the-dialog / cancel / mute.
