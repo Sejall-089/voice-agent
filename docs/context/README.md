@@ -5,9 +5,10 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-23): M0-M27 shipped; M27 closed 2026-10-23, with named gaps.**
+**Current status (as of 2026-10-23): M0-M27 shipped and closed; M28 code complete
+2026-10-23, live pass pending. M27's plan-choice finding stays open.**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M27 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M28 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -47,8 +48,16 @@ only**. For M20 to M27 the status lives in `spec.md` (§9's entry for each, and 
   polls the mouse buttons while the list is open); a mid-step cancel says Cancelling, a too-late
   one says so, and a job cancelled after a step ran stays with its message. One finding **not
   fixed**, under investigation: with clipboard text selected, "create a linear issue and send to
-  fun" planned an extra "summarize the clipboard" step. `npm test` now passes 3021 across 136
-  files, 96 skipped (the opt-in real-model evals and real-Piper check).
+  fun" planned an extra "summarize the clipboard" step. 3021 tests passed across 136 files at
+  the close, 96 skipped.
+- **M28 - refuse unfilled placeholders in plan arguments; the plan-choice eval set.** Code
+  complete 2026-10-23, **live pass pending**; M27's plan-choice finding **still open**. `docs/M28-live-checklist.md`: 0
+  ticked, 2 open (not yet run). The finding was reproduced and measured with a new eval set
+  (gpt-5-mini, 3 trials a case): the extra summarize step comes with a long clipboard. Two
+  wordings fixed it and each broke a control, so both were reverted; the baseline and the two
+  runs are in `spec.md` §9 (M28). Shipped: the planner refuses a plan whose arguments hold a
+  placeholder nothing fills (`{selected_text}`). `npm test` now passes 3039 across 137 files, 96
+  skipped (the opt-in real-model evals and real-Piper check).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -66,7 +75,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27) and the eight checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28) and the nine checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`

@@ -4,7 +4,9 @@ import { buildRegistry, toToolSchemas } from "../../src/core/registry.ts";
 import { realModelGate } from "./realModel.ts";
 import { CONNECTORS, loadConnectorTools } from "../../src/core/mcp/load.ts";
 import { UnavailableConnection } from "../../src/core/mcp/SdkConnection.ts";
-import type { CapturedContext } from "../../src/core/types.ts";
+import type { CapturedContext, PlannedStep, ToolInput } from "../../src/core/types.ts";
+import { canonicalToolName, checkUnfilledBlanks, checkUnreadContent } from "../../src/core/chain.ts";
+import { linearConnector } from "../../src/core/mcp/connectors/linear.ts";
 
 // DOES THE REAL MODEL REACH FOR `plan` WHEN IT SHOULD? (M19)
 //
@@ -87,16 +89,23 @@ const connectors = loadConnectorTools({
 
 // The menu the running app offers with everything configured — tool choice gets harder as the
 // menu grows, and a small menu would flatter the result.
-const MENU = toToolSchemas(
-  buildRegistry({
-    gmail: true,
-    notion: true,
-    calendar: true,
-    speech: true,
-    pointing: true,
-    connectors,
-  }),
-);
+const REGISTRY = buildRegistry({
+  gmail: true,
+  notion: true,
+  calendar: true,
+  speech: true,
+  pointing: true,
+  connectors,
+});
+const MENU = toToolSchemas(REGISTRY);
+
+// What the planner's pre-flight would do with this answer before anything is narrated (core/
+// chain.ts) — so a plan the app would refuse is reported as refused, not as something that runs.
+function appWould(instruction: string, context: CapturedContext, steps: readonly PlannedStep[]): string {
+  if (!checkUnfilledBlanks(instruction, context, steps).ok) return "   [the app refuses it: a blank nothing fills]";
+  if (!checkUnreadContent(instruction, context, steps, REGISTRY).ok) return "   [the app refuses it: nothing read what was pointed at]";
+  return "";
+}
 
 interface Seen {
   label: string;
@@ -239,12 +248,90 @@ const CLIPBOARD: readonly Case[] = [
   { phrase: "file this bug in linear and tell the social channel", expected: BUG_CHAIN },
 ];
 
+// M27'S LIVE FINDING. Text selected, no email open, "create a linear issue and send to fun": the
+// plan was summarize > create > send, and nobody asked for a summary. The selected text is
+// already in the prompt, so the create can take it as given. `given` marks the cases whose create
+// must carry the clipboard word for word — and whose confirm dialog must then show all of it,
+// which is what lets a person notice an unrelated clipboard before approving.
+//
+// STILL OPEN (M28, spec.md §9). On gpt-5-mini at low effort the extra step comes with LENGTH:
+// 0 of 6 with a one-line clipboard, 4 of 6 with a long one. Two wordings were measured on this
+// set and reverted: "use selected text as given", unconditional, took the long and unrelated
+// rows from 6 of 9 to 9 of 9 and broke explicit "summarize" and the open-email verb rule; made
+// conditional on the verb rule, it fixed one of those two. The set is the baseline the next
+// attempt is measured against, before and after.
+const CREATE_AND_SEND = ["linear__create_issue", "sendMessage"];
+const SHORT_BUG =
+  "Login button does nothing on mobile Safari after the 2.3 update: tapping it shows no " +
+  "spinner and no error.";
+const selected = (label: string, selectedText: string): Seen => ({
+  label,
+  context: { selectedText, activeApp: null, activeWindowTitle: null },
+});
+const SHORT_CLIP = selected("short clipboard: a one-line bug", SHORT_BUG);
+const LONG_CLIP = selected("long clipboard: prose + stack trace", LONG_TRACE);
+
+interface M28Case extends Case {
+  seen: Seen;
+  times: number;
+  given?: true;
+}
+
+const M28_PHRASES = ["create a linear issue and send to fun", "log this as an issue and let #bugs know"];
+const M28: readonly M28Case[] = [
+  ...M28_PHRASES.flatMap((phrase) =>
+    [SHORT_CLIP, LONG_CLIP].map((seen) => ({
+      phrase,
+      expected: CREATE_AND_SEND,
+      seen,
+      times: 3,
+      given: true as const,
+    })),
+  ),
+  // Controls. Asked to summarize, it still summarizes first.
+  {
+    phrase: "summarize this and file it in Linear",
+    expected: ["summarize", "linear__create_issue"],
+    seen: LONG_CLIP,
+    times: 3,
+  },
+  // With an email open, filing still reads the email, even with a bug-shaped clipboard beside it.
+  {
+    phrase: "file this bug in linear and tell the social channel",
+    expected: BUG_CHAIN,
+    seen: hintedWith("short clipboard: a one-line bug", SHORT_BUG),
+    times: 3,
+  },
+  // A clipboard that has nothing to do with the request goes in as it is, and the confirm shows
+  // all of it.
+  {
+    phrase: "create a linear issue and send to fun",
+    expected: CREATE_AND_SEND,
+    seen: UNRELATED_CLIPBOARD,
+    times: 3,
+    given: true,
+  },
+];
+
+const squash = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+// The confirm dialog's text for a create: the pinned definition's own `describe`, which is what
+// the adapter's `confirmSummary` shows. Not `confirmSummary` itself — it validates against the
+// server's schema first, and the tools here have no server behind them. (No email is open in any
+// `given` case, so the adapter's "from your clipboard text" label never applies.)
+function confirmText(args: ToolInput): string {
+  const create = linearConnector.tools.find((tool) => tool.name === "create_issue");
+  if (create?.describe === undefined) throw new Error("Linear's create_issue has no describe");
+  return create.describe(args, { defaultTeam: "Engineering" });
+}
+
 const results: {
   seen: string;
   phrase: string;
   expected: string;
   chosen: string;
   note: string;
+  ok: boolean;
 }[] = [];
 
 // Every call a run makes, worked out BEFORE anything is called, so a dry run can say how many.
@@ -270,6 +357,11 @@ function plannedRuns() {
   //   M19_PLAN_SET=hinted     WHAT THE APP SENDS NOW with an email open (`emailOpen`):
   //                           the clipboard phrase, the core set, and the control that
   //                           "summarize this" with clipboard text stays `summarize`    5 x TRIALS
+  //   M19_PLAN_SET=m28        M27's live finding: "create a linear issue and send to fun" and
+  //                           "log this as an issue…" with a short and a long clipboard, no
+  //                           email (no summarize step; the clipboard as given); the controls
+  //                           (asked to summarize, email open, unrelated clipboard shown in
+  //                           full); the five CASES and the three verb controls          45
   //   M19_PLAN_TRIALS=3       repeats per phrase (default 1)
   const set = process.env["M19_PLAN_SET"] ?? "all";
   const trials = Math.max(1, Number(process.env["M19_PLAN_TRIALS"] ?? "1") || 1);
@@ -334,6 +426,14 @@ function plannedRuns() {
     { ...reply, seen: HINTED_LONG_TRACE, times: 3 }, // "reply" acts on the email, via draftReply
     { ...summarize, seen: HINTED_WITH_CLIPBOARD, times: 3 }, // "summarize" acts on the CLIPBOARD
   ];
+  // M28: the new cases and their controls, then the recorded phrasings — every CASES phrase as the
+  // app sees it, and the verb controls — each three times, so "still chooses as before" is
+  // measured on the same wording before and after.
+  const m28 = [
+    ...M28,
+    ...CASES.map((entry) => ({ ...entry, seen: AS_THE_APP_SEES_IT, times: 3 })),
+    ...verbControls,
+  ];
   const counted =
     set === "longfix"
       ? longfix
@@ -341,7 +441,9 @@ function plannedRuns() {
         ? summarizeLong
         : set === "verbs"
           ? [...longfix, ...verbControls]
-          : selected.map((entry) => ({ ...entry, times: trials }));
+          : set === "m28"
+            ? m28
+            : selected.map((entry) => ({ ...entry, times: trials }));
   return counted.flatMap((entry) =>
     Array.from({ length: entry.times }, (_, index) => ({ ...entry, trial: index + 1 })),
   );
@@ -368,7 +470,9 @@ describe("plan-choice eval configuration", () => {
 });
 
 describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19)", () => {
-  for (const { phrase, expected, seen, trial } of RUNS) {
+  for (const run of RUNS) {
+    const { phrase, expected, seen, trial } = run;
+    const given = "given" in run && run.given === true;
     it(`[${seen.label}] #${trial} "${phrase}" -> ${expected.join(" > ")}`, async () => {
       if (llm === null) throw new Error("the plan-choice eval is a dry run");
       const choice = await llm.chooseTool(phrase, seen.context, MENU, null);
@@ -379,30 +483,62 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
         choice.kind === "none" && choice.text
           ? `: ${choice.text.replace(/\s+/g, " ").slice(0, 200)}`
           : "";
-      const chosen =
+      // Names as the planner reads them: a `functions.` prefix is the provider's namespace, and
+      // `canonicalToolName` strips it before anything is checked (M19). Noted, not failed.
+      const names = MENU.map((tool) => tool.name);
+      const raw =
         choice.kind === "plan"
           ? choice.steps.map((step) => step.tool)
           : choice.kind === "tool"
             ? [choice.name]
             : [`(${choice.kind}${said})`];
+      const chosen = raw.map((name) => canonicalToolName(name, names));
+      const prefixed = raw.some((name, index) => name !== chosen[index]) ? "   [functions. prefix]" : "";
       // What went into the issue when the plan did NOT read the email first — the live run
       // filed one whose description the model had simply made up.
       const create =
         choice.kind === "plan"
-          ? choice.steps.find((step) => step.tool === "linear__create_issue")
+          ? choice.steps.find((step) => canonicalToolName(step.tool, names) === "linear__create_issue")
           : undefined;
       const invented =
         create !== undefined && !chosen.includes("readEmail")
           ? `   [description: ${JSON.stringify(create.arguments["description"] ?? null).slice(0, 110)}]`
           : "";
+      // M28: did the create take the selected text as given, and does its confirm show all of it?
+      const clip = squash(seen.context.selectedText ?? "");
+      const description = String(create?.arguments["description"] ?? "");
+      const asGiven = given && create !== undefined && squash(description).includes(clip);
+      const shown =
+        asGiven && create !== undefined ? squash(confirmText(create.arguments)).includes(clip) : false;
+      const givenNote = !given
+        ? invented
+        : asGiven
+          ? `   [description: the clipboard as given; confirm shows all of it: ${shown ? "yes" : "NO"}]`
+          : `   [description NOT as given: ${JSON.stringify(create?.arguments["description"] ?? null).slice(0, 110)}]`;
       results.push({
         seen: seen.label,
         phrase,
         expected: expected.join(" > "),
         chosen: chosen.join(" > "),
-        note: invented,
+        note:
+          givenNote +
+          prefixed +
+          appWould(
+            phrase,
+            seen.context,
+            choice.kind === "plan"
+              ? choice.steps.map((step) => ({ ...step, tool: canonicalToolName(step.tool, names) }))
+              : choice.kind === "tool"
+                ? [{ tool: chosen[0] ?? "", arguments: choice.input, describe: "" }]
+                : [],
+          ),
+        ok: chosen.join(" > ") === expected.join(" > ") && (!given || shown),
       });
       expect(chosen).toEqual(expected);
+      if (given) {
+        expect(asGiven).toBe(true);
+        expect(shown).toBe(true);
+      }
 
       if (choice.kind === "plan" && expected === BUG_CHAIN) {
         // The two things the worked example exists to teach: the email goes in as {step1}, and
@@ -425,9 +561,9 @@ describe.skipIf(!CONFIGURED)("does the REAL model plan the bug-report chain (M19
         `  connector tools on the menu: ${connectors.map((tool) => tool.name).join(", ")}`,
         ...results.map(
           (r) =>
-            `  ${r.chosen === r.expected ? "ok      " : "MISMATCH"}  [${r.seen}] "${r.phrase}"\n            -> ${r.chosen}${r.note}`,
+            `  ${r.ok ? "ok      " : "MISMATCH"}  [${r.seen}] "${r.phrase}"\n            -> ${r.chosen}${r.note}`,
         ),
-        `  ${results.filter((r) => r.chosen === r.expected).length}/${results.length} matched`,
+        `  ${results.filter((r) => r.ok).length}/${results.length} matched`,
         "",
       ].join("\n"),
     );

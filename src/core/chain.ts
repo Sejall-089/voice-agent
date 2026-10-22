@@ -425,6 +425,75 @@ export function isUnreadContentRefusal(
   return entry.status === "refused" && entry.tool === null && entry.result === UNREAD_CONTENT;
 }
 
+// --- A blank the model left, which nothing will fill (M28) ------------------------------------
+//
+// THE FAILURE. Measured in M28's eval: "log this as an issue and let #bugs know", nothing on
+// screen, came back as a create whose description was the literal text "{selected_text}". It is
+// not a `{stepN}`, so nothing substitutes it; the body is not blank, so `checkUnreadContent`
+// passes it; and the issue would be filed reading "{selected_text}" once a person approved it.
+//
+// THE RULE. Refuse when an argument holds a BLANK — a brace pair around a single bare name,
+// `{selected_text}` or `{clipboard}` — that is not a `{stepN}` and that the user's own text does
+// not contain. Refuses; never rewrites.
+//
+// HOW A BLANK IS TOLD FROM A BRACE IN SOMEONE'S TEXT:
+//   1. SHAPE: `{`, optional spaces, a name — a letter or underscore, then letters, digits, `_`,
+//      `.` or `-` — optional spaces, `}`. Nothing else inside. JSON (`{"a": 1}`), code
+//      (`{ return x; }`), sets (`{1, 2}`), an empty `{}` and prose in braces (`{see below}`) have
+//      a quote, a colon, a comma, a digit first, nothing, or a space between words, and are not
+//      this shape.
+//   2. WHOSE TEXT: a blank that appears in the instruction or the captured clipboard is the
+//      user's — a format string they copied ("Hello {name}"), a template they dictated — and
+//      copying it into an argument is copying their words. Only a blank the model wrote itself
+//      is refused.
+//   3. `{stepN}` in any of the lenient forms `PLACEHOLDER` accepts is a reference, and
+//      `validatePlan` already judges those.
+//
+// Like `checkUnreadContent`, it runs on every path before anything is narrated, asked, admitted
+// or run, and reads arguments only — never which tool it is.
+export const UNFILLED_BLANK =
+  "I didn't start that. My plan had a blank in curly braces that nothing would fill in, so " +
+  "it would have gone out as those characters. Copy the text you mean, or say it, then ask again.";
+
+const BLANK = /\{\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\}/g;
+
+// Every blank in `steps`' arguments that is neither a `{stepN}` nor in the user's own text.
+export function unfilledBlanks(
+  steps: readonly PlannedStep[],
+  theirs: readonly (string | null)[],
+): string[] {
+  const found: string[] = [];
+  for (const step of steps) {
+    forEachString(step.arguments, (text) => {
+      for (const match of text.matchAll(BLANK)) {
+        const blank = match[0];
+        if (hasPlaceholder(blank)) continue;
+        if (theirs.some((own) => own !== null && own.includes(blank))) continue;
+        found.push(blank);
+      }
+    });
+  }
+  return found;
+}
+
+export function checkUnfilledBlanks(
+  instruction: string,
+  context: Pick<CapturedContext, "selectedText">,
+  steps: readonly PlannedStep[],
+): PlanCheck {
+  return unfilledBlanks(steps, [instruction, context.selectedText]).length === 0
+    ? { ok: true }
+    : { ok: false, reason: UNFILLED_BLANK };
+}
+
+// Kept out of the next planning call's previous turn, like the unread-content refusal: its "ask
+// again" is advice to the person, not context for the model.
+export function isUnfilledBlankRefusal(
+  entry: Pick<ActionLogEntry, "status" | "tool" | "result">,
+): boolean {
+  return entry.status === "refused" && entry.tool === null && entry.result === UNFILLED_BLANK;
+}
+
 // Substitute the results of steps that have ALREADY RUN into this step's arguments.
 //
 // Called by the planner at the moment execution reaches this step and before its gate fires —

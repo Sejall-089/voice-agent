@@ -380,6 +380,14 @@ Open the email or copy the text, then ask again."* An issue you dictate ("create
 titled login button is broken") is never refused for having no description. See spec.md §5b,
 "Content pointed at, never read".
 
+**It won't send a blank.** If a plan's arguments hold a placeholder nothing will fill in — the
+model writing `{selected_text}` or `{clipboard}` instead of the text itself — it refuses before
+anything runs: *"I didn't start that. My plan had a blank in curly braces that nothing would
+fill in, so it would have gone out as those characters. Copy the text you mean, or say it, then
+ask again."* `{step1}` and the like are real references and are fine, and so is text you copied
+that happens to contain braces (JSON, a template's `{name}`). See spec.md §5b, "A blank nothing
+fills".
+
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
 you later.
@@ -1010,7 +1018,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3021 tests across 136 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3039 tests across 137 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1021,6 +1029,17 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
+**M28 (refuse unfilled placeholders; the plan-choice eval set) is code complete (23 Oct 2026),
+live pass pending: its two live boxes are not yet run. M27's plan-choice finding stays open.** M27's finding — with
+a long clipboard, "create a linear issue and send to fun" adds a "summarize the clipboard" step
+nobody asked for — was reproduced and measured: it comes with length (0 of 6 trials with a
+one-line clipboard, 4 of 6 with a long one). Two prompt wordings removed the extra step but each
+broke something that works today (an explicit "summarize", and filing an open email when text
+is also copied), so both were reverted and the app plans as it did at M27. What shipped: the
+planner now refuses a plan whose arguments hold a placeholder nothing fills, like
+`{selected_text}`, before anything runs. **3039 tests green across 137 files, 96 skipped.** See
+`docs/M28-live-checklist.md` and `spec.md` §9 (M28).
+
 **M27 (three pill fixes from M26's live findings) is closed (23 Oct 2026), after a live run by a
 person, with named gaps.** The label counts every group present ("1 running · 2 done") and the
 pill widens to fit; Dismiss and Cancel keep the list open, and "Dismiss all" sits beside the
@@ -1030,7 +1049,7 @@ so; a job cancelled after it had done something stays in the pill with what it d
 watched 10 of the checklist's 26 boxes; the rest are covered by tests or scripts against real
 windows. One finding is **not fixed**, under investigation: with clipboard text selected, "create
 a linear issue and send to fun" planned an extra "summarize the clipboard" step nobody asked
-for. **3021 tests green across 136 files, 96 skipped.** See `docs/M27-live-checklist.md` and
+for. **3021 tests green across 136 files, 96 skipped** (at M27's close). See `docs/M27-live-checklist.md` and
 `spec.md` §9 (M27).
 
 **M26 (a finished background job stays in the pill until seen) is closed (22 Oct 2026), after

@@ -1149,6 +1149,34 @@ four recorded misses (six entries) and nothing else. It does not catch the LOUD 
 "summarize the clipboard, then create" plan is fed by `{step1}`, and its preview names the
 clipboard) or a lone create that drops a send (a different failure).
 
+### A blank nothing fills (added 2026-10-23, M28)
+
+Measured in M28's plan-choice eval: "log this as an issue and let #bugs know", nothing on screen,
+came back once as a create whose description was the literal `"{selected_text}"`. It is not a
+`{stepN}`, so nothing substitutes it; the body is not blank, so `checkUnreadContent` passes it;
+and once approved the issue would read "{selected_text}".
+
+`checkUnfilledBlanks` (`core/chain.ts`, pure) refuses when any argument, at any depth, holds a
+**blank** that is not the user's own text. How a blank is told from a brace in real text:
+
+1. **Shape.** `{`, optional spaces, one bare name (a letter or `_`, then letters, digits, `_`,
+   `.`, `-`), optional spaces, `}` — `{selected_text}`, `{ clipboard }`, `{email.body}`. JSON
+   (`{"a": 1}`), code (`{ return x; }`), sets (`{1, 2}`), `{}` and prose in braces
+   (`{see below}`) are not this shape.
+2. **Whose text.** A blank that appears in the instruction or the captured clipboard is the
+   user's (a copied "Hello {name}" template) and passes; a clipboard holding one blank does not
+   excuse a different one.
+3. **References.** Anything the `{stepN}` parser accepts is a reference, judged by
+   `validatePlan`. A near-miss it does not accept (`{step_one}`) is a blank.
+
+**Refuses; never rewrites.** Where: on a plan after `validatePlan` (so a malformed `{stepN}`
+keeps its own refusal) and before `checkUnreadContent` and the one-step branch; on a lone call
+before `checkUnreadContent`. What the user gets: one fixed ASCII paragraph, "I didn't start that.
+My plan had a blank in curly braces that nothing would fill in, so it would have gone out as
+those characters. Copy the text you mean, or say it, then ask again." Logged `refused`,
+`tool: null`, never through `logMiss`, and kept out of the next planning call's previous turn
+(`isUnfilledBlankRefusal`), like the unread-content refusal.
+
 ### Deliberately deferred
 
 No new tools; no conditional branching mid-chain ("if I'm free at 3, book X, otherwise Y" — a
@@ -4607,7 +4635,8 @@ Post-v0:
       'Summarize the selected clipboard text', which the instruction did not ask for. Under
       investigation." No M27 change touches planning; the cause is not known, and the next step
       is to reproduce it — with the clipboard state recorded, as M19's plan-choice lesson says —
-      before anything is edited.
+      before anything is edited. *(M28 reproduced and measured it: it comes with a long
+      clipboard. Two wordings were tried and reverted; still open. See M28.)*
 
       **Known gaps / open limits:** another program polling the mouse buttons can take the
       "pressed since" bit, so a very short tap may then be missed; taps under ~15 ms rely on that
@@ -4615,6 +4644,115 @@ Post-v0:
       secondary display or with mixed scaling is not measured; the too-late wording is in memory
       only (after a restart the row reads as plain done); `PILL_LABEL_MAX_WIDTH` (348 px) and
       "+N more" were reached only by script; the 16 open boxes above.
+
+- [ ] **M28 — refuse unfilled placeholders in plan arguments; the plan-choice eval set.**
+      **Code complete 2026-10-23, live pass pending (0 of 2 boxes ticked —
+      `docs/M28-live-checklist.md`). M27's plan-choice finding stays open.** M28 set out to fix that
+      finding with prompt wording. Two wordings were measured and both reverted; what shipped is
+      a deterministic check the measurement turned up, and the eval set as the baseline for the
+      next attempt. One commit.
+
+      **The finding, reproduced.** M27's live run: with text selected and no email open,
+      "create a linear issue and send to fun" planned summarize > create > send. Four texts push
+      toward a reading step and none says text already in the prompt is used as given:
+      `CHOOSE_SYSTEM`'s "plan the tool that reads it as an EARLIER step" (`prompt.ts`), the plan
+      tool's worked example (`plan.ts`), the Linear and GitHub create descriptions ("in a plan
+      this is normally an earlier step's whole result") and `summarize`'s own description.
+
+      **The eval set** (`tests/eval/planChoice.eval.test.ts`, `M19_PLAN_SET=m28`, 45 calls,
+      3 trials a case, gpt-5-mini at low effort — the configured planning model). `given` cases
+      also check the create's description holds the whole clipboard and that the Linear
+      definition's `describe` (the dialog's text) shows all of it. Tool names are scored the way
+      the planner reads them (`canonicalToolName`), and each trial records what the planner's
+      pre-flight would do with it (`checkUnfilledBlanks`, `checkUnreadContent`). Clipboards:
+      short (a one-line bug, ~110 chars), long (prose + stack trace, ~1,500), unrelated (offsite
+      notes, ~300).
+
+      **Baseline — the app's wording, unchanged by M28** (54 answered calls: the 45, and 9
+      re-run after an eval-harness bug lost their plans; "as given" = the whole clipboard in the
+      description and in the dialog):
+
+      | Phrase | On screen | Trial 1 | Trial 2 | Trial 3 | Expected | Result |
+      |---|---|---|---|---|---|---|
+      | create a linear issue and send to fun | short clipboard | create > send, as given | create > send, as given | create > send, as given | create > send, as given | 3/3 |
+      | create a linear issue and send to fun | long clipboard | create only, no description, no send | **summarize** > create > send | create > send, as given | create > send, as given | 1/3 |
+      | log this as an issue and let #bugs know | short clipboard | create > send, as given | create > send, as given | create > send, as given | create > send, as given | 3/3 |
+      | log this as an issue and let #bugs know | long clipboard | **summarize** > create > send | **summarize** > create > send | **summarize** > create > send | create > send, as given | 0/3 |
+      | summarize this and file it in Linear | long clipboard | summarize > create | summarize > create | summarize > create | summarize > create | 3/3 |
+      | file this bug in linear and tell the social channel | email open + short | readEmail > create > send | readEmail > create > send | readEmail > create > send | the same | 3/3 |
+      | create a linear issue and send to fun | unrelated clipboard | **summarize** > create > send | create > send, as given | create > send, as given | create > send, as given | 2/3 |
+      | file this bug email in Linear and tell the bugs channel | nothing | readEmail > create > send | readEmail > create > send | readEmail > create > send | the same | 3/3 |
+      | make a Linear ticket from this email, then post the link in #bugs | nothing | readEmail > create > send | readEmail > create > send | readEmail > create > send | the same | 3/3 |
+      | log this as an issue and let #bugs know | nothing | **summarize** > create > send | **summarize** > create > send | **summarize** > create > send | readEmail > create > send | 0/3 |
+      | file this bug in Linear and tell the social channel | nothing | readEmail > create > send | readEmail > create > send | readEmail > create > send | the same | 3/3 |
+      | find the login issue in Linear | nothing | search_issues | search_issues | search_issues | the same | 3/3 |
+      | log this as an issue and let #bugs know | email open + long | readEmail > create > send | readEmail > create > send | readEmail > create > send | the same | 3/3 |
+      | reply to this and send it | email open + long | draftReply > sendReply | draftReply > sendReply | draftReply > sendReply | the same | 3/3 |
+      | summarize this | email open + unrelated | summarize | summarize | summarize | the same | 3/3 |
+
+      **The extra step comes with length.** Unwanted summarize steps with no email open: short
+      clipboard 0 of 6, unrelated 1 of 3, long 4 of 6 (plus one create that dropped both the
+      description and the send). M27's live clipboard was not recorded; by these numbers it was
+      probably long.
+
+      **Two wordings, both reverted** (45 answered calls each; the first needed 31 trials re-run
+      after the network dropped, unbilled):
+
+      | | Baseline | 1: unconditional | 2: conditional, after the verb rule |
+      |---|---|---|---|
+      | Unwanted summarize — long + unrelated clipboard | 5 of 9 | 0 of 9 | 0 of 9 |
+      | Long + unrelated rows pass | 6 of 9 | 9 of 9 | 9 of 9 |
+      | Short-clipboard rows pass | 6 of 6 | 6 of 6 | 6 of 6 |
+      | "summarize this and file it in Linear" summarizes | 3 of 3 | 2 of 3 | **1 of 3** |
+      | Email open + short: "file this bug…" reads the email | 3 of 3 | **1 of 3** | 3 of 3 |
+      | Email open + long: "log this…" reads the email | 3 of 3 | **1 of 3** | **1 of 3** |
+      | Nothing on screen: "file this bug in Linear…" reads (or is refused) | 3 read | 1 read, 2 create with no description | 2 read, 1 refused by `checkUnreadContent` |
+      | Nothing on screen: "log this…" (separate finding) | summarize ×3 | create with no description ×2, `"{selected_text}"` ×1 | create with no description ×3, all refused |
+
+      Wording 1, in `CHOOSE_SYSTEM` and both create descriptions: "selected text is already
+      shown to you, so it needs no reading step: put it in the argument as given, however long
+      it is; summarize, rewrite or shorten it only when the user asks." Wording 2: the same,
+      only "when selected text is shown and 'this' means it by the rule above", placed after the
+      verb rule. Option 2 (ask when a plan summarizes) was not approved and not tried; no planner
+      code rewrites plans.
+
+      **Lesson.** An unconditional "use selected text as given" rule fixed the long-clipboard
+      summarize steps (5 of 9 to 0 of 9) but regressed explicit "summarize" and the open-email
+      verb rule; the conditional version fixed one of the two regressions; reverted. A rule
+      added to the planning prompt competes with the rules around it — measure the controls,
+      not only the failing case. And a fixture's size can decide whether a failure reproduces
+      at all: a one-line clipboard never showed this one.
+
+      **What shipped: `checkUnfilledBlanks`** (§5b, "A blank nothing fills"), from wording 1's
+      `"{selected_text}"`. Tests: `tests/unfilledBlanks.test.ts` (new, 18) — the shape, nested
+      arguments, every `{stepN}` form, near-misses, literal braces that are not the shape, the
+      user's own text, and through the planner: a plan, a one-step plan and a lone call refused
+      with nothing run, the precondition that `checkUnreadContent` alone would have let it
+      through, the previous-turn rule, and controls that a valid `{step1}` and a brace-filled
+      clipboard as given still run.
+
+      Mutations (each with the Edit tool, each reverted; run twice, once on wording 2 and once
+      after the revert, the same counts both times):
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Refuse a blank (both planner paths) | check removed | 4 |
+      | A blank in the user's own text passes | exclusion dropped | 6 |
+      | Shape: one bare name only | spaces allowed inside | 1 |
+      | `{stepN}` is a reference, not a blank | not excluded | 4 |
+
+      **Build record (2026-10-23, before the live pass).** `npm test`: **3039 passed across 137 files, 96
+      skipped**. Both typechecks clean. Real-model spend for M28: about $0.17 over 144 answered
+      calls (baseline 54, wording 1 45, wording 2 45), all from the eval above, run on the
+      user's go.
+
+      **Known gaps / still open:** M27's plan-choice finding (a long clipboard often gets an
+      unwanted summarize step; visible in the preview and at the dialog, box 2.1). **Separate
+      finding:** with nothing on screen, "log this as an issue and let #bugs know" never plans
+      its M19 expectation (readEmail first) on gpt-5-mini — summarize ×3 on the shipped wording,
+      which stops at the summary for want of text; that expectation was recorded on gpt-5. The
+      eval does not record a lone call's arguments, so the two "summarize this and file it" lone
+      creates under wording 2 are unexplained. Both live boxes unwatched.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

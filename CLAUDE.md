@@ -7,7 +7,8 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M27, which closed on 2026-10-23 with named gaps. The next one is whatever is agreed and
+  M27, which closed on 2026-10-23 with named gaps. M28 is code complete, live pass pending —
+  close it out before starting another. The next one is whatever is agreed and
   added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
@@ -251,6 +252,17 @@ patterns behind them — each cost a real debugging session.
 - **A rule that lives inside a script string (the pointer helper's C#) can't be tested from
   node (M27).** The discard-first-poll rule survived its mutation until the decision moved into
   a TypeScript function a test could reach (`judgeSample`); the host now only samples.
+
+### M28
+
+- **A prompt rule that fixes one plan-choice case competes with every rule around it — measure
+  the controls, not just the failure (M28).** "Use selected text as given, however long it is"
+  took the long-clipboard summarize steps from 5 of 9 to 0 of 9, and broke explicit "summarize"
+  and the open-email verb rule (3 of 3 down to 1 of 3); made conditional on the verb rule, it
+  fixed one of the two. Both were reverted. Only the controls in the same eval set showed it.
+  And **record the fixture dimension that decides whether a failure reproduces**: a one-line
+  clipboard never showed this bug (0 of 6), a long one did (4 of 6), and M27's live clipboard
+  was not recorded.
 
 ## Scope added mid-milestone
 

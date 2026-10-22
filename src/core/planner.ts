@@ -22,7 +22,9 @@ import {
   OVER_STEP_CAP,
   SAVED_HOLD_MS,
   canonicalToolName,
+  checkUnfilledBlanks,
   checkUnreadContent,
+  isUnfilledBlankRefusal,
   isUnknownReferenceRefusal,
   isUnreadContentRefusal,
   preflightReferences,
@@ -268,10 +270,12 @@ export class Planner {
     //    The same for a create refused because nothing read what the user pointed at
     //    (`isUnreadContentRefusal`): its "open the email or copy the text, then ask again" is an
     //    instruction to the user, and shown to the model it is the same kind of text that M21
-    //    found turning the next answer into prose.
+    //    found turning the next answer into prose. And for a plan refused for a blank nothing
+    //    fills (`isUnfilledBlankRefusal`, M28), whose "copy the text you mean" is the same kind.
     const last = this.log.getLast();
     const previousTurn =
-      last !== null && (isUnknownReferenceRefusal(last) || isUnreadContentRefusal(last))
+      last !== null &&
+      (isUnknownReferenceRefusal(last) || isUnreadContentRefusal(last) || isUnfilledBlankRefusal(last))
         ? null
         : last;
     let choice = await this.llm.chooseTool(
@@ -346,15 +350,14 @@ export class Planner {
     }
 
     // A lone create carrying only a made-up title when the user pointed at something (core/
-    // chain.ts, `checkUnreadContent`). Before anything is asked or admitted — and after the
-    // multi-call retry above, so it judges whichever answer came back.
-    const unread = checkUnreadContent(
-      instruction,
-      context,
-      [{ tool: name, arguments: choice.input, describe: "" }],
-      this.registry,
-    );
-    if (!unread.ok) return await this.refuseUnread(instruction, choice.name, unread.reason);
+    // chain.ts, `checkUnreadContent`), or any lone call with a blank nothing fills
+    // (`checkUnfilledBlanks`, M28). Before anything is asked or admitted — and after the
+    // multi-call retry above, so they judge whichever answer came back.
+    const lone = [{ tool: name, arguments: choice.input, describe: "" }];
+    const blanks = checkUnfilledBlanks(instruction, context, lone);
+    if (!blanks.ok) return await this.refuseLone(instruction, choice.name, blanks.reason);
+    const unread = checkUnreadContent(instruction, context, lone, this.registry);
+    if (!unread.ok) return await this.refuseLone(instruction, choice.name, unread.reason);
 
     const asked = await this.askBeforeLoneCall(instruction, tool, choice.input);
     if (asked !== null) return asked;
@@ -713,6 +716,14 @@ export class Planner {
       return await this.refusePlan(instruction, proposed, check.reason);
     }
 
+    // A blank the model wrote that nothing will fill — "{selected_text}" (core/chain.ts,
+    // `checkUnfilledBlanks`, M28). After validation, so a malformed `{stepN}` keeps its own
+    // refusal, and before the one-step branch below, so a one-step plan is judged too.
+    const blanks = checkUnfilledBlanks(instruction, context, steps);
+    if (!blanks.ok) {
+      return await this.refusePlan(instruction, proposed, blanks.reason);
+    }
+
     // A create that would carry only a made-up title, when the user pointed at something nothing
     // in the plan reads (core/chain.ts, `checkUnreadContent`). Here, before the one-step branch
     // below — so a one-step plan is judged too — and before any question, admission, narration
@@ -972,10 +983,11 @@ export class Planner {
     }
   }
 
-  // A LONE create refused by `checkUnreadContent` (core/chain.ts). The same row a plan's refusal
-  // writes — `refused`, no tool, the tool name as the model sent it, never `logMiss` — without
-  // `refusePlan`'s `chain`, which would report "0 of 1" for something that was never a chain.
-  private async refuseUnread(
+  // A LONE call refused by `checkUnreadContent` or `checkUnfilledBlanks` (core/chain.ts). The
+  // same row a plan's refusal writes — `refused`, no tool, the tool name as the model sent it,
+  // never `logMiss` — without `refusePlan`'s `chain`, which would report "0 of 1" for something
+  // that was never a chain.
+  private async refuseLone(
     instruction: string,
     sent: string,
     reason: string,
