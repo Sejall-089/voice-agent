@@ -15,16 +15,22 @@
 // hotkey handler and the real pill controller, rather than a line in a file no test can
 // import (CLAUDE.md).
 
+import type { DetachTrigger } from "../../core/jobs/JobManager.ts";
+
 export interface StartingSomethingElseDeps {
-  jobs: { detachAttached(): unknown };
+  jobs: { detachAttached(trigger: DetachTrigger): unknown };
   // The pill's controller, once main has built it — it is built after the hotkeys, so this is
   // asked for at the moment of the press. Null before then, and on an install without a pill.
   pill: () => { collapse(): void } | null;
 }
 
-export function createStartingSomethingElse(deps: StartingSomethingElseDeps): () => void {
-  return (): void => {
-    deps.jobs.detachAttached();
+// `trigger` comes from the CALLER — the hotkey handler that accepted the press says which
+// hotkey it was (M25), so the word in the detach log is decided where a test can see it.
+export function createStartingSomethingElse(
+  deps: StartingSomethingElseDeps,
+): (trigger: "hotkey" | "dictation") => void {
+  return (trigger): void => {
+    deps.jobs.detachAttached(trigger);
     deps.pill()?.collapse();
   };
 }

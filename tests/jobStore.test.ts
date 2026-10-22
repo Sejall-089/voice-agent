@@ -368,7 +368,7 @@ describe("a restart: interrupted, never resumed", () => {
     const gate = before.gateFor(id);
     await gate.admit({ tools: ["sendMessage"], statusOnly: false });
     await gate.enterStep({ tool: "sendMessage", index: 1, total: 1, foregroundOnly: false });
-    before.detachAttached();
+    before.detachAttached("hotkey");
     const woken: unknown[] = [];
     void gate.beforeConfirm().then((answer) => woken.push(answer));
     await new Promise((resolve) => setTimeout(resolve, 0));

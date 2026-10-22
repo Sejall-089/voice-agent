@@ -380,7 +380,7 @@ async function world(options: { pointerOver?: () => boolean | null } = {}) {
     const id = manager.submit(instruction);
     const gate = manager.gateFor(id);
     await gate.admit({ tools: ["sendMessage"], statusOnly: false });
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     await gate.enterStep({ tool: "sendMessage", index: 1, total: 1, foregroundOnly: false });
     void gate.beforeConfirm();
     await flush();
@@ -388,7 +388,7 @@ async function world(options: { pointerOver?: () => boolean | null } = {}) {
   };
   const failedJob = (result: string): string => {
     const id = manager.submit("file this bug");
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     manager.finish(id, "failed", result);
     return id;
   };
@@ -440,7 +440,7 @@ describe("PillController: what closes an open list", () => {
     const id = w.manager.submit("add to my page");
     const gate = w.manager.gateFor(id);
     await gate.admit({ tools: ["addToPage"], statusOnly: false });
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     void gate.enterStep({ tool: "addToPage", index: 1, total: 1, foregroundOnly: true });
     await w.flush();
     await w.pageLoaded();
@@ -663,6 +663,6 @@ describe("THE REAL WIRING: an accepted hotkey press collapses an open pill", () 
   it("before the pill exists there is nothing to collapse, and the press is unharmed", () => {
     const manager = new JobManager({ store: new InMemoryJobStore() });
     const starting = createStartingSomethingElse({ jobs: manager, pill: () => null });
-    expect(() => starting()).not.toThrow();
+    expect(() => starting("hotkey")).not.toThrow();
   });
 });

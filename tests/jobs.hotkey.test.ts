@@ -69,7 +69,7 @@ function hotkey(w: World) {
     chain: { isRunning: () => w.manager.attachedBlocks() },
     detach: () => {
       events.push("detach");
-      w.manager.detachAttached();
+      w.manager.detachAttached("hotkey");
     },
     runInstruction: () => Promise.resolve(),
   });
@@ -82,7 +82,7 @@ describe("the instruction hotkey and running jobs", () => {
     const w = jobWorld({ script: { work: tool("okThing"), next: tool("okThing") }, tools: tools(hold.promise) });
     const first = w.run("work");
     await settle();
-    w.manager.detachAttached(); // it is in the background now, still inside its handler
+    w.manager.detachAttached("hotkey"); // it is in the background now, still inside its handler
     expect(w.manager.get("job1")).toMatchObject({ state: "running", attached: false });
 
     const { events, press } = hotkey(w);
@@ -167,7 +167,7 @@ describe("the instruction hotkey and running jobs", () => {
     hold.resolve();
     const w = jobWorld({ script: { send: plan({ tool: "okThing" }, { tool: "sendThing" }) }, tools: tools(hold.promise) });
     const running = w.run("send");
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     await settle();
     expect(w.manager.get("job1")?.state).toBe("needs-you");
 

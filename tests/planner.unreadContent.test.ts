@@ -286,7 +286,7 @@ describe("a detached job", () => {
 
     const done = w.run(POINTING);
     // Detached before the model has answered: whatever happens next happens in the background.
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     await done;
 
     expect(ran.handled).toEqual([]);

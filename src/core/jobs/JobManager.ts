@@ -54,9 +54,15 @@ export interface JobView {
   seenAt: number | null;
 }
 
+// What moved a job off the bar (M25), carried on the "detached" change and written to the log
+// line main prints for it — so a job found in the pill can be traced to the press, click or
+// submission that put it there. Restoring at startup is not one: it relabels jobs that were live
+// as interrupted, already ended, and detaches nothing.
+export type DetachTrigger = "hotkey" | "dictation" | "outside-click" | "submit" | "escape";
+
 export type JobChange =
   | { type: "state"; job: JobView; previous: JobState | null }
-  | { type: "detached"; job: JobView }
+  | { type: "detached"; job: JobView; trigger: DetachTrigger }
   | { type: "updated"; job: JobView };
 
 export type ResumeResult =
@@ -165,7 +171,7 @@ export class JobManager implements JobsReader {
   // A new job, attached. Only one job is attached at a time: whatever was attached before is
   // detached first (the hotkey has normally done that already).
   submit(instruction: string): string {
-    this.detachAttached();
+    this.detachAttached("submit");
     // The backstop for a refusal. If the job that had the bar could not be detached (it holds
     // the foreground — the hotkey guards should never have let a submission through), the new
     // job does not get the bar as well: two attached jobs would both write to it. It starts
@@ -399,8 +405,8 @@ export class JobManager implements JobsReader {
 
   // The user has started something else. Whatever was attached carries on without the bar.
   // Refused (false) while it holds the foreground — the caller should have asked
-  // `attachedBlocks()` first, and this is the backstop.
-  detachAttached(): boolean {
+  // `attachedBlocks()` first, and this is the backstop. `trigger` says what did it (M25).
+  detachAttached(trigger: DetachTrigger): boolean {
     let detached = false;
     for (const job of this.jobs.values()) {
       if (!job.attached || TERMINAL.includes(job.state)) continue;
@@ -408,7 +414,7 @@ export class JobManager implements JobsReader {
       job.attached = false;
       job.background = true;
       this.touch(job, false);
-      this.emit({ type: "detached", job: view(job) });
+      this.emit({ type: "detached", job: view(job), trigger });
       detached = true;
     }
     return detached;

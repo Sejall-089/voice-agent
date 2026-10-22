@@ -90,8 +90,8 @@ export interface InstructionHotkeyDeps {
   // M23. The press was NOT blocked, so the user is starting something else: whatever job was
   // attached to the bar carries on in the background from here. Called once per accepted
   // press, after every guard and before the bar is touched. Absent before M23 and in any
-  // install without jobs.
-  detach?: () => void;
+  // install without jobs. Told it was THIS hotkey (M25), for the detach log line.
+  detach?: (trigger: "hotkey") => void;
   runInstruction: (instruction: string) => Promise<void>;
 }
 
@@ -176,7 +176,11 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
     //     its narration, results and speech go to its own record and the status pill, and it
     //     will wait rather than open a dialog on someone who is typing. Deliberately after all
     //     four guards: a press that was ignored must not send anything to the background.
-    detach?.();
+    //
+    //     (M25) And said in the log, so a job found in the pill can be traced to the press that
+    //     put it there. Only here — an ignored press already logs why it was ignored.
+    console.log("[main] instruction hotkey accepted");
+    detach?.("hotkey");
 
     // 5. Barge-in. Here as well as in startRecording() on purpose: this fires the instant the
     //    key is pressed, while the microphone takes 160-680ms to warm up, so the app goes

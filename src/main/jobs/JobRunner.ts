@@ -68,7 +68,17 @@ export function createJobRunner(deps: JobRunnerDeps): (instruction: string) => P
   manager.onChange((change) => {
     // Detached: the job no longer speaks through the bar, so the indicator it turned on is
     // turned off here — its own `showThinking(false)`, when the run ends, will go nowhere.
-    if (change.type === "detached") deps.shell.showThinking(false);
+    //
+    // (M25) And logged with what did it, so a job found in the pill can be traced live to the
+    // press, click or submission that put it there. The instruction is cut to 40 characters.
+    if (change.type === "detached") {
+      const job = change.job;
+      console.log(
+        `[main] job ${job.id} detached by ${change.trigger} ("${job.instruction.slice(0, 40)}", ` +
+          `${job.state}, step ${job.step}/${job.total})`,
+      );
+      deps.shell.showThinking(false);
+    }
     // Queued while the user is still looking: say so, rather than let "Thinking…" sit there.
     if (change.type === "state" && change.job.state === "queued" && change.job.attached) {
       void deps.shell.executeAction({ kind: "notify", payload: QUEUED_NOTICE });

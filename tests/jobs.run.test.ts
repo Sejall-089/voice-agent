@@ -166,7 +166,7 @@ describe("a detached job never touches what is in front of the user (addition A)
     };
     expect(w.shell.thinking).toEqual([true]);
 
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     // Detaching is what turns the indicator off; the job's own "off" will go nowhere.
     expect(w.shell.thinking).toEqual([true, false]);
     // Something the user is then offered by whatever they did next, in front of the bar.
@@ -208,7 +208,7 @@ describe("a detached job never touches what is in front of the user (addition A)
 
     const background = w.run("second, in the background");
     await settle();
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     hold.resolve();
     await background;
 
@@ -237,7 +237,7 @@ describe("a detached job waits at a confirm (decision 5, addition B)", () => {
     });
     const done = w.run("read then send");
     await settle();
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     hold.resolve();
     await settle();
     return { w, spies, done };
@@ -392,7 +392,7 @@ describe("a detached job waits at a foreground-only tool", () => {
     });
     const done = w.run("read then screen");
     await settle();
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     hold.resolve();
     await settle();
 
@@ -416,7 +416,7 @@ describe("a detached job waits at a foreground-only tool", () => {
     });
     const done = w.run("read then screen");
     await settle();
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     hold.resolve();
     await settle();
     w.clock.now += EXPIRY_MS;

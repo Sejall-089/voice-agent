@@ -4055,7 +4055,22 @@ Post-v0:
          string used — **survived at first**, because this node's ICU (78) puts a plain space
          before "PM"; the parts source was made injectable and a test now hands in U+202F and a
          lowercase "pm" (1). Not run: a real-model eval of the routing (only when asked).
-      3. Detach triggers and three log lines; the unguarded-hotkey known gap documented.
+      3. **Detach triggers and three log lines** (addendum B). A live run found a job in the
+         pill and nothing in the log to say how it got there. `JobManager.detachAttached()` now
+         takes the trigger — `hotkey`, `dictation`, `outside-click`, `submit` or `escape` (a
+         restore at startup is not one: it relabels jobs that were live as interrupted and detaches
+         nothing) — and the "detached" change carries it. The trigger word is decided by the
+         handler that accepted the press (`instructionHotkey.ts`, `dictate.ts`) or by `submit()`,
+         never by `main.ts`. Three lines, no more:
+         `[main] job <id> detached by <trigger> ("<first 40 chars>", <state>, step <n>/<total>)`
+         (`JobRunner`), `[main] instruction hotkey accepted`, `[dictate] hotkey accepted` (each
+         only after the handler's own guards — an ignored press already logs why). Tests:
+         `detachLog.test.ts` (7). Mutations: the wrong trigger at the instruction hotkey (1
+         failed) and at the dictation hotkey (1); `submit()` naming another trigger (1); the
+         line without its trigger (3); "accepted" logged before the guards (1).
+         **Known gap (addendum C, deliberately not fixed):** a second instruction-hotkey press
+         while a voice recording or transcription is in progress is not blocked, and detaches
+         the attached job.
       4. Escape cancels a running instruction that has not acted yet, otherwise detaches it; a
          transcript that finishes after Escape is discarded.
       5. An outside click on a thinking bar detaches its job.

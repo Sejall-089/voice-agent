@@ -177,7 +177,7 @@ describe("attached and detached", () => {
     const gate = manager.gateFor(id);
     await gate.admit(WORK);
     await gate.enterStep(step("sendMessage"));
-    expect(manager.detachAttached()).toBe(true);
+    expect(manager.detachAttached("hotkey")).toBe(true);
 
     const asked = watch(gate.beforeConfirm());
     await flush();
@@ -196,7 +196,7 @@ describe("attached and detached", () => {
     const id = manager.submit("summarize then add to my page");
     const gate = manager.gateFor(id);
     await gate.admit({ tools: ["summarize", "addToPage"], statusOnly: false });
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
 
     expect(await gate.enterStep(step("summarize", false, 1, 2))).toBe("go");
     gate.leaveStep();
@@ -220,7 +220,7 @@ describe("attached and detached", () => {
     const id = manager.submit("add to my page");
     const gate = manager.gateFor(id);
     await gate.admit(WORK);
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     const entered = watch(gate.enterStep(step("addToPage", true)));
     await flush();
 
@@ -252,7 +252,7 @@ describe("what the attached job holds, and what a hotkey press may do about it",
     await gate.admit(WORK);
     await gate.enterStep(step("summarize"));
     expect(manager.attachedBlocks()).toBe(false);
-    expect(manager.detachAttached()).toBe(true);
+    expect(manager.detachAttached("hotkey")).toBe(true);
     expect(manager.isAttached(id)).toBe(false);
   });
 
@@ -263,7 +263,7 @@ describe("what the attached job holds, and what a hotkey press may do about it",
     await gate.admit(WORK);
     await gate.enterStep(step("draftReply", true));
     expect(manager.attachedBlocks()).toBe(true);
-    expect(manager.detachAttached()).toBe(false);
+    expect(manager.detachAttached("hotkey")).toBe(false);
     expect(manager.isAttached(id)).toBe(true);
 
     gate.handlerStarting();
@@ -294,7 +294,7 @@ describe("what the attached job holds, and what a hotkey press may do about it",
     const { manager } = harness();
     const id = manager.submit("send these");
     await manager.gateFor(id).admit(WORK);
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     expect(manager.attachedBlocks()).toBe(false);
     expect(manager.hasAttached()).toBe(false);
   });
@@ -311,7 +311,7 @@ describe("what the rest of the app may ask about the attached job", () => {
     expect(manager.attachedTool()).toBe("linear__create_issue");
     await gate.enterStep(step("linear__create_issue"));
     gate.leaveStep();
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     // In the background now: it is nobody's bar.
     expect(manager.attachedTool()).toBeNull();
   });
@@ -344,7 +344,7 @@ describe("the confirm permit", () => {
     const { manager } = harness();
     const id = manager.submit("send these");
     await manager.gateFor(id).admit(WORK);
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     expect(manager.takeConfirmPermit(id)).toBe("none");
   });
 
@@ -354,7 +354,7 @@ describe("the confirm permit", () => {
     const gate = manager.gateFor(id);
     await gate.admit(WORK);
     await gate.enterStep(step("sendMessage"));
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     const asked = gate.beforeConfirm();
     await flush();
     manager.resume(id);
@@ -381,7 +381,7 @@ describe("expiry: thirty minutes, then 'expired, not run'", () => {
     const gate: JobGate = manager.gateFor(id);
     await gate.admit(WORK);
     await gate.enterStep(step("sendMessage"));
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     const asked = watch(gate.beforeConfirm());
     await flush();
     return { id, asked };
@@ -443,7 +443,7 @@ describe("cancelling", () => {
     const gate = manager.gateFor(id);
     await gate.admit(WORK);
     await gate.enterStep(step("sendMessage"));
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     const asked = watch(gate.beforeConfirm());
     await flush();
 

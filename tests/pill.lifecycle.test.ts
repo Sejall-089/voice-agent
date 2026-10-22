@@ -189,7 +189,7 @@ function world(options: { store?: JobStore; startAt?: number } = {}) {
   });
   const background = (instruction: string): string => {
     const id = manager.submit(instruction);
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     return id;
   };
   const failed = (text = "Slack said no."): string => {
@@ -301,7 +301,7 @@ describe("seen: opening the list starts the one-hour clock", () => {
     const store = new InMemoryJobStore();
     const before = new JobManager({ store, now: () => T0, newId: () => "was-live" });
     before.submit("send these notes");
-    before.detachAttached();
+    before.detachAttached("hotkey");
 
     const w = world({ store, startAt: T0 + 60_000 }); // the restart
     expect(w.restored).toBe(1);
@@ -582,7 +582,7 @@ describe("the diagnostic log: one line per pill event, with its reason", () => {
         ...(withLog ? { log: () => undefined } : {}),
       });
       const id = manager.submit("send these notes");
-      manager.detachAttached();
+      manager.detachAttached("hotkey");
       manager.finish(id, "failed", "no");
       controller.onExpand(true);
       controller.onHover(false);

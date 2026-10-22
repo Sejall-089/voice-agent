@@ -348,7 +348,7 @@ describe("as a job — attached and detached", () => {
     const ran: string[] = [];
     const w = jobWorld({ script: script({ kind: "multiple", tools: ["readThing", "noteThing"] }), tools: jobTools(ran) });
     const running = w.run(INSTRUCTION);
-    w.manager.detachAttached(); // the user pressed the hotkey while it was still planning
+    w.manager.detachAttached("hotkey"); // the user pressed the hotkey while it was still planning
     await running;
 
     expect(w.llm.chooseCalls).toBe(2);
@@ -372,7 +372,7 @@ describe("as a job — attached and detached", () => {
     hold.resolve();
     const w = jobWorld({ script: script(plan("readThing", "noteThing")), tools: jobTools(ran, hold.promise) });
     const running = w.run(INSTRUCTION);
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     await running;
     await settle();
     expect(ran).toEqual(["readThing", "noteThing"]);
@@ -569,7 +569,7 @@ describe("multi_tool_use.parallel: the multi-call case in another shape", () => 
     }));
     const w = jobWorld({ script: { [LIVE]: wrapperAsStep, [withPlanRetry(LIVE)]: wrapperAsStep }, tools });
     const running = w.run(LIVE);
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     await running;
 
     expect(w.llm.chooseCalls).toBe(2);

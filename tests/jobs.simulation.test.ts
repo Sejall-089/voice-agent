@@ -78,7 +78,7 @@ describe("three concurrent jobs, start to finish", () => {
     const risky = w.run("gather then post");
     const screen = w.run("gather then act on screen");
     await settle();
-    w.manager.detachAttached();
+    w.manager.detachAttached("hotkey");
     await settle();
 
     // All three are executing at once, each inside its first handler.

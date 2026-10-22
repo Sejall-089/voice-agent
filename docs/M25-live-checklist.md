@@ -32,8 +32,21 @@
 - [ ] **2.3** Ask it while a job is running in the pill. **Expect:** answered at once, and no new
       row appears in the pill.
 
+## 3. The detach log
+
+- [ ] **3.1** With the dev console visible, start a slow instruction and press the instruction
+      hotkey while it is still working. **Expect:** `[main] instruction hotkey accepted`, then
+      `[main] job <id> detached by hotkey ("<the instruction>", running, step …)`, and the job
+      in the pill.
+- [ ] **3.2** The same with the dictation hotkey. **Expect:** `[dictate] hotkey accepted` and
+      `detached by dictation`.
+- [ ] **3.3** Press the instruction hotkey while a confirm dialog is up. **Expect:** the existing
+      "ignored - a confirmation is waiting" line, and **no** "accepted" line.
+
 ## Known gaps, so nobody mistakes them for failures while testing
 
+- A second instruction-hotkey press while a voice recording or transcription is in progress is
+  not blocked and detaches the attached job (addendum C; deliberately not fixed in M25).
 - A remainder survives any number of answers in between, for up to 5 minutes; "read the rest"
   always means the most recent answer that was cut short, introduced as earlier if anything was
   said since.

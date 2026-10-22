@@ -477,7 +477,7 @@ function controllerHarness(options: { muted?: boolean; busy?: () => boolean; for
     const id = manager.submit("send these notes");
     const gate = manager.gateFor(id);
     await gate.admit({ tools: ["sendMessage"], statusOnly: false });
-    manager.detachAttached();
+    manager.detachAttached("hotkey");
     const answer: { value: unknown } = { value: "PENDING" };
     if (reason === "confirm") {
       await gate.enterStep({ tool: "sendMessage", index: 1, total: 1, foregroundOnly: false });
@@ -536,7 +536,7 @@ describe("PillController — the pill's buttons, and the chime", () => {
 
     // Dismiss is for a job that ended some other way.
     const failed = h.manager.submit("file this bug");
-    h.manager.detachAttached();
+    h.manager.detachAttached("hotkey");
     h.manager.finish(failed, "failed", "It broke.");
     expect(h.last()?.mode).toBe("failed");
     h.controller.onAction(failed, "dismiss");

@@ -34,14 +34,18 @@ export function createOnDictateHotkey(
   // M23. Run once per ACCEPTED press, before dictation begins: main.ts detaches the job that
   // had the bar, for the reason the instruction hotkey does — dictation shows its indicator in
   // that same window, and a job still writing its narration there would be writing over it.
-  onAccepted?: () => void,
+  // Told it was THIS hotkey (M25), for the detach log line.
+  onAccepted?: (trigger: "dictation") => void,
 ): () => void {
   return (): void => {
     if (busyState && busyState.getState() !== "idle") {
       console.log("[dictate] hotkey ignored - an instruction is already being captured");
       return;
     }
-    onAccepted?.();
+    // (M25) Logged, like an ignored press already is, so the log shows every press that could
+    // have sent a job to the background.
+    console.log("[dictate] hotkey accepted");
+    onAccepted?.("dictation");
     void dictation.begin();
   };
 }
