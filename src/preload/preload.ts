@@ -106,9 +106,10 @@ const api = {
 
   // --- Speech output (M14). Main owns the queue; the renderer owns the speaker. ---
 
-  // main → renderer: play these WAV bytes.
-  onSpeak(callback: (wav: Uint8Array) => void): () => void {
-    const listener = (_e: IpcRendererEvent, wav: Uint8Array): void => callback(wav);
+  // main → renderer: play these WAV bytes. `id` names the clip, and goes back in speechEnded.
+  onSpeak(callback: (wav: Uint8Array, id: number) => void): () => void {
+    const listener = (_e: IpcRendererEvent, wav: Uint8Array, id: number): void =>
+      callback(wav, id);
     ipcRenderer.on("speech:play", listener);
     return () => ipcRenderer.removeListener("speech:play", listener);
   },
@@ -118,10 +119,12 @@ const api = {
     ipcRenderer.on("speech:stop", listener);
     return () => ipcRenderer.removeListener("speech:stop", listener);
   },
-  // renderer → main: that utterance is over — finished, cut off, or never started. Always
-  // sent, because the queue upstream is drained by waiting for it.
-  speechEnded(error?: string): void {
-    ipcRenderer.send("speech:ended", error);
+  // renderer → main: clip `id` is over — finished, cut off, or never started. Always sent,
+  // because the queue upstream is drained by waiting for it. The id comes first: main matches it
+  // against the clip it is waiting on, and reads `error` as the second argument (M24 — it used
+  // to arrive in the first, where main never looked, so no playback failure was ever logged).
+  speechEnded(id: number, error?: string): void {
+    ipcRenderer.send("speech:ended", id, error);
   },
 
   // --- The needs-you chime (M23). Its own channels: nothing is reported back. ---

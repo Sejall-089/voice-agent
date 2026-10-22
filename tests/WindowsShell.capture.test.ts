@@ -118,6 +118,7 @@ const { createOnInstructionHotkey, CONFIRM_WAITING, CHAIN_RUNNING } = await impo
   "../src/main/instructionHotkey.ts"
 );
 const { combineInstructionBusy } = await import("../src/main/dictate.ts");
+const { PLAYBACK_CEILING_MS } = await import("../src/main/shell/playbackLimit.ts");
 const { FakeTranscriber } = await import("./FakeTranscriber.ts");
 const { MockInputInjector } = await import("./MockInputInjector.ts");
 
@@ -816,29 +817,48 @@ describe("WindowsShell — speech output", () => {
     expect(speaker.calls).toContain("stop");
   });
 
-  it("sends the bytes and resolves when the renderer reports back", async () => {
+  it("sends the bytes with a clip id, and resolves only on a report naming that clip", async () => {
+    // M24: the report carries the clip's id, so one arriving late for a clip main already gave
+    // up on cannot end the wait for the clip playing now.
     const win = makeWindow();
     const shell = new WindowsShell(win as never);
     const wav = new Uint8Array([1, 2, 3]);
+    let over = false;
 
-    const playing = shell.play(wav);
+    const playing = shell.play(wav).then(() => (over = true));
     const sent = win.sent.find((message) => message.channel === "speech:play");
     expect(sent?.args[0]).toBe(wav);
+    const id = sent?.args[1];
+    expect(typeof id).toBe("number");
 
-    ipcMain.emit("speech:ended", {}, undefined);
-    await expect(playing).resolves.toBeUndefined();
+    ipcMain.emit("speech:ended", {}, (id as number) + 1, undefined);
+    await Promise.resolve();
+    expect(over).toBe(false);
+
+    ipcMain.emit("speech:ended", {}, id, undefined);
+    await playing;
+    expect(over).toBe(true);
   });
 
-  it("resolves even when the renderer never answers", async () => {
+  it("resolves even when the renderer never answers — at the ceiling, for bytes of unknown length", async () => {
     // The queue upstream drains by awaiting this. A play() that stayed pending after a
     // crashed or destroyed renderer would strand every utterance behind it forever.
+    //
+    // RE-JUSTIFIED AT M24. This used to pass at 20 s because every clip was let go at 15 s —
+    // the bound that cut long speech short. Bytes that are not a WAV have no knowable length, so
+    // they now wait the ceiling: still never for ever, and never the old 15 s. The length-based
+    // limit for a real WAV is covered in speechPlayback.test.ts.
     vi.useFakeTimers();
     try {
       const shell = new WindowsShell(makeWindow() as never);
-      const playing = shell.play(new Uint8Array([1]));
+      let over = false;
+      const playing = shell.play(new Uint8Array([1])).then(() => (over = true));
 
-      await vi.advanceTimersByTimeAsync(20_000);
-      await expect(playing).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(PLAYBACK_CEILING_MS - 1);
+      expect(over).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await playing;
+      expect(over).toBe(true);
     } finally {
       vi.useRealTimers();
     }

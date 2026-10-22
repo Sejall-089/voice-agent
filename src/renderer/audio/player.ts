@@ -13,10 +13,14 @@
 export class SpeechPlayer {
   private current: HTMLAudioElement | null = null;
   private currentUrl: string | null = null;
+  // Settles the current clip's play() promise. Held so stop() can settle it too.
+  private finish: (() => void) | null = null;
 
-  // Resolves when the utterance finishes OR when stop() cuts it off — never rejects, because
-  // the queue draining upstream awaits this, and a rejection there would strand everything
-  // behind it. A failure to play is reported through `onError` and still resolves.
+  // Resolves exactly once, when the utterance finishes, fails to play, or is cut off by stop()
+  // — including the stop() a later play() makes before it starts. Never rejects, because the
+  // queue draining upstream waits for the report this resolution triggers, and a promise that
+  // never settled is how a barge-in used to leave main waiting out a clip nobody could hear
+  // (M24). A failure to play is reported through `onError` and still resolves.
   play(wav: Uint8Array, onError: (message: string) => void): Promise<void> {
     this.stop();
 
@@ -30,12 +34,16 @@ export class SpeechPlayer {
     this.currentUrl = url;
 
     return new Promise<void>((resolve) => {
+      let settled = false;
       const done = (): void => {
+        if (settled) return;
+        settled = true;
         // Only tidy up if this utterance is still the current one — stop() may already have
         // moved on to the next, and revoking its URL would kill it mid-sentence.
         if (this.current === audio) this.release();
         resolve();
       };
+      this.finish = done;
 
       audio.onended = done;
       audio.onerror = () => {
@@ -44,6 +52,9 @@ export class SpeechPlayer {
       };
 
       audio.play().catch((error: unknown) => {
+        // Pausing a clip whose play() has not started yet rejects that play() with an
+        // AbortError. That is a stop(), already reported as an ordinary end — not a failure.
+        if (settled) return;
         // The most likely cause by far is Chromium's autoplay policy, which main.ts disables
         // at startup precisely because nothing here is ever triggered by a click.
         onError(error instanceof Error ? error.message : String(error));
@@ -52,19 +63,23 @@ export class SpeechPlayer {
     });
   }
 
-  // Cut playback off now. Safe when nothing is playing, and safe to call twice.
+  // Cut playback off now, and settle the clip's play() so its end is reported. Safe when
+  // nothing is playing, and safe to call twice.
   stop(): void {
     const audio = this.current;
     if (audio === null) return;
+    const finish = this.finish;
     audio.pause();
     audio.onended = null;
     audio.onerror = null;
     this.release();
+    finish?.();
   }
 
   private release(): void {
     if (this.currentUrl !== null) URL.revokeObjectURL(this.currentUrl);
     this.current = null;
     this.currentUrl = null;
+    this.finish = null;
   }
 }

@@ -129,15 +129,16 @@ export function CommandBar(): JSX.Element {
     // device. Every path reports back exactly once, because the queue upstream drains by
     // waiting for that report — a silent failure here would strand every utterance behind it.
 
-    const offSpeak = window.api.onSpeak((wav) => {
+    const offSpeak = window.api.onSpeak((wav, id) => {
       let failure: string | undefined;
       void player
         .play(wav, (message) => (failure = message))
-        .then(() => window.api.speechEnded(failure));
+        .then(() => window.api.speechEnded(id, failure));
     });
 
     const offStopSpeaking = window.api.onStopSpeaking(() => {
-      // play()'s promise resolves on its own when cut off, which is what reports the end.
+      // stop() resolves the clip's play() above (M24), and that .then is what reports its end —
+      // so main stops waiting the moment the sound stops, not when the clip would have ended.
       player.stop();
     });
 

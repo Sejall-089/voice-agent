@@ -19,6 +19,7 @@ import type { InputInjector } from "./InputInjector.ts";
 import { virtualKeyFor } from "./mediaKeys.ts";
 import { approveLabel } from "./confirmLabel.ts";
 import { ConfirmBroker } from "./ConfirmBroker.ts";
+import { playbackLimitMs } from "./playbackLimit.ts";
 import { CONFIRM_WAITING } from "../instructionHotkey.ts";
 import type { CapturedContext, ConfirmOptions, LocalAction, OSShell } from "./OSShell.ts";
 import type { SpeechShell } from "./SpeechShell.ts";
@@ -36,6 +37,11 @@ export interface Speaker {
 // How long to wait for the renderer to answer a voice request before giving up. Without
 // this a crashed renderer would leave VoiceSession stuck in "transcribing" forever, and
 // the hotkey dead.
+//
+// A bound on a REPLY ("the microphone is on", "here is the audio"), and only that. It is NOT
+// how long a spoken clip may play: that wait lasts as long as the clip does, and has its own
+// limit computed from the clip (playbackLimit.ts). Reusing this one there is what cut every
+// utterance longer than 15 s short (M24).
 const RENDERER_REPLY_TIMEOUT_MS = 15_000;
 
 // How long a result stays on screen when the bar was never focused (the voice path shows
@@ -76,6 +82,11 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // The speech queue (M14), or null on an install with no synthesizer configured. Held rather
   // than constructed here because it needs this shell to play through.
   private speech: Speaker | null = null;
+  // The clip main is waiting on, if any (M24). Each `play()` numbers its clip, and the renderer
+  // names that number when it reports the end — so a report that arrives late, for a clip main
+  // has already stopped waiting for, can never end the wait for the clip playing now.
+  private playbackSeq = 0;
+  private playbackWait: { id: number; end: (why: string | null) => void } | null = null;
   // How to open an installed app (M18). Unlike `speech` and `dismissPointer` this is NOT
   // nullable and does NOT default to doing nothing: the built-in catalog needs no
   // configuration to work (three of its four entries ship with Windows), so an install where
@@ -190,6 +201,14 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // must not stay pending because whatever hid the bar did not go through hide().
     this.window.on("hide", () => this.endAsk(null));
     this.window.on("closed", () => this.endAsk(null));
+    // And a clip that can no longer finish (M24). A renderer that crashed or a window that is
+    // gone will never report `speech:ended`; waiting out the clip's whole limit would keep the
+    // app "speaking" — chime held, next utterance queued — for as long as the clip would have
+    // lasted, with nothing playing.
+    this.window.on("closed", () => this.endPlaybackWait("the window closed mid-clip"));
+    this.window.webContents.on("render-process-gone", (_event, details) =>
+      this.endPlaybackWait(`the renderer went away mid-clip (${details.reason})`),
+    );
 
     // A renderer keydown listener for Escape only fires when the bar's own <input> has DOM
     // focus, which requires the WINDOW to have OS focus first. That's routinely false: voice
@@ -624,27 +643,69 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     this.speech?.stop() ?? this.stopPlayback();
   }
 
+  // Resolves when THIS clip is over, as the renderer reports it: finished, cut off by a
+  // barge-in, or failed to play. Never rejects: the queue upstream awaits this, and a rejection
+  // would strand every utterance behind one bad clip — a failure resolves and is logged instead.
+  //
+  // How long it waits is the clip's own length plus a grace (playbackLimit.ts), never a fixed
+  // bound: `SpeechSession.isSpeaking()` is true for exactly as long as this is pending, and the
+  // chime and the queue both trust that to mean "the user is still listening" (M24).
   play(wav: Uint8Array): Promise<void> {
-    // Resolve on the renderer's report, whatever it says. A rejection here would strand the
-    // whole queue behind one bad utterance, so a failure resolves and is reported instead.
-    const finished = this.awaitRenderer<null>("speech:ended", (_payload, error) => {
-      if (error) console.error(`[WindowsShell] playback: ${error}`);
-      return null;
-    }).catch((error: unknown) => {
-      // A renderer that never answered — a crash, or a window destroyed mid-utterance. The
-      // queue must keep moving.
-      console.error(`[WindowsShell] playback did not report back: ${messageOf(error)}`);
-      return null;
-    });
+    // A window that is gone can play nothing, and `send` on it would throw.
+    if (this.window.isDestroyed()) return Promise.resolve();
+    // One clip at a time — the queue awaits each — so a wait still open here has been
+    // overtaken. Release it rather than leave it to run out on its own.
+    this.endPlaybackWait(null);
 
-    this.window.webContents.send("speech:play", wav);
-    return finished.then(() => undefined);
+    const id = (this.playbackSeq += 1);
+    const limit = playbackLimitMs(wav);
+
+    return new Promise<void>((resolve) => {
+      let over = false;
+      const end = (why: string | null): void => {
+        if (over) return;
+        over = true;
+        clearTimeout(timer);
+        ipcMain.removeListener("speech:ended", onEnded);
+        if (this.playbackWait?.id === id) this.playbackWait = null;
+        if (why !== null) console.error(`[WindowsShell] ${why}`);
+        resolve();
+      };
+      // The renderer reports (id, error?). An `ended` naming another clip is a late report for
+      // one main already stopped waiting for, and must not end this one.
+      const onEnded = (_event: Electron.IpcMainEvent, endedId: unknown, error: unknown): void => {
+        if (endedId !== id) return;
+        if (typeof error === "string" && error.length > 0) {
+          console.error(`[WindowsShell] playback failed: ${error}`);
+        }
+        end(null);
+      };
+      const timer = setTimeout(() => {
+        const clip =
+          limit.clipMs === null
+            ? "a clip of unknown length"
+            : `a ${(limit.clipMs / 1000).toFixed(1)} s clip (${limit.basis})`;
+        end(
+          `playback did not finish or report back within ${(limit.limitMs / 1000).toFixed(1)} s ` +
+            `for ${clip}; moving on.`,
+        );
+      }, limit.limitMs);
+
+      this.playbackWait = { id, end };
+      ipcMain.on("speech:ended", onEnded);
+      this.window.webContents.send("speech:play", wav, id);
+    });
   }
 
   stopPlayback(): void {
-    // Fire-and-forget: the renderer's own play() promise resolves when it is cut off, and that
-    // is what reports the end, so there is nothing to wait for here.
+    // Fire-and-forget. Stopping the renderer's player resolves the clip's own play(), and that
+    // is what reports `speech:ended` for it — so the wait in play() above ends as soon as the
+    // sound does, without main having to guess.
     if (!this.window.isDestroyed()) this.window.webContents.send("speech:stop");
+  }
+
+  private endPlaybackWait(why: string | null): void {
+    this.playbackWait?.end(why);
   }
 
   // --- VoiceShell (M7) ---
@@ -1040,10 +1101,6 @@ interface ConfirmRequest {
   options: ConfirmOptions | undefined;
   detached: boolean;
   barWasVisible: boolean;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // The IPC payload crosses a process boundary, so it is validated rather than trusted.
