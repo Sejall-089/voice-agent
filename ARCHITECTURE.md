@@ -704,11 +704,15 @@ was asked for, and each dialog's button names its own action ("Create issue", th
 Every instruction is a **job**, run by the same planner with the same per-step gates. What M23
 adds is that a job no longer has to hold the command bar until it finishes: pressing the hotkey
 while it is still working **detaches** it, and it carries on in the background, shown in a
-small always-on-top **status pill**.
+small always-on-top **status pill**. M25 added two more ways off the bar, and a log line for
+each: focus leaving a visible bar for another window (an **outside click**) detaches the job
+that is still working, and **Escape** cancels one that has not entered a step yet (silently —
+nothing is shown, said or listed) or detaches one that has. Every detach names its trigger
+(`hotkey`, `dictation`, `outside-click`, `submit`, `escape`) in `[main] job … detached by …`.
 
 ```mermaid
 flowchart LR
-    Hotkey["Hotkey<br/>(not blocked)"] --> Detach["JobManager.detachAttached()"]
+    Hotkey["Hotkey, outside click<br/>or Escape (not blocked)"] --> Detach["JobManager.detachAttached(trigger)"]
     Job["Job (planner run)<br/>JobShell · JobLog · gate"] -->|attached| Bar["Command bar"]
     Job -->|detached| Record["Job record<br/>(SQLite jobs table)"]
     Record --> Pill["Status pill<br/>PillController · PillWindow"]

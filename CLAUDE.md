@@ -7,7 +7,7 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M24, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
+  M25, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
   added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
@@ -227,6 +227,24 @@ patterns behind them — each cost a real debugging session.
   computed from that thing.** And when the fix makes something run longer, re-check every rule
   that measured time against the old length — M24's own stale rule then dropped a "Sent." for
   waiting behind a clip that was finally allowed to finish.
+
+### M25
+
+- **A test cannot see a difference its runtime never produces — inject the source of it
+  (M25).** `tellTime` builds "It's 2:51 PM." from Intl parts so no ICU separator reaches the
+  speech engine; the mutation that took Intl's whole string instead *survived*, because this
+  machine's node (ICU 78) puts a plain space before "PM" where others put U+202F. M14's lesson
+  (literal expectations, never the runtime's own output) was followed and was not enough: the
+  code under test asked the runtime, and the runtime gave the harmless answer. The fix was a
+  parameter for where the parts come from, and a test that hands in the hostile ICU. **When the
+  risk lives in what the runtime returns, make that a seam a test can feed.**
+- **A change in who reaches a path changes what the path is for (M25).** M23 made a finished
+  background job leave the pill after 8 s, reasoning that nothing was asked of the user — true
+  when the only way into the background was pressing the hotkey for something else, which left
+  sends and creates behind. M25's outside click and Escape send *thinking* jobs there, often a
+  summary whose result is the whole point, and the live run watched that result vanish. Nothing
+  in the 8 s rule changed; who arrives at it did. **When a change opens a mode to a new trigger,
+  re-read the rules downstream of that mode for what they assumed about how it was reached.**
 
 ## Scope added mid-milestone
 

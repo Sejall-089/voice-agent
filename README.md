@@ -990,7 +990,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (2870 tests across 127 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (2922 tests across 132 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1001,13 +1001,24 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
+**M25 (three live findings from M24; Escape and an outside click on a running instruction) is
+closed (22 Oct 2026), after a live run by a person and a loopback-recorded scripted run, with
+named gaps.** "Read the rest" survives a short answer in between and says it is from the earlier
+answer; "what's the time" gets one short sentence; Escape cancels an instruction that has not
+started yet; an outside click sends a thinking instruction to the status pill; and every detach is
+logged with what caused it. A person watched 4 of the checklist's boxes; 3 more are covered by
+the scripted run, 12 by tests only. One live finding, investigated: a finished background job
+leaves the pill after about 10 seconds (M23's deliberate 8 s fade), and its result can't be read
+after that. The fix is decided for M26: a done job stays in the pill until you've seen it. **2922 tests green across 132
+files, 96 skipped.** See `docs/M25-live-checklist.md` and `spec.md` §9 (M25).
+
 **M24 (long speech plays to its end) is closed (22 Oct 2026), after a live run by a person and a
 loopback-recorded scripted run, with named gaps.** Speech over 15 s is no longer treated as
 finished at 15 s; an utterance waiting behind a playing clip is no longer dropped as stale; and a
 blocked microphone is now reported instead of looking like a recording. A person heard 3 of the
 checklist's boxes; 9 more are machine-verified from what reached the speakers (WASAPI loopback);
 2 were not run. Four live findings, none a regression, went into M25. **2870 tests green across
-127 files, 96 skipped.** See `docs/M24-live-checklist.md` and `spec.md` §4d and §9 (M24).
+127 files at its close, 96 skipped.** See `docs/M24-live-checklist.md` and `spec.md` §4d and §9 (M24).
 
 **M23 (background jobs, the status pill, the needs-you chime) is closed (22 Oct 2026), after a
 live run by a person, with named gaps.** A person watched 12 of the checklist's boxes; 25 more are

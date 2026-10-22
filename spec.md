@@ -4066,10 +4066,13 @@ Post-v0:
       when the hotkey was pressed (hotkey detaches by design); not reproduced with Escape alone;
       the M25 log lines will confirm live;
       "what's the time" got a long answer (no time tool).
-- [ ] **M25 — three live findings from M24, and what Escape and an outside click do to a running
-      instruction.** **In progress; nothing committed before M24 is closed.** Each finding was
-      investigated without code changes first (a scripted repro on the real planner, job runner
-      and shell). Build order, one commit each, each diff approved first:
+- [x] **M25 — three live findings from M24, and what Escape and an outside click do to a running
+      instruction.** **Closed 2026-10-22, after a live run by a person and a loopback-recorded
+      scripted run (4 boxes ticked, 15 open — `docs/M25-live-checklist.md`), with named gaps and
+      one finding, investigated and decided for M26.** The close-out record is at the end of this
+      entry. Each
+      finding was investigated without code changes first (a scripted repro on the real planner,
+      job runner and shell). Build order, one commit each, each diff approved first:
 
       1. **"Read the rest" survives a short answer in between** (§6, `elaborate`). Root cause:
          `Planner.say()` cleared the remainder on every answer that held nothing back. Now it is
@@ -4129,6 +4132,35 @@ Post-v0:
          every blur treated as an outside click (5 failed, the Escape test among them, as
          required); the visibility check dropped (1, the Escape test); the hook before the
          confirm guard (2, the dialog test among them); the open-capture check dropped (1).
+
+      **Close-out record (2026-10-22).** `npm test`: 2922 passed across 132 files, 96 skipped
+      (the opt-in real-model evals and real-Piper check); both typechecks clean. The suite ran
+      before each of the five commits (2878, 2896, 2903, 2914, 2922). Eval skipped (not run
+      against the real model) — so whether the real model routes "what's the time" to `tellTime`
+      rests on the person's 2.1, not on an eval. The mutation pass is recorded per change above:
+      every mutation was caught except two, both resolved — T3 (Intl's whole string; the parts
+      source made injectable and a test added) and F5 (a dead check, removed).
+
+      **Live, by a person (4 ticked):** "read the rest" after a short answer, with the lead-in
+      (1.1); the short time answer (2.1); Escape while thinking — silent, no pill row (4.1); an
+      outside click while thinking — the job in the pill, silent (5.1). **By script (3, open):**
+      the real app on HEAD, a fake model and Slack webhook, what reached the speakers recorded by
+      WASAPI loopback and transcribed by the app's own whisper — a dangerous instruction Escaped
+      while thinking never opened a dialog (4.2), focus moved away by SetForegroundWindow detached
+      the job (5.2, in part), and speech playing at an outside click played to its end (5.5).
+      **By tests only (12, open):** 1.2, 1.3, 2.2, 2.3, 3.1–3.3, 4.3, 4.4, 5.3, 5.4, 5.6.
+
+      **Finding, investigation complete:** a done job disappears from the pill after about 10 s.
+      Cause: M23's deliberate 8 s fade (§5c, `DONE_FADE_MS`) plus the pill's 1 s re-check. It
+      matters now because M25's outside click detaches jobs whose result is the point, and a done
+      detached job's result is stored (job record, action log) but unreadable once the pill
+      clears. **Fix decided: M26 — keep a done job in the pill until it has been seen.** Not
+      fixed in M25.
+
+      **Known gaps:** a second instruction-hotkey press during a recording or transcription is
+      not blocked and detaches the attached job (addendum C); any focus loss counts as an
+      outside click while a job is thinking; the renderer's own Escape fallback still only hides
+      the bar.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
