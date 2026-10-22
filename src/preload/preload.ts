@@ -86,8 +86,13 @@ const api = {
     return () => ipcRenderer.removeListener("voice:state", listener);
   },
   // renderer → main: capture is live (or couldn't start — blocked mic, no device).
+  //
+  // (payload, error), the shape every renderer reply takes (see sendAudio below) — there is no
+  // payload, so it is null. The error used to go in the payload slot, where main never looks for
+  // one: a blocked microphone was reported as a microphone that started, and the app showed
+  // itself recording with nothing listening (M24, the same bug as speechEnded's).
   voiceStarted(error?: string): void {
-    ipcRenderer.send("voice:started", error);
+    ipcRenderer.send("voice:started", null, error);
   },
   // renderer → main: the finished clip (or an error explaining why there isn't one).
   sendAudio(clip: { wav: Uint8Array; durationMs: number } | null, error?: string): void {

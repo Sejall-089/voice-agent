@@ -1915,6 +1915,27 @@ quick succession have to invalidate two different utterances). Without that last
 synthesized before the interruption would arrive *after* it and talk over the instruction the
 user is already speaking.
 
+**A clip is waited for as long as it lasts (M24).** The renderer plays the audio and reports
+`speech:ended`; `WindowsShell.play()` waits for that report for the clip's own length — read from
+its WAV header (`src/main/shell/playbackLimit.ts`), else estimated from its size at Piper's
+22,050 Hz 16-bit mono, else a 120 s ceiling — plus a 5 s grace (`PLAYBACK_GRACE_MS`). Until M24
+it waited under `RENDERER_REPLY_TIMEOUT_MS`, a 15 s bound meant for a quick renderer *reply*:
+anything longer was treated as finished at 15 s, `isSpeaking()` went false mid-sentence, a held
+chime played over it, and the next utterance's `speech:play` stopped it. Each clip is numbered,
+and the renderer names the number in its report (`speechEnded(id, error)`), so a report that
+arrives late for a clip main gave up on cannot end the wait for the next one. A crashed renderer
+or a closed window ends the wait at once. `SpeechPlayer.stop()` settles the clip's `play()`, so
+a barge-in is reported as an ordinary end and the wait is over the moment the sound is.
+
+**An utterance overtaken by events is dropped, not said** (M14; refined in M24). Speech
+describes a moment, so an utterance that has waited more than 8 s (`DEFAULT_STALE_AFTER_MS`) is
+dropped when its turn comes, and at most 8 wait at once (the oldest go first). **Time spent behind
+a clip that is still playing does not count as waiting** — the user was listening, the world did
+not move on. Time with nothing playing — a synthesis backlog, the gap after a clip — does. (Before
+M24 every clip was cut at 15 s, so waiting behind one was short; once a clip plays to its end, a
+"Sent." queued during a 30 s read-out would otherwise be dropped for no reason but the length of
+what came before it.)
+
 **The microphone is never open while the app is talking.** Enforced in the shell's
 `startRecording()`, the one chokepoint every path to the microphone passes through, rather than
 at each hotkey — the same lesson M8 learned when cleanup bound to a single code path leaked on
@@ -3912,6 +3933,56 @@ Post-v0:
       Shorter results (13.8 s measured) are unaffected. Not measured: a second queued
       utterance would presumably start over the end of the first, since the player stops
       whatever is playing. Pre-dates M23 (M14's timeout); M23's chime is what exposes it.
+      **Fixed in M24** (below): the M24 repro measured the second case too — the next utterance
+      does not start over the first, it *stops* it.
+- [ ] **M24 — speech longer than 15 s plays to its end.** **Code complete 2026-10-22; the live
+      pass (`docs/M24-live-checklist.md`) has not been run.** Agreed as the fix for M23's open
+      limit. Three separate changes, each its own commit:
+
+      1. **Playback waits as long as the clip lasts** (§4d). Root cause, found before any code
+         was changed: `WindowsShell.play()` waited for `speech:ended` under M7's 15 s
+         renderer-*reply* bound, reused in M14. That bound did not cut audio itself — what cut it
+         was the next utterance, whose `speech:play` makes the player stop whatever is playing.
+         The wait is now the clip's length from its WAV header + `PLAYBACK_GRACE_MS` (5 s), with
+         an estimate and a 120 s ceiling as fallbacks (`src/main/shell/playbackLimit.ts`); each
+         clip is numbered so a late report cannot end the next clip's wait; a crash or a closed
+         window ends the wait at once. Found with it, from the same timer: `SpeechPlayer.stop()`
+         never settled its `play()`, so after every barge-in main waited the full 15 s with
+         nothing playing, and a reply queued in that time (a confirm's "Sent.") could be dropped
+         as stale; and the preload sent `speechEnded`'s error where main never read it, so no
+         playback failure was ever logged. Real Piper: a 585-character `elaborate` remainder is
+         37.4 s of audio and gets a 42.4 s limit (`tests/piperPlaybackLimit.live.test.ts`,
+         opt-in).
+      2. **The staleness rule counts waiting, not listening** (§4d). With clips playing to the
+         end, anything queued more than 8 s before a long clip finished was dropped. Time behind
+         a playing clip no longer ages an utterance; a synthesis backlog still does; the 8 s
+         value and the 8-item cap are unchanged.
+      3. **A blocked microphone is reported.** The same argument-order bug on the recorder:
+         `voiceStarted(error)` put the error in the payload slot, so a denied microphone was
+         taken as started and the bar showed itself recording with nothing listening. Now
+         `(null, error)`, the shape `sendAudio` already used; both voice paths go back to idle
+         with "Couldn't start recording: …".
+
+      **Tests:** 46 new (2824 → 2870, 124 → 127 files, plus one opt-in file):
+      `playbackLimit.test.ts` (15), `speechPlayback.test.ts` (26 — the real shell, queue, player
+      and preload `api` against a fake speaker on a fake clock, including every barge-in gesture,
+      a stalled and a crashed renderer, and a job's long answer followed by a 39 s "read the
+      rest"), `SpeechSession.test.ts` (+2), `micBlocked.test.ts` (3). Two existing tests in
+      `WindowsShell.capture.test.ts` were re-justified: one asserted the old 15 s release.
+
+      **Mutation pass** (each made and undone with the Edit tool): the fixed 15 s bound put back
+      (9 tests failed); `stop()` not settling `play()` (8); `speechEnded`'s order swapped back
+      (13; dropping only the error, 1); no grace (14); no clip-id check (2); no crash handler (1);
+      no window-closed handler (1); no AbortError guard (1); the old age calculation (9); no
+      staleness at all (5); `voiceStarted`'s order swapped back (2). One survivor was found and
+      fixed: a stalled-renderer test used a 10 s clip, whose 10 s + 5 s grace equals the old 15 s
+      bound, so it passed with the bound restored.
+
+      **Known limits:** the grace and the ceiling are reasoned, not measured (nothing has timed
+      `speech:play` to sound on a real device); the dictation hotkey's own `speech.stop()` lives
+      in `main.ts` and has no test that could fail (the microphone-opening path that also stops
+      speech is tested); a renderer reload mid-clip is neither a crash nor a report, so it waits
+      out the clip's limit.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

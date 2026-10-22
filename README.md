@@ -225,6 +225,13 @@ never open while the app is talking, enforced where every path to the microphone
 rather than at each hotkey. Nothing is lost when it's cut off, because the full text is still on
 screen — speech is the disposable channel.
 
+**Long answers play to the end (M24).** Until M24, anything over 15 seconds — a "read the rest",
+mostly — was treated as finished at 15 s: the chime could play over it, and whatever was said
+next cut it off. The app now waits as long as the clip actually lasts (read from the audio
+itself, plus a few seconds' grace). Something queued behind a long answer — a "Sent.", the next
+step's narration — waits its turn and is said after it, not dropped. Interrupting is unchanged:
+Escape or either hotkey still stops it at once, and what you say next is answered out loud.
+
 **156 tests**, and `scripts/tts-recon.mjs` — which interrogates a real Piper binary rather than
 guessing at it, the M11 "never hand-author a fixture" lesson applied to an audio engine. It is
 what established that the engine mis-decodes non-ASCII without `PYTHONUTF8=1`, applies no time
@@ -965,7 +972,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (2824 tests across 124 files, plus 95 opt-in real-model evals that skip themselves): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (2870 tests across 127 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -975,6 +982,13 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M24 (long speech plays to its end) is code complete (22 Oct 2026); its live pass has not been
+run.** Speech over 15 s is no longer treated as finished at 15 s; an utterance waiting behind a
+playing clip is no longer dropped as stale; and a blocked microphone is now reported instead of
+looking like a recording. **2870 tests green across 127 files, 96 skipped.** Every item in
+`docs/M24-live-checklist.md` ends in sound, so only a person can tick it. See `spec.md` §4d and
+§9 (M24).
 
 **M23 (background jobs, the status pill, the needs-you chime) is closed (22 Oct 2026), after a
 live run by a person, with named gaps.** A person watched 12 of the checklist's boxes; 25 more are
