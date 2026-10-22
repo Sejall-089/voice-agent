@@ -118,6 +118,9 @@ interface Live extends JobRecord {
   // click, or not at all.
   confirmPermit: "attached" | "detached" | null;
   wake: ((answer: GateAnswer) => void) | null;
+  // Whether a step has been entered (M25). Until then the job has only planned — it has told
+  // nobody anything and changed nothing — so Escape may cancel it outright; after, it detaches.
+  started: boolean;
 }
 
 export class JobManager implements JobsReader {
@@ -161,6 +164,8 @@ export class JobManager implements JobsReader {
         stepForegroundOnly: false,
         confirmPermit: null,
         wake: null,
+        // Every restored job has already ended; nothing about it is cancellable by Escape.
+        started: true,
       });
     }
     return interrupted;
@@ -204,6 +209,7 @@ export class JobManager implements JobsReader {
       stepForegroundOnly: false,
       confirmPermit: null,
       wake: null,
+      started: false,
     };
     this.jobs.set(job.id, job);
     this.store.save(job);
@@ -283,6 +289,7 @@ export class JobManager implements JobsReader {
     const job = this.jobs.get(id);
     if (job === undefined || TERMINAL.includes(job.state)) return Promise.resolve("cancelled");
     if (job.cancelRequested) return Promise.resolve("cancelled");
+    job.started = true;
     job.step = step.index;
     job.total = step.total;
     job.tool = step.tool;
@@ -418,6 +425,33 @@ export class JobManager implements JobsReader {
       detached = true;
     }
     return detached;
+  }
+
+  // Escape, while a job is attached (M25 Fix 2). Escape means "never mind" everywhere else in
+  // this app, and before M25 it only hid the bar: the job went on, popped the bar back up with
+  // its answer, spoke it, and opened a dangerous confirm on someone who had just said never mind.
+  //   - Not started (still planning, or queued for a slot): CANCELLED, silently. It also stops
+  //     being attached, so its "Cancelled before it started" goes to its own record — nothing
+  //     re-shows the bar or speaks — and a cancelled job is never in the pill.
+  //   - Started (a step has been entered): DETACHED, with trigger "escape" — it may already
+  //     have done something, so it is not stopped blind; it goes to the pill, silent, with its
+  //     Cancel button.
+  //   - Holding the foreground (a foreground-only step, or its confirm is up): left alone.
+  //     Today's behaviour — and with a confirm up, Escape is the dialog's own Cancel anyway.
+  //     No check of its own: a job only holds the foreground once a step has been entered, so it
+  //     has started, and `detachAttached` refuses it (an explicit check here was dead code — the
+  //     M25 mutation pass removed it and nothing changed).
+  escapeAttached(): "cancelled" | "detached" | "none" {
+    for (const job of this.jobs.values()) {
+      if (!job.attached || TERMINAL.includes(job.state)) continue;
+      if (!job.started) {
+        job.attached = false;
+        this.cancel(job.id);
+        return "cancelled";
+      }
+      return this.detachAttached("escape") ? "detached" : "none";
+    }
+    return "none";
   }
 
   // The pill's button for a waiting job. For a confirm this only lets the job go on to OPEN

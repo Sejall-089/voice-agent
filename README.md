@@ -237,6 +237,12 @@ time", then say "read the rest": you get the summary's rest, introduced with "Fr
 answer:" so it's clear what it belongs to. Before M25 the short answer in between made the app
 say there was nothing more to read.
 
+**Escape means never mind, for a running instruction too (M25).** Press Escape while the bar
+says "Thinking…" and the instruction is cancelled — nothing runs, nothing comes back to the bar,
+nothing is said. If it had already started doing something, it moves to the status pill instead,
+where it finishes quietly and can still be cancelled. Escape while your spoken instruction is
+still being transcribed throws it away.
+
 **"What's the time?" gets a short answer (M25).** "It's 2:51 PM." — or, for "what's the date?",
 "It's Thursday, 22 October." The time is read from the clock, not worded by the model.
 

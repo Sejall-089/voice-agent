@@ -109,6 +109,9 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // has any business doing to it — the shell does not capture and does not point, it only knows
   // that "never mind" should mean never mind for everything on screen at once.
   private dismissPointer: (() => void) | null = null;
+  // What Escape does to the job that has the bar (M25), once main.ts has built the jobs. The
+  // shell never learns what a job is — it only knows that Escape should mean never mind.
+  private escapeJob: (() => void) | null = null;
   private snapshotTarget: (() => Promise<void>) | null = null;
   // Every confirm dialog, one at a time (M23). Through M22 this was a boolean,
   // `confirmPending`, set around a single dialog — which two jobs' confirms overlapping would
@@ -232,7 +235,12 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // bound to the window's "show" event, so anything that showed the bar mid-dialog would have
     // quietly taken the key back. `confirm()` re-arms it itself once the answer is in.
     if (this.confirmPending) return;
-    this.escapeRegistered = globalShortcut.register("Escape", () => this.neverMind());
+    this.escapeRegistered = globalShortcut.register("Escape", () => {
+      // M25: the running instruction first (cancelled, or sent to the pill), then everything
+      // on screen — so nothing it does next can re-show the bar Escape is about to hide.
+      this.escapeJob?.();
+      this.neverMind();
+    });
     if (!this.escapeRegistered) {
       // Rare (something else already owns global Escape) — the renderer's own keydown
       // listener remains as a fallback whenever the bar happens to have focus.
@@ -613,6 +621,12 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // is being handed, not the other way round.
   attachPointer(dismiss: () => void): void {
     this.dismissPointer = dismiss;
+  }
+
+  // M25. Same shape as attachPointer: run on an Escape press — and only then, not when a
+  // question times out (that also goes through neverMind) — before the bar is hidden.
+  attachEscapeJob(handler: () => void): void {
+    this.escapeJob = handler;
   }
 
   // M16.9. Same shape as attachPointer: the shell is handed the thing to call, and never learns

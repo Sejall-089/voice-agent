@@ -296,6 +296,9 @@ app.whenReady().then(() => {
     store: new SqliteJobStore(db),
     foregroundFree: () => shell.isForegroundFree(),
   });
+  // M25: Escape cancels the job that has the bar if it has not acted yet, else detaches it
+  // (JobManager.escapeAttached — the rule and its tests live there, not here).
+  shell.attachEscapeJob(() => void jobs.escapeAttached());
   const interruptedJobs = jobs.restore();
   if (interruptedJobs > 0) {
     console.log(

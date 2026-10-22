@@ -1220,6 +1220,23 @@ open, or the attached job *holds the foreground* — it is inside a `foreground-
 between "this step needs a confirm" and that dialog being answered. Through M22 any running
 chain blocked both hotkeys for its whole length; now only that narrower thing does.
 
+**Escape while the attached job is still working (M25).** Escape means "never mind" everywhere
+else in the app; until M25 it only hid the bar, and the job went on — popped the bar back up
+with its answer, spoke it, and opened a dangerous confirm on someone who had just said never
+mind. Now (`JobManager.escapeAttached`, run by the Escape press only — not by a question timing
+out):
+
+| the attached job | Escape |
+|---|---|
+| still planning, or queued for a slot (no step entered) | **cancels** it, silently: its "Cancelled before it started" goes to its own record, the bar is not re-shown, nothing is said, and it is never in the pill |
+| a step has been entered | **detaches** it (trigger `escape`): it carries on in the pill, silent, with its Cancel button — it may already have done something, so it is not stopped blind |
+| holds the foreground (a `foreground-only` step, or its confirm is up) | leaves it alone, as before — with a confirm up, Escape is the dialog's own Cancel |
+
+And a voice instruction Escaped **during transcription** is thrown away: `VoiceSession.finish()`
+returns nothing if the session was abandoned while whisper worked (until M25 the transcript was
+run anyway). The renderer's own Escape key (`commandbar:close`), a fallback that only fires if
+the global Escape could not be registered, still only hides the bar.
+
 ### `Tool.background`
 
 Required on every tool, with no default (`core/types.ts`):
@@ -4071,8 +4088,17 @@ Post-v0:
          **Known gap (addendum C, deliberately not fixed):** a second instruction-hotkey press
          while a voice recording or transcription is in progress is not blocked, and detaches
          the attached job.
-      4. Escape cancels a running instruction that has not acted yet, otherwise detaches it; a
-         transcript that finishes after Escape is discarded.
+      4. **Escape on a running instruction** (§5c, "Attached and detached"). Root cause: Escape
+         only hid the bar — nothing told the job. Now it cancels a job that has not entered a
+         step (silently), detaches one that has (trigger `escape`), and leaves alone one holding
+         the foreground; and (E5) `VoiceSession.finish()` returns nothing if Escape came while
+         whisper was transcribing. Tests: `escapeJob.test.ts` (6, through the real Escape key,
+         planner, job runner and voice session — the investigation's repro promoted),
+         `jobManager.test.ts` (+5 for `escapeAttached`). Mutations: cancelling even after a step
+         started (2 failed); cancelling without silencing it (2); the E5 re-check removed (1);
+         the Escape key not telling the jobs (3). One survivor, and it was dead code: an
+         explicit "holds the foreground" check — a job only holds the foreground after it has
+         started, and `detachAttached` already refuses it; the check was removed.
       5. An outside click on a thinking bar detaches its job.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the

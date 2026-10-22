@@ -43,7 +43,23 @@
 - [ ] **3.3** Press the instruction hotkey while a confirm dialog is up. **Expect:** the existing
       "ignored - a confirmation is waiting" line, and **no** "accepted" line.
 
+## 4. Escape on a running instruction
+
+- [ ] **4.1** Give an instruction with a slow answer (a summary). While the bar says
+      "Thinking…", press **Escape**. **Expect:** the bar closes and stays closed; nothing is
+      said; no row in the pill. Pre-M25: the answer popped the bar back up and was spoken.
+- [ ] **4.2** Ask for something `dangerous` (a Slack send to the test channel) and press Escape
+      while it is still thinking. **Expect:** no confirm dialog ever opens; nothing is sent.
+- [ ] **4.3** Speak an instruction, press Enter, and press Escape while it is still being
+      transcribed. **Expect:** nothing runs.
+- [ ] **4.4** Start something that takes a while *after* it has started (a long chain), and press
+      Escape mid-way. **Expect:** it moves to the pill, finishes quietly, and the console says
+      `detached by escape`.
+
 ## Known gaps, so nobody mistakes them for failures while testing
+
+- The renderer's own Escape (a fallback used only if the global Escape could not be
+  registered) still just hides the bar.
 
 - A second instruction-hotkey press while a voice recording or transcription is in progress is
   not blocked and detaches the attached job (addendum C; deliberately not fixed in M25).

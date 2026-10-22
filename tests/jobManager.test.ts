@@ -546,3 +546,65 @@ describe("what is written down", () => {
     expect(manager.views().map((job) => job.id)).toContain(id);
   });
 });
+
+// M25 Fix 2. The rule itself; tests/escapeJob.test.ts runs it through the real Escape key.
+describe("escapeAttached — what Escape does to the job that has the bar", () => {
+  it("still planning: cancelled, no longer attached, never in the pill — and it may not start", async () => {
+    const { manager } = harness();
+    const id = manager.submit("summarize this");
+
+    expect(manager.escapeAttached()).toBe("cancelled");
+    expect(manager.get(id)).toMatchObject({ attached: false, background: false });
+    expect(manager.isCancelRequested(id)).toBe(true);
+    // The planning call comes back: the gate refuses to let it run.
+    expect(await manager.gateFor(id).admit(WORK)).toBe("cancelled");
+  });
+
+  it("waiting for a slot: cancelled at once", async () => {
+    const { manager } = harness({ maxRunning: 1 });
+    const busy = manager.submit("busy");
+    await manager.gateFor(busy).admit(WORK);
+    manager.detachAttached("hotkey");
+    const id = manager.submit("queued one");
+    const admitted = watch(manager.gateFor(id).admit(WORK));
+    await flush();
+    expect(manager.get(id)?.state).toBe("queued");
+
+    expect(manager.escapeAttached()).toBe("cancelled");
+    await flush();
+    expect(manager.get(id)?.state).toBe("cancelled");
+    expect(admitted.value).toBe("cancelled");
+  });
+
+  it("a step has started: detached with trigger 'escape', and it carries on", async () => {
+    const { manager, changes } = harness();
+    const id = manager.submit("summarize this");
+    const gate = manager.gateFor(id);
+    await gate.admit(WORK);
+    await gate.enterStep(step("doThing"));
+
+    expect(manager.escapeAttached()).toBe("detached");
+    expect(manager.get(id)).toMatchObject({ state: "running", attached: false, background: true });
+    expect(manager.isCancelRequested(id)).toBe(false);
+    expect(changes.filter((c) => c.type === "detached")).toEqual([
+      expect.objectContaining({ type: "detached", trigger: "escape" }),
+    ]);
+  });
+
+  it("holding the foreground (its confirm is up): left alone", async () => {
+    const { manager } = harness();
+    const id = manager.submit("send it");
+    const gate = manager.gateFor(id);
+    await gate.admit(WORK);
+    await gate.enterStep(step("sendThing"));
+    await gate.beforeConfirm(); // attached: the job now holds the foreground until it is answered
+
+    expect(manager.escapeAttached()).toBe("none");
+    expect(manager.get(id)).toMatchObject({ attached: true });
+  });
+
+  it("nothing attached: nothing happens", () => {
+    const { manager } = harness();
+    expect(manager.escapeAttached()).toBe("none");
+  });
+});

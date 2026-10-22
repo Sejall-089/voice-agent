@@ -90,8 +90,15 @@ export class VoiceSession {
     try {
       transcript = await this.transcriber.transcribe(clip);
     } catch (error) {
+      if (!this.is("transcribing")) return "";
       return this.giveUp(`Couldn't transcribe that: ${messageOf(error)}`);
     }
+
+    // (M25, E5) Abandoned while whisper was working — Escape, a click away — or a new session
+    // has begun since. The transcript is for nobody now: return nothing, and leave the state to
+    // whoever moved it. Until M25 it was returned anyway, and an Escape during transcription
+    // still ran the instruction.
+    if (!this.is("transcribing")) return "";
 
     const text = transcript.trim();
     if (text.length === 0) return this.giveUp(NOTHING_HEARD);
