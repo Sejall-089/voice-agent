@@ -1,8 +1,9 @@
 import { Chime } from "../../core/jobs/chime.ts";
 import type { JobManager } from "../../core/jobs/JobManager.ts";
 import { FOREGROUND_BUSY } from "../../core/jobs/messages.ts";
-import { dismissAllTargets, initialPillState, pillView, reducePill } from "../../core/jobs/pill.ts";
-import type { PillEvent, PillState, PillView } from "../../core/jobs/pill.ts";
+import { dismissAllTargets, initialPillState, isPointInRect, pillView, reducePill } from "../../core/jobs/pill.ts";
+import type { PillEvent, PillState, PillView, Rect } from "../../core/jobs/pill.ts";
+import type { PointerPoint, PointerPressSource } from "../shell/PointerPressSource.ts";
 import { CHIME_MUTED, readFlag, writeFlag } from "../../core/settings.ts";
 import type { SettingsStore } from "../../core/settings.ts";
 
@@ -47,6 +48,14 @@ export interface PillControllerDeps {
   // console. Optional: without it nothing is logged and nothing else changes.
   log?: (line: string) => void;
   now?: () => number;
+  // M27, fix B: mouse presses anywhere on screen, so a press OUTSIDE the pill can close an open
+  // list (the pill cannot take focus, so it never blurs). Optional, and allowed to fail: without
+  // it, or if it cannot start, the list closes as it always did — ten seconds after the pointer
+  // leaves, a second click, a row's Review…/Resume, the hotkey.
+  outsidePresses?: PointerPressSource;
+  // The pill window's bounds right now, in the same space as a press's point (DIP), or null when
+  // there is no visible pill. A press inside them is the pill's own business.
+  pillBounds?: () => Rect | null;
 }
 
 export class PillController {
@@ -57,6 +66,9 @@ export class PillController {
   private notice: { text: string; until: number } | null = null;
   // The last view handed to the surface, serialised: a tick that changes nothing draws nothing.
   private drawn: string | null = null;
+  // The outside-press watcher (fix B): not asked yet, starting, able to watch, or not available.
+  private presses: "idle" | "starting" | "ready" | "unavailable" = "idle";
+  private watching = false;
 
   constructor(private readonly deps: PillControllerDeps) {
     this.now = deps.now ?? Date.now;
@@ -246,12 +258,17 @@ export class PillController {
     if (this.state.expanded !== wasOpen) {
       this.say(`list ${this.state.expanded ? "OPENED" : "CLOSED"}: ${reason}`);
     }
+    // Watch for outside presses exactly while the list is open — whatever opened or closed it.
+    this.syncWatching();
     const view = this.view();
     const serialised = JSON.stringify(view);
     if (serialised !== this.drawn) {
       this.drawn = serialised;
       this.deps.surface.render(view);
     }
+    // The pill is on screen, so the list could be opened by the next click: have the watcher
+    // ready BEFORE that click, not starting at it (it takes about 1.5 s).
+    if (view.mode !== "hidden") this.preparePresses();
     // THE LIST IS OPEN WITH THESE JOBS IN IT: the user has seen them. Recorded once per job
     // (the manager ignores a second look), and it is what starts the hour after which a
     // failed or expired one leaves the pill. Only what is actually LISTED — a job past the
@@ -263,6 +280,66 @@ export class PillController {
         .map((item) => item.id);
       if (ended.length > 0) this.deps.manager.markSeen(ended);
     }
+  }
+
+  // --- Outside presses (M27, fix B) ---
+  //
+  // Until M27 nothing closed an open list when the user clicked elsewhere: the pill never takes
+  // focus, so it never blurs (M26's second live finding). Now, while the list is open, every
+  // mouse press is reported with where the pointer was, and one OUTSIDE the pill closes it — on
+  // the desktop, another app, or the instruction bar alike. Mouse buttons only: a key, a hotkey,
+  // a window hiding, a dialog opening are not presses (measured, PointerPressSource.ts).
+
+  private preparePresses(): void {
+    const source = this.deps.outsidePresses;
+    if (source === undefined || this.presses !== "idle") return;
+    this.presses = "starting";
+    source.onFailure((reason) => this.pressesUnavailable(reason));
+    source.prepare().then(
+      () => {
+        if (this.presses !== "starting") return;
+        this.presses = "ready";
+        // The list may have been opened while it was starting.
+        this.syncWatching();
+      },
+      (error: unknown) => this.pressesUnavailable(error instanceof Error ? error.message : String(error)),
+    );
+  }
+
+  // SAID, never swallowed: the list still works without it — it closes ten seconds after the
+  // pointer leaves, as before M27 — but a click elsewhere will not close it, and the log is the
+  // only place that difference can be traced to.
+  private pressesUnavailable(reason: string): void {
+    if (this.presses === "unavailable") return;
+    this.presses = "unavailable";
+    this.watching = false;
+    this.say(`outside presses cannot be watched (${reason}); an open list closes after 10 s with the pointer off it, as before`);
+  }
+
+  private syncWatching(): void {
+    const source = this.deps.outsidePresses;
+    if (source === undefined) return;
+    const want = this.state.expanded && this.presses === "ready";
+    if (want && !this.watching) {
+      this.watching = true;
+      source.watch((point) => this.onPress(point));
+      this.say("watching for presses outside the pill");
+    } else if (!want && this.watching) {
+      this.watching = false;
+      source.stop();
+      this.say("stopped watching for presses outside the pill");
+    }
+  }
+
+  private onPress(point: PointerPoint): void {
+    // A press polled just before the list closed can arrive just after: it is about a list that
+    // is no longer open.
+    if (!this.watching || !this.state.expanded) return;
+    const bounds = this.deps.pillBounds?.() ?? null;
+    // Inside the pill — a row's button, the pill itself, the list's own controls — is the page's
+    // business. With no pill on screen there is nothing to be outside of.
+    if (bounds === null || isPointInRect(point, bounds)) return;
+    this.dispatch({ type: "collapse" }, "a press outside the pill");
   }
 
   // One line per pill event, for the console (M23 follow-up). A live report — "the list

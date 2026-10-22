@@ -1432,6 +1432,49 @@ opens it. The window cannot take focus, so there is no blur: the page reports th
 entering and leaving, and once a second main also asks the OS where the pointer is, because
 the window is resized under it and a `mouseleave` was measured not arriving.
 
+**A mouse press outside the pill closes an open list** (M27, fix B; M26's second live finding —
+until M27 it closed only ten seconds after the pointer left). With no blur to listen for, a
+helper watches the mouse buttons (`main/shell/WindowsPointerWatcher.ts`, behind
+`PointerPressSource`): a persistent PowerShell host, in the style of `WindowsInputInjector`,
+whose background thread polls `GetAsyncKeyState` for left, right, middle, X1 and X2 **every 50
+ms, reading both bits** — down now, and pressed since the last poll — and on a press reports
+`GetCursorPos`. `PillController` closes the list when the point is outside the pill window's
+bounds; a press inside (a row, the list's own buttons, the pill itself) is the page's business.
+Any outside press counts: the desktop, another app, the instruction bar.
+
+- **Watched only while the list is open**, whatever opened or closed it (a click, the hotkey,
+  Review…/Resume, ten idle seconds, the pill emptying): `WATCH` when it opens, `STOP` — the
+  polling thread joined — when it closes. A press line arriving after that is ignored.
+- **Prepared when the pill first appears**, not at the click that opens the list: the host takes
+  about 1.5 s to start. If the list is opened before it is ready, watching starts when it is.
+- **The opening click never counts**: the first poll after `WATCH` is never a press, low bit
+  included — nor is a button already held down when watching starts. The host only samples
+  (`SAMPLE first down low x y`); that rule, and the press rule, are `judgeSample` in TypeScript.
+- **The helper does not outlive the app**: disposed at `will-quit` (`QUIT`, then killed), as
+  `WindowsInputInjector` is; and when main exits any other way, a hard kill included, its stdin
+  closes and the host exits — its polling thread is a background thread. Measured 2026-10-22: the
+  helper gone after dispose, after a plain exit, and within 0.2 s of `taskkill /F` on the parent,
+  watching or idle.
+- **Mouse buttons only**: a key (a hotkey, F24), a window hiding itself, a message box opening
+  and the pill hiding and re-showing are not presses — measured, not assumed.
+- **If the helper cannot start, or dies, the list works as before M27**: it closes ten seconds
+  after the pointer leaves, on a second click, Review…/Resume or the hotkey. That is said once
+  in the console (`outside presses cannot be watched (…)`), never swallowed, and not retried at
+  the next click.
+
+Measured first on a prototype (`scripts/pill-outside-click-recon.cjs`, 2026-10-22): 48 of 48
+clicks seen, held 0-120 ms, at 50 and 100 ms; the high bit alone caught every click held 30 ms
+or more at 50 ms but only a quarter of 5-15 ms taps, so the low bit is what catches a tap;
+press-to-noticed median 32 ms, max 63 ms at 50 ms; the helper's processor time while polling
+below what Windows measures (0 ms in 8 s); start-up about 1.5 s; inside clicks read inside the
+pill's electron bounds 4 of 4 (PowerShell is not DPI-aware, so its points are DIP, like
+`getBounds()`). Then on the shipped code in real windows (`scripts/ask-recon/pill-outside-click.ts`):
+PASS. **Known limits:** Windows documents that another program polling the same button state
+can take the "pressed since" bit first, so a tap shorter than the poll can then be missed;
+taps under about 15 ms rely on that bit; a press in the pill window's transparent margin counts
+as inside; a pill on a secondary display, or mixed display scaling, is not measured (the pill
+lives on the primary display).
+
 The open panel is **sized to its content**: the page measures the list and main resizes the
 window to fit, up to 440 px, keeping the bottom-right corner fixed. A job's message is drawn
 whole and wrapped; only text over 420 characters is shortened, between words, with an
@@ -4393,7 +4436,8 @@ Post-v0:
       not notice (no layout), so `render.test.ts` now reads `pill.html`'s stylesheet and pins
       sticky, `top: -8px` and the opaque background; it failed on the same mutation.
 
-      **A cancelled job shows Cancelling (found while building fix A).** Built. Read through the
+      **A cancelled job shows Cancelling (found while building fix A).** Committed (d5b90e0).
+      Read through the
       real manager and controller: after Cancel on a job mid-step, its row still said "Running —
       Step 1 of 2 · summarize", the label "1 running", and Cancel was offered again; a second
       press did nothing visible. Nothing was stuck — the next step is refused and the runner ends
@@ -4408,6 +4452,53 @@ Post-v0:
       row goes and the list closes; still planning shows the planning wording and admit refuses;
       a waiting job cancels at once and is never drawn as Cancelling. Mutations (Edit, reverted):
       the field dropped from the view — 3 failed; the second Cancel kept — 3 failed.
+
+      **Fix B — a press outside the pill closes the open list (M26 finding 2).** Built. The rule
+      and its measurements are in §5c, "The status pill". Recon FIRST, on a prototype
+      (`scripts/pill-outside-click-recon.cjs`): no problem found — every click seen, 32 ms median
+      reaction at 50 ms, no measurable CPU, 1.5 s start-up, inside/outside agreeing with
+      electron's bounds, no press from a key, a hide, a message box or a re-show, none while
+      stopped, none from a press just before watching began. The one finding that shaped the
+      design: a click shorter than the poll is caught only by the low bit, so both bits are read.
+      Built: `PointerPressSource` (interface) and `WindowsPointerWatcher` (`main/shell/`; the
+      script, the line parser and the start-up/failure handling split from the process so they
+      can be tested); `PillController` prepares it when the pill first appears, watches exactly
+      while the list is open, closes on a press outside `pillBounds`, and logs once if it cannot
+      watch; `main.ts` wires it and disposes it at quit.
+
+      Tests (`tests/pill.outsideClick.test.ts`; the press source a fake that is ASYNC like the
+      real one and fails with the real one's types): a press outside closes the list and stops
+      watching; a press on the bar counts; inside, at both corners, does not, and one pixel past
+      the edge does; prepared when the pill appears, not before and not at the click, once;
+      watched only while open and stopped by each way it closes (second click, hotkey, Review…,
+      ten idle seconds, emptied); a press arriving after close is ignored; opened before ready,
+      watched once ready, and not if closed by then; no pill, no outside; a failure to start is
+      logged once, nothing is watched, the list still closes after 10 s, and it is not retried at
+      the click; a death later is logged once and watching ends; with no watcher passed, nothing
+      changes. The transport, with the process faked: mouse buttons only (1, 2, 4, 5, 6) in the
+      script it runs; only a well-formed PRESS line is a press; one spawn, READY across chunks;
+      WATCH 50 / STOP, no press delivered after STOP; failures as Errors (exit before READY, the
+      spawn throwing, no READY in time, the host killed); a death after READY told once and
+      nothing written after; dispose not reported as a failure.
+
+      Mutations (each with the Edit tool, each reverted): inside presses treated as outside — 1
+      failed; polling kept after the list closes — 3 failed; a helper failure swallowed silently
+      — 2 failed; **the first-read discard removed — SURVIVED** while the rule lived in the C#
+      string, which no test can run (the fake-host tests see only printed lines). The host was
+      made a sampler and the rule moved to `judgeSample` in TypeScript, with tests that a button
+      already down when watching starts, and the opening click's low bit, are not presses; the
+      same mutation then failed 5, and `git diff` was empty after the revert.
+
+      Lifecycle (measured, scratch parent holding the real watcher): the helper is gone after
+      dispose, after a plain exit without dispose, and within 0.2 s of `taskkill /F` on the
+      parent, watching or idle — the same as `WindowsInputInjector` (stdin closes, `ReadLine`
+      returns null, the host exits; the polling thread is a background thread). No fix needed.
+
+      Real windows, the shipped code (`scripts/ask-recon/pill-outside-click.ts`: the real
+      controller, pill window over the built page and watcher; real clicks): PASS — the opening
+      click does not count; a click on the list's heading, F24, a window hiding and re-showing
+      and a message box leave it open; a click on another window closes it and stops watching;
+      with it closed a click does nothing; reopened, a second outside click closes it again.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M26's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

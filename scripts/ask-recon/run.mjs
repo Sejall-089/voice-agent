@@ -4,6 +4,7 @@
 //   node scripts/ask-recon/run.mjs dismissed-then-again
 //   node scripts/ask-recon/run.mjs result-links          (flashes a window; sends no OS keys)
 //   node scripts/ask-recon/run.mjs pill-collapse [png dir]   (MOVES THE MOUSE AND CLICKS, ~45 s; no keys)
+//   node scripts/ask-recon/run.mjs pill-outside-click [png dir]   (MOUSE, CLICKS on its own windows, F24 once, ~30 s)
 //   node scripts/ask-recon/run.mjs focus-after-dialog [png dir]   (MOUSE, CLICKS, and keys into its own windows only, ~40 s)
 //   node scripts/ask-recon/run.mjs confirm-waiting-line [png dir] (MOUSE, CLICKS, its own hotkey, Enter into its own dialog, ~25 s)
 //
@@ -42,16 +43,16 @@ const [name, ...args] = process.argv.slice(2);
 
 const entry = join(here, `${name}.ts`);
 if (!name || !existsSync(entry)) {
-  console.error("usage: node scripts/ask-recon/run.mjs <hotkey-during-question|dismissed-then-again|result-links|pill-collapse|focus-after-dialog|confirm-waiting-line> [args]");
+  console.error("usage: node scripts/ask-recon/run.mjs <hotkey-during-question|dismissed-then-again|result-links|pill-collapse|pill-outside-click|focus-after-dialog|confirm-waiting-line> [args]");
   process.exit(2);
 }
-// `pill-collapse` loads the status pill's page and preload instead of the bar's;
+// `pill-collapse` and `pill-outside-click` load the status pill's page and preload instead of the bar's;
 // `focus-after-dialog` and `confirm-waiting-line` load both. Those also honour BUILD_DIR — a build somewhere other than out/ (`electron-vite build --outDir
 // <dir>`) — so they can be run without rebuilding out/ under a running `npm run dev`. The other
 // three scripts read out/ directly.
 const buildDir = process.env.BUILD_DIR ?? join(repo, "out");
 const needed =
-  name === "pill-collapse"
+  name === "pill-collapse" || name === "pill-outside-click"
     ? ["preload/pill.js", "renderer/pill.html"]
     : name === "focus-after-dialog" || name === "confirm-waiting-line"
       ? ["preload/pill.js", "renderer/pill.html", "preload/preload.js", "renderer/index.html"]

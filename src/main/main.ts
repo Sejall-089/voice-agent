@@ -27,6 +27,7 @@ import { createStartingSomethingElse } from "./jobs/startingSomethingElse.ts";
 import type { JobPlannerParts } from "./jobs/JobRunner.ts";
 import { PillWindow } from "./pill/PillWindow.ts";
 import { PillController } from "./pill/PillController.ts";
+import { WindowsPointerWatcher } from "./shell/WindowsPointerWatcher.ts";
 import { JobManager } from "../core/jobs/JobManager.ts";
 import { SqliteJobStore } from "../core/jobs/JobStore.ts";
 import { isPointInRect, PILL_COLLAPSED } from "../core/jobs/pill.ts";
@@ -139,6 +140,8 @@ let screenSurface: WindowsScreen | null = null;
 let elementsSurface: WindowsElements | null = null;
 // M23. The status pill's window and the one-second timer behind it, for will-quit.
 let statusPill: PillWindow<BrowserWindow> | null = null;
+// M27. Watches mouse presses while the pill's list is open; a PowerShell host, disposed at quit.
+let pointerWatcher: WindowsPointerWatcher | null = null;
 let pillTimer: ReturnType<typeof setInterval> | null = null;
 
 const WINDOW_WIDTH = 640;
@@ -648,6 +651,8 @@ app.whenReady().then(() => {
   shell.attachDetachedDialogOwner(() => pill.window());
   screen.on("display-metrics-changed", () => pill.reposition());
 
+  const watcher = new WindowsPointerWatcher();
+  pointerWatcher = watcher;
   const pillController = new PillController({
     manager: jobs,
     settings,
@@ -669,6 +674,13 @@ app.whenReady().then(() => {
     // One console line per pill event — a click, a row's button, the pointer entering or
     // leaving, the list opening or closing and why. Timestamps, job ids and fixed words only.
     log: (line) => console.log(`[main] ${line}`),
+    // M27: a press outside the pill closes its open list. Prepared when the pill first shows,
+    // watched only while the list is open; if it cannot start, the list works as before.
+    outsidePresses: watcher,
+    pillBounds: () => {
+      const win = pill.window();
+      return win !== null && win.isVisible() ? win.getBounds() : null;
+    },
   });
   // From the pill's page, and only from it: a message on these channels from any other
   // window is dropped. What each may ask for is checked again in PillController.
@@ -941,4 +953,5 @@ app.on("will-quit", () => {
   // interrupted, which is also what happens when the process is killed and this never runs.
   if (pillTimer !== null) clearInterval(pillTimer);
   statusPill?.dispose();
+  pointerWatcher?.dispose();
 });

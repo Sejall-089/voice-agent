@@ -2,8 +2,8 @@
 
 > **NOT RUN YET.** Written before the live pass. This file grows one section per fix as each is
 > built: section 1 is fix C (the label), section 2 fix A (Dismiss keeps the list open, "Dismiss
-> all"), section 3 the Cancelling row. The section for fix B (an outside click closes the list)
-> is added with that fix.
+> all"), section 3 the Cancelling row, section 4 fix B (a click outside the pill closes the
+> list).
 >
 > M27 fixes the three status-pill findings from M26's live run (`spec.md` §9, M27; §5c, "The
 > status pill"). Everything a test or script can show is already shown and listed under
@@ -105,3 +105,51 @@ Cancel, a second press dropped, label and other rows unchanged, the next step re
 job never drawn as Cancelling — `tests/pill.dismiss.test.ts` against the real job manager and
 pill controller. Mutations: the field dropped from the view (3 failed); the second Cancel kept
 (3 failed).
+
+## 4. A click outside the pill closes the open list (fix B)
+
+Get a job or two into the pill and click the pill to open the list before each item. Use a
+real mouse; then repeat 4.1 and 4.5 on a **touchpad** with **taps**, not presses.
+
+- [ ] **4.1** Click on the **desktop**: the list closes at once (well under a second). The pill
+      itself stays.
+- [ ] **4.2** Click in **another app's window** (a browser, VS Code): the list closes, and that
+      click still does what it would have done in that app.
+- [ ] **4.3** Open the bar with the hotkey, then click the **bar**: the list closes, and the bar
+      takes the click as usual.
+- [ ] **4.4** Click **inside** the list — a row's text, the heading, the chime toggle, Dismiss
+      on one row: it stays open (Dismiss removes that row as before).
+- [ ] **4.5** The click that **opens** the list does not close it — try a quick click and a
+      slow one.
+- [ ] **4.6** With the list open, press the dictation hotkey or Escape, or let a confirm dialog
+      open from Review…: none of them is treated as a click elsewhere (the hotkey and Review…
+      close the list by their own rules, as before; Escape alone leaves it open).
+- [ ] **4.7** Right-click and middle-click outside also close it.
+- [ ] **4.8** With the list **closed**, clicking around changes nothing about the pill.
+
+**Live caveats — what a person has to judge, because no script can:**
+
+- **Physical clicks and touchpad taps.** Every measurement so far used synthetic clicks. A real
+  mouse holds a click ~60-120 ms; a touchpad tap can be far shorter.
+- **Taps shorter than about 15 ms.** At the 50 ms poll they are seen only through Windows's
+  "pressed since the last check" bit (the "down now" bit caught a quarter of 5-15 ms taps in the
+  recon). If a quick tap outside sometimes leaves the list open, note which device and how often.
+- **Another program polling the mouse buttons** (some gaming overlays, macro tools, remote
+  desktop software) can take that same bit first, Windows documents. With such a program running,
+  short taps may be missed; a normal click should still close the list. Note anything running
+  that might poll.
+
+**Machine-verified, not watched (fix B):**
+
+- The rule — outside closes, inside (edges included) does not, the bar counts, watched only while
+  open and stopped by every way it closes, prepared when the pill appears and not at the click,
+  a late press ignored, a failure logged once and the 10 s close still working —
+  `tests/pill.outsideClick.test.ts` with an async fake. The helper's transport, mouse buttons
+  only, failures as Errors — the same file, with the process faked.
+- The design, on a prototype in real windows (`scripts/pill-outside-click-recon.cjs`,
+  2026-10-22): 48/48 synthetic clicks seen held 0-120 ms; median 32 ms to notice at 50 ms; no
+  measurable CPU; ~1.5 s start-up; no press from F24, a hide, a message box or a re-show.
+- The shipped code in real windows (`scripts/ask-recon/pill-outside-click.ts`, 2026-10-22):
+  PASS — opening click not counted; inside click, F24, hide/show and a message box leave it open;
+  an outside click closes it and stops watching; closed, a click does nothing; works again after
+  a reopen.

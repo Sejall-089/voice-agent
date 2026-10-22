@@ -512,7 +512,10 @@ hotkey again, it carries on in the background while you say the next thing.
   **Dismiss all**, at the top of the list next to the chime toggle (both stay in view when the
   list scrolls), clears every finished, failed or expired job
   listed — never a running or waiting one, and never one marked *interrupted*, which you
-  dismiss on its own. Pressing the hotkey
+  dismiss on its own. **Clicking anywhere outside the pill** — the desktop, another app, the
+  bar — closes the open list; otherwise it closes 10 seconds after the pointer leaves it.
+  (The pill never takes the keyboard, so a small helper watches the mouse buttons while the
+  list is open, and only then.) Pressing the hotkey
   while that dialog is up says *"There's a confirmation waiting"* in the bar; the line goes
   away once the dialog is answered, or as soon as you run something new from the bar.
 - **A finished background job stays in the pill until you've seen it** — green, "N done",
@@ -1004,7 +1007,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (2982 tests across 134 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3008 tests across 135 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1019,8 +1022,9 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 counts every group present ("1 running · 2 done"), the pill widens to fit, and past a cap it
 says "+N more". Fix A is in: Dismiss and Cancel keep the list open while anything is left in
 it, and "Dismiss all" clears the finished, failed and expired jobs listed. A job cancelled
-mid-step now says "Cancelling — finishing step N of M" until it stops. An outside click closing
-the list is next. **2982 tests green across 134 files, 96 skipped.** See `spec.md` §9
+mid-step now says "Cancelling — finishing step N of M" until it stops. Fix B is built: a click
+anywhere outside the pill closes its open list. The live checklist (`docs/M27-live-checklist.md`)
+has not been run yet. **3008 tests green across 135 files, 96 skipped.** See `spec.md` §9
 (M27).
 
 **M26 (a finished background job stays in the pill until seen) is closed (22 Oct 2026), after
