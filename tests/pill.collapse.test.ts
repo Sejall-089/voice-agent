@@ -471,7 +471,9 @@ describe("PillController: what closes an open list", () => {
     await w.pageLoaded();
     await w.waitingJob("second");
     w.failedJob("It broke.");
-    expect(w.last()).toMatchObject({ expanded: false, label: "2 need you" });
+    // RE-JUSTIFIED AT M27: the label now counts every group, so it also shows the failure
+    // ARRIVED while collapsed — "2 need you" alone could not tell that from it never coming.
+    expect(w.last()).toMatchObject({ expanded: false, label: "2 need you · 1 didn't finish" });
   });
 
   it("the idle timer runs off the controller's tick: open, pointer leaves, ten seconds, closed", async () => {

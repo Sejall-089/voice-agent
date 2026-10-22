@@ -190,6 +190,21 @@ export class PillController {
     this.dispatch({ type: "measured", height: raw }, "measured");
   }
 
+  // The page measured how wide each way of writing the label is (M27). Checked here as the
+  // height is; the labels must be exactly the ones the pill is showing (`reducePill`), and the
+  // width it picks is bounded in `pillSize`, so the most a wrong report can do is make the pill
+  // its widest or say "+N more" too soon.
+  onLabelWidths(rawLabels: unknown, rawWidths: unknown): void {
+    if (!Array.isArray(rawLabels) || !Array.isArray(rawWidths)) return;
+    if (rawLabels.length === 0 || rawLabels.length > 4 || rawWidths.length !== rawLabels.length) return;
+    const labels = rawLabels.filter((label): label is string => typeof label === "string");
+    const widths = rawWidths.filter(
+      (width): width is number => typeof width === "number" && Number.isFinite(width) && width > 0 && width <= 10_000,
+    );
+    if (labels.length !== rawLabels.length || widths.length !== rawWidths.length) return;
+    this.dispatch({ type: "labelMeasured", labels, widths }, "label measured");
+  }
+
   onMute(raw: unknown): void {
     if (typeof raw !== "boolean") return;
     // Written first: a mute that is shown and not saved would come back unmuted.

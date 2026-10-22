@@ -40,6 +40,44 @@ export function measurePill(root: HTMLElement): number | null {
   return Math.ceil(list.scrollHeight + border + GAP + SUMMARY_HEIGHT);
 }
 
+// How wide the pill would have to be to show each of these labels whole (M27): a hidden copy
+// of the pill, at its natural width, with each label in turn. Null when there is no pill drawn.
+// It measures and decides nothing — which label is shown, and how wide, is main's call.
+export function measureLabels(root: HTMLElement, labels: readonly string[]): number[] | null {
+  const summary = root.querySelector<HTMLElement>(".summary");
+  if (summary === null || labels.length === 0) return null;
+  const probe = summary.cloneNode(true) as HTMLElement;
+  // Inline, so it beats both the stylesheet's width and the width this view set on the pill.
+  probe.style.cssText = "position:absolute;left:0;top:0;visibility:hidden;width:max-content;";
+  probe.setAttribute("aria-hidden", "true");
+  root.append(probe);
+  const text = probe.querySelector<HTMLElement>(".label");
+  const widths = labels.map((label) => {
+    if (text !== null) text.textContent = label;
+    return Math.ceil(probe.getBoundingClientRect().width);
+  });
+  probe.remove();
+  return widths;
+}
+
+export interface PillReports {
+  contentHeight(height: number): void;
+  labelWidths(labels: string[], widths: number[]): void;
+}
+
+// After a view is drawn: tell main what it needs to size the window. Each figure is reported
+// only when the view shows main does not have it yet — otherwise every report would come
+// straight back as a new view and be reported again.
+export function reportMeasurements(root: HTMLElement, view: PillView, send: PillReports): void {
+  const height = measurePill(root);
+  if (height !== null && height !== view.contentHeight) send.contentHeight(height);
+  const options = view.labelOptions ?? [];
+  if (options.length > 0 && view.labelWidths === undefined) {
+    const widths = measureLabels(root, options);
+    if (widths !== null && widths.every((width) => width > 0)) send.labelWidths([...options], widths);
+  }
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
   tag: K,
@@ -97,6 +135,8 @@ export function renderPill(root: HTMLElement, view: PillView, handlers: PillHand
   const summary = el(doc, "button", "summary");
   summary.type = "button";
   summary.setAttribute("aria-expanded", String(view.expanded));
+  // As wide as main sized the window for the label (M27); until then, the stylesheet's width.
+  if (typeof view.width === "number") summary.style.width = `${view.width}px`;
   summary.append(el(doc, "span", "dot"), el(doc, "span", "label", view.label));
   summary.addEventListener("click", () => handlers.onExpand(!view.expanded));
   root.append(summary);

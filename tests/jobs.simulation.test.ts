@@ -97,7 +97,9 @@ describe("three concurrent jobs, start to finish", () => {
     expect(w.manager.get("job3")).toMatchObject({ state: "needs-you", waitingFor: "foreground-only", tool: "onScreen" });
     // Two jobs started waiting in the same moment: ONE chime.
     expect(sound.chimes).toBe(1);
-    expect(shown()).toMatchObject({ mode: "needs-you", label: "2 need you", pulse: true });
+    // RE-JUSTIFIED AT M27: it pinned "2 need you", which hid job1 — done in the background and,
+    // since M26, kept until seen. That was M26's third live finding. The colour is still amber.
+    expect(shown()).toMatchObject({ mode: "needs-you", label: "2 need you · 1 done", pulse: true });
     // Nobody was asked anything, and nothing risky or on-screen ran.
     expect(w.shell.confirmMessages).toEqual([]);
     expect(ran).toEqual(["gather", "gather", "gather"]);

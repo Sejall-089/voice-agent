@@ -20,8 +20,20 @@ export interface PillItem {
 }
 
 export interface PillView {
+  // The colour, from the most urgent group present.
   mode: PillMode;
+  // Every group present, most urgent first — "1 running · 2 done" (M27) — or as many as fit,
+  // with "+N more" for the jobs in the rest.
   label: string;
+  // Every way of writing the label, longest first, for the page to measure (M27). Absent when
+  // hidden. The page measures them all and reports the widths; main picks the one that fits.
+  labelOptions?: string[];
+  // The widths main accepted for exactly these `labelOptions`. Present: there is nothing to
+  // report. Absent: the page should measure.
+  labelWidths?: number[];
+  // How wide the pill itself (the collapsed button) is drawn, in CSS pixels, once a
+  // measurement has been accepted. Absent until then: the stylesheet's width stands.
+  width?: number;
   pulse: boolean;
   expanded: boolean;
   muted: boolean;

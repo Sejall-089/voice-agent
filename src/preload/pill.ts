@@ -6,7 +6,7 @@ import type { PillView } from "../core/jobs/pillView.ts";
 // business with the microphone, the speaker or the instruction input, and a window that is on
 // screen while other things happen should be holding as little as possible.
 //
-// One channel in, four out. Every outgoing message is a REQUEST that main checks again
+// One channel in, six out. Every outgoing message is a REQUEST that main checks again
 // (PillController): the page is handed strings and booleans and cannot approve, send or run
 // anything by sending one.
 const pill = {
@@ -33,6 +33,12 @@ const pill = {
   // pill → main: how tall the open list's content is, so the window can be sized to it.
   contentHeight(height: number): void {
     ipcRenderer.send("pill:height", height);
+  },
+  // pill → main: how wide each way of writing the label is, so the pill can be sized to the
+  // one that fits (M27). The labels are sent back with the widths, so main can tell a
+  // measurement of the label it is showing from one of a label that has since changed.
+  labelWidths(labels: string[], widths: number[]): void {
+    ipcRenderer.send("pill:label-widths", labels, widths);
   },
   // pill → main: mute or unmute the needs-you chime.
   mute(muted: boolean): void {

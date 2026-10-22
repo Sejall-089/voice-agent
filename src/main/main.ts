@@ -689,6 +689,9 @@ app.whenReady().then(() => {
   ipcMain.on("pill:height", (event, height: unknown) => {
     if (fromPill(event)) pillController.onContentHeight(height);
   });
+  ipcMain.on("pill:label-widths", (event, labels: unknown, widths: unknown) => {
+    if (fromPill(event)) pillController.onLabelWidths(labels, widths);
+  });
   pillControllerRef = pillController;
   // Once a second: waits expire, a finished job fades, a held chime may be due.
   pillTimer = setInterval(() => pillController.tick(), 1_000);

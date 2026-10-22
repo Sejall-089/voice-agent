@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { PillView } from "../../core/jobs/pillView.ts";
 import { ChimePlayer } from "../audio/chime.ts";
-import { ACTION_LABEL, measurePill, renderPill } from "./render.ts";
+import { ACTION_LABEL, measureLabels, measurePill, renderPill, reportMeasurements } from "./render.ts";
 
 // What the pill actually DRAWS (M23). CLAUDE.md: a log line proves what the app decided, not
 // what the user saw — so this inspects the DOM the page ends up with, and clicks its buttons.
@@ -162,6 +162,69 @@ describe("measurePill", () => {
     const long = "Could not confirm the message to #fun. It may have been sent. Check Slack before trying again.";
     const { text } = draw({ ...VIEW, items: [{ id: "j", title: "t", state: "failed", detail: long, actions: ["dismiss"] }] });
     expect(text(".row .detail")).toEqual([long]);
+  });
+});
+
+// M27: the pill is drawn as wide as main chose for its label, and the page measures every way
+// of writing the label so main can choose. jsdom does no layout, so a width is supplied per
+// label: 8 px a character plus 60 for the padding and the dot, like a browser would roughly.
+function withFakeLayout<T>(run: (seen: { styles: string[] }) => T): T {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  const seen = { styles: [] as string[] };
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement): DOMRect {
+    seen.styles.push(this.style.cssText);
+    const width = 60 + 8 * (this.querySelector(".label")?.textContent ?? "").length;
+    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: 44, width, height: 44, toJSON: () => ({}) };
+  };
+  try {
+    return run(seen);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  }
+}
+
+describe("the label's width (M27)", () => {
+  const COLLAPSED: PillView = { ...VIEW, expanded: false, label: "1 needs you · 2 done", labelOptions: ["1 needs you · 2 done", "1 needs you · +2 more"] };
+
+  it("the pill is drawn at the width main chose, and at the stylesheet's until it has chosen", () => {
+    expect((draw({ ...COLLAPSED, width: 300 }).root.querySelector(".summary") as HTMLElement).style.width).toBe("300px");
+    expect((draw(COLLAPSED).root.querySelector(".summary") as HTMLElement).style.width).toBe("");
+  });
+
+  it("measures each way of writing the label at its natural width, and leaves the pill as it was", () => {
+    const { root, text } = draw({ ...COLLAPSED, width: 240 });
+    const widths = withFakeLayout((seen) => {
+      const result = measureLabels(root, ["1 needs you · 2 done", "1 needs you · +2 more"]);
+      // Measured at max-content, not at the 240 px the pill is drawn at.
+      expect(seen.styles.every((style) => style.includes("width: max-content"))).toBe(true);
+      return result;
+    });
+    expect(widths).toEqual([60 + 8 * 20, 60 + 8 * 21]);
+    expect(root.querySelectorAll(".summary")).toHaveLength(1); // the probe is gone
+    expect(text(".summary .label")).toEqual(["1 needs you · 2 done"]);
+  });
+
+  it("reports the widths, with the labels they are for, only when main does not have them yet", () => {
+    const reports: string[] = [];
+    const send = {
+      contentHeight: () => undefined,
+      labelWidths: (labels: string[], widths: number[]) => void reports.push(JSON.stringify([labels, widths])),
+    };
+    withFakeLayout(() => {
+      reportMeasurements(draw(COLLAPSED).root, COLLAPSED, send);
+      const accepted = { ...COLLAPSED, labelWidths: [220, 228], width: 232 };
+      reportMeasurements(draw(accepted).root, accepted, send);
+    });
+    expect(reports).toEqual([JSON.stringify([COLLAPSED.labelOptions, [220, 228]])]);
+  });
+
+  it("hidden: nothing to measure, nothing reported", () => {
+    const reports: unknown[] = [];
+    const hidden: PillView = { ...VIEW, mode: "hidden", items: [], expanded: false };
+    withFakeLayout(() =>
+      reportMeasurements(draw(hidden).root, hidden, { contentHeight: (h) => reports.push(h), labelWidths: (l) => reports.push(l) }),
+    );
+    expect(reports).toEqual([]);
   });
 });
 

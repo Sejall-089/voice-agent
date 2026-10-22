@@ -513,6 +513,10 @@ hotkey again, it carries on in the background while you say the next thing.
   however long that takes, and across a restart. Click the pill to read its result; a minute
   after that it clears by itself, or Dismiss clears it at once. Nothing is spoken and no chime
   plays when it finishes. (Until M26 it faded after 8 seconds, read or not.)
+- **The pill's label counts everything in it**, most urgent first — e.g. "1 running · 2 done" —
+  and its colour is the most urgent one's. It widens to fit; if even its widest isn't enough, it
+  shows the most urgent groups and "+N more". (Until M27 it counted only the most urgent group,
+  so "1 running" hid finished jobs.)
 - **A wait nobody answers expires after 30 minutes** — "expired, not run". The step is never
   run on its own.
 - **Ask "are my agents done yet?"** and it tells you: what is waiting for you, what is still
@@ -994,7 +998,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (2934 tests across 132 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (2957 tests across 133 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1004,6 +1008,11 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M27 (three pill fixes from M26's live findings) is in progress.** Fix C is built: the label
+counts every group present ("1 running · 2 done"), the pill widens to fit, and past a cap it
+says "+N more". Dismiss keeping the list open, and an outside click closing it, are next.
+**2957 tests green across 133 files, 96 skipped.** See `spec.md` §9 (M27).
 
 **M26 (a finished background job stays in the pill until seen) is closed (22 Oct 2026), after
 a live run by a person, with named gaps.** M25's finding is fixed: a done job sent to the pill

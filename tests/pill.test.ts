@@ -59,18 +59,23 @@ describe("the pill's state reducer", () => {
     expect(view).toMatchObject({ mode: "running", label: "3 running" });
   });
 
-  it("needs-you is amber and outranks everything else", () => {
+  // RE-JUSTIFIED AT M27. It pinned "1 needs you" for all four groups: under M23's rule the
+  // label was the top group alone. Now "outranks" means the COLOUR and the label's FIRST place;
+  // every other group is still counted after it, in order.
+  it("needs-you is amber and outranks everything else: its colour, and first in the label", () => {
     const view = pillView(withJobs([job("running"), job("failed"), job("needs-you"), job("done")]));
-    expect(view).toMatchObject({ mode: "needs-you", label: "1 needs you" });
+    expect(view).toMatchObject({ mode: "needs-you", label: "1 needs you · 1 didn't finish · 1 running · 1 done" });
     expect(pillView(withJobs([job("needs-you"), job("needs-you")])).label).toBe("2 need you");
   });
 
   // Title corrected when the rule changed: it stays while UNSEEN (this job never is), not
   // "until acknowledged" — once seen it also clears after an hour (tests/pill.lifecycle.test.ts).
+  // RE-JUSTIFIED AT M27: it pinned "1 didn't finish" with a job running beside it; the running
+  // job is now counted too, after the failure, and the colour is still the failure's.
   it("failed outranks running, and an unseen one stays however long that takes; a dismissed one is gone", () => {
     const failed = job("failed", { result: "Slack said no." });
     const state = withJobs([failed, job("running")]);
-    expect(pillView(state)).toMatchObject({ mode: "failed", label: "1 didn't finish" });
+    expect(pillView(state)).toMatchObject({ mode: "failed", label: "1 didn't finish · 1 running" });
     const muchLater = reducePill(state, { type: "tick", now: T0 + 6 * 60 * 60 * 1000 });
     expect(pillView(muchLater).mode).toBe("failed");
     // Acknowledged: gone.

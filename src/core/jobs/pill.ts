@@ -12,7 +12,10 @@ export type { PillAction, PillItem, PillMode, PillView };
 // of the job list and a clock, so every one of those can be wrong in a test instead of on a
 // screen.
 //
-// What it shows, most urgent first — one mode at a time:
+// What it shows, most urgent first. The COLOUR is one mode at a time, from the most urgent
+// group present; the LABEL counts every group present, in this order — "1 running · 2 done"
+// (M27). Until M27 the label counted only the top group, so a running job hid done ones,
+// which since M26 can wait indefinitely to be read.
 //
 //   needs-you   amber. Something is waiting for the user. It PULSES for a moment when a job
 //               starts waiting, then holds steady: a pill that never stops moving is noise.
@@ -47,6 +50,10 @@ export interface PillState {
   collapseAt: number | null;
   // How tall the open list's content is, as the page measured it, or null before it has.
   contentHeight: number | null;
+  // How wide each way of writing the label is, as the page measured it — kept with the labels
+  // it measured, so a measurement of an older label is never applied to a newer one. Kept when
+  // the list closes: it is about the label, not the list.
+  labelMeasure: { labels: readonly string[]; widths: readonly number[] } | null;
 }
 
 export type PillEvent =
@@ -60,6 +67,8 @@ export type PillEvent =
   | { type: "hover"; inside: boolean; now: number }
   // The page measured the open list.
   | { type: "measured"; height: number }
+  // The page measured these ways of writing the label (M27).
+  | { type: "labelMeasured"; labels: readonly string[]; widths: readonly number[] }
   | { type: "mute"; muted: boolean };
 
 export function initialPillState(muted: boolean, now: number): PillState {
@@ -72,6 +81,7 @@ export function initialPillState(muted: boolean, now: number): PillState {
     hovering: false,
     collapseAt: null,
     contentHeight: null,
+    labelMeasure: null,
   };
 }
 
@@ -137,6 +147,17 @@ export function reducePill(state: PillState, event: PillEvent): PillState {
       // Only while open, and only a real height. The window is sized from this (`pillSize`).
       if (!state.expanded || !Number.isFinite(event.height) || event.height <= 0) return state;
       return { ...state, contentHeight: Math.ceil(event.height) };
+    case "labelMeasured": {
+      // Only for the labels the pill is showing NOW, one real width each. A report of labels
+      // that have since changed is dropped; the page measures the new ones when it draws them.
+      const now = labelOptions(labelGroups(state));
+      const matches =
+        sameStrings(event.labels, now) &&
+        event.widths.length === now.length &&
+        event.widths.every((width) => Number.isFinite(width) && width > 0);
+      if (!matches) return state;
+      return { ...state, labelMeasure: { labels: now, widths: event.widths.map((width) => Math.ceil(width)) } };
+    }
     case "mute":
       return { ...state, muted: event.muted };
   }
@@ -240,31 +261,78 @@ function countLabel(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
+interface LabelGroup {
+  mode: Exclude<PillMode, "hidden">;
+  count: number;
+  text: string;
+}
+
+// Every group with something in it, MOST URGENT FIRST: needs-you, didn't finish, running,
+// done. The first one is the pill's colour. Cancelled jobs are never shown, so never counted.
+function labelGroups(state: PillState): LabelGroup[] {
+  const shown = state.jobs.filter((job) => isShown(job, state.now));
+  const count = (test: (job: JobView) => boolean): number => shown.filter(test).length;
+  const groups: LabelGroup[] = [
+    { mode: "needs-you", count: count((job) => job.state === "needs-you"), text: "" },
+    { mode: "failed", count: count((job) => STOPPED.includes(job.state)), text: "" },
+    { mode: "running", count: count((job) => job.state === "running" || job.state === "queued"), text: "" },
+    { mode: "done", count: count((job) => job.state === "done"), text: "" },
+  ];
+  const words: Record<LabelGroup["mode"], [string, string]> = {
+    "needs-you": ["needs you", "need you"],
+    failed: ["didn't finish", "didn't finish"],
+    running: ["running", "running"],
+    done: ["done", "done"],
+  };
+  return groups
+    .filter((group) => group.count > 0)
+    .map((group) => ({ ...group, text: countLabel(group.count, ...words[group.mode]) }));
+}
+
+const LABEL_SEPARATOR = " · ";
+
+// Every way of writing the label, LONGEST FIRST: all the groups; then one group fewer, with
+// "+N more" for the JOBS in the groups left off; down to the top group alone plus "+N more".
+// The top group is never the one left off — it is the colour, and the most urgent.
+function labelOptions(groups: readonly LabelGroup[]): string[] {
+  if (groups.length === 0) return [];
+  const options = [groups.map((group) => group.text).join(LABEL_SEPARATOR)];
+  for (let keep = groups.length - 1; keep >= 1; keep -= 1) {
+    const more = groups.slice(keep).reduce((sum, group) => sum + group.count, 0);
+    options.push([...groups.slice(0, keep).map((group) => group.text), `+${more} more`].join(LABEL_SEPARATOR));
+  }
+  return options;
+}
+
+// Which label to show and how wide to draw the pill for it: the LONGEST option whose measured
+// width is within the cap, and the pill at that width (never narrower than the M23 pill). If
+// none fits — a very large font — the shortest, at the cap, where the stylesheet ellipsizes it.
+function pickLabel(widths: readonly number[]): { index: number; width: number } {
+  const fits = widths.findIndex((width) => width <= PILL_LABEL_MAX_WIDTH);
+  const index = fits === -1 ? widths.length - 1 : fits;
+  const wanted = widths[index] ?? PILL_COLLAPSED.width;
+  return { index, width: Math.max(PILL_COLLAPSED.width, Math.min(PILL_LABEL_MAX_WIDTH, wanted)) };
+}
+
+function sameStrings(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((text, index) => text === b[index]);
+}
+
 export function pillView(state: PillState): PillView {
   const shown = state.jobs.filter((job) => isShown(job, state.now));
-  const waiting = shown.filter((job) => job.state === "needs-you");
-  const stopped = shown.filter((job) => STOPPED.includes(job.state));
-  const working = shown.filter((job) => job.state === "running" || job.state === "queued");
+  const groups = labelGroups(state);
+  const top = groups.at(0);
+  const mode: PillMode = top === undefined ? "hidden" : top.mode;
+  const options = labelOptions(groups);
 
-  let mode: PillMode;
-  let label: string;
-  if (waiting.length > 0) {
-    mode = "needs-you";
-    label = countLabel(waiting.length, "needs you", "need you");
-  } else if (stopped.length > 0) {
-    mode = "failed";
-    label = countLabel(stopped.length, "didn't finish", "didn't finish");
-  } else if (working.length > 0) {
-    mode = "running";
-    label = countLabel(working.length, "running", "running");
-  } else if (shown.length > 0) {
-    // Everything left is done (cancelled is never shown): say how many are waiting to be read.
-    mode = "done";
-    label = countLabel(shown.length, "done", "done");
-  } else {
-    mode = "hidden";
-    label = "";
-  }
+  // The label as measured, when the page has measured exactly these options. Until it has
+  // (the first frame after the counts change), the full label is drawn at the width the LAST
+  // measurement chose, so the pill does not shrink for a frame and grow again.
+  const measure = state.labelMeasure;
+  const measured = measure !== null && sameStrings(measure.labels, options) ? measure.widths : null;
+  const chosen = measured !== null ? pickLabel(measured) : null;
+  const label = options[chosen?.index ?? 0] ?? "";
+  const width = chosen?.width ?? (measure !== null ? pickLabel(measure.widths).width : undefined);
 
   // Waiting first, then what did not finish, then the rest — the order someone opening the
   // list needs them in.
@@ -298,6 +366,9 @@ export function pillView(state: PillState): PillView {
     muted: state.muted,
     items,
     ...(state.expanded && state.contentHeight !== null ? { contentHeight: state.contentHeight } : {}),
+    ...(mode !== "hidden" ? { labelOptions: options } : {}),
+    ...(measured !== null && mode !== "hidden" ? { labelWidths: [...measured] } : {}),
+    ...(width !== undefined && mode !== "hidden" ? { width } : {}),
   };
 }
 
@@ -322,25 +393,35 @@ export function isPointInRect(point: { x: number; y: number }, rect: Rect): bool
 }
 
 export const PILL_MARGIN = 16;
+// The collapsed pill at its narrowest — the M23 pill, which one group always fits.
 export const PILL_COLLAPSED = { width: 232, height: 44 } as const;
 const PILL_EXPANDED_WIDTH = 348;
+// How wide the collapsed pill may grow to fit every group in its label (M27): the open list's
+// width, so opening the list never makes the pill itself jump. Past it, "+N more".
+export const PILL_LABEL_MAX_WIDTH = PILL_EXPANDED_WIDTH;
 const PILL_ROW_HEIGHT = 84;
 const PILL_CHROME_HEIGHT = 96;
 const PILL_MAX_HEIGHT = 440;
 
-// How big the pill's window is. Collapsed: fixed. Open: AS TALL AS ITS CONTENT, up to a
-// ceiling — the page measures the list and reports it (`contentHeight`), so one job with a
-// long message gets a taller panel and no scrollbar, where a fixed height per row used to
-// clip the message and scroll. Before the page has measured (the first frame after a click)
-// an estimate from the row count stands in. Past the ceiling the list scrolls.
+// How big the pill's window is. Collapsed: as wide as its label, as the page measured it
+// (`width`, between PILL_COLLAPSED.width and PILL_LABEL_MAX_WIDTH), and a fixed height. Open:
+// AS TALL AS ITS CONTENT, up to a ceiling — the page measures the list and reports it
+// (`contentHeight`), so one job with a long message gets a taller panel and no scrollbar,
+// where a fixed height per row used to clip the message and scroll. Before the page has
+// measured (the first frame after a click) an estimate from the row count stands in. Past the
+// ceiling the list scrolls.
 export function pillSize(
-  view: Pick<PillView, "expanded" | "items" | "contentHeight">,
+  view: Pick<PillView, "expanded" | "items" | "contentHeight" | "width">,
 ): { width: number; height: number } {
-  if (!view.expanded) return { ...PILL_COLLAPSED };
+  const pillWidth =
+    typeof view.width === "number" && Number.isFinite(view.width)
+      ? Math.max(PILL_COLLAPSED.width, Math.min(PILL_LABEL_MAX_WIDTH, Math.ceil(view.width)))
+      : PILL_COLLAPSED.width;
+  if (!view.expanded) return { width: pillWidth, height: PILL_COLLAPSED.height };
   const estimated = PILL_CHROME_HEIGHT + Math.max(1, view.items.length) * PILL_ROW_HEIGHT;
   const wanted = typeof view.contentHeight === "number" ? view.contentHeight : estimated;
   const height = Math.max(PILL_COLLAPSED.height, Math.min(PILL_MAX_HEIGHT, Math.ceil(wanted)));
-  return { width: PILL_EXPANDED_WIDTH, height };
+  return { width: Math.max(PILL_EXPANDED_WIDTH, pillWidth), height };
 }
 
 // The pill's rectangle: the bottom-right corner of a display's WORK AREA (the screen minus

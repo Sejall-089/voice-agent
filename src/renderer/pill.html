@@ -73,8 +73,15 @@
         flex: 0 0 auto;
       }
 
+      /* One line, always. Main sizes the pill to the label as the page measured it (M27), up to
+         a cap past which it says "+N more"; the ellipsis is only for the frame before that
+         measurement arrives, or a font so large that even the shortest form does not fit. */
       .label {
         font-weight: 600;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .mode-needs-you .summary {

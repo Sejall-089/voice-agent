@@ -1,4 +1,4 @@
-import { measurePill, renderPill } from "./render.ts";
+import { renderPill, reportMeasurements } from "./render.ts";
 
 // The status pill's page (M23). Plain DOM, no React: it draws whatever main last sent and
 // forwards clicks. It keeps no state, so there is nothing here that can be stale — whether the
@@ -14,11 +14,12 @@ window.pill.onView((view) => {
     onExpand: (expanded) => window.pill.expand(expanded),
     onMute: (muted) => window.pill.mute(muted),
   });
-  // Tell main how tall the open list really is, so the window fits it. Reported only when it
-  // differs from what main already used — otherwise each report would come straight back as a
-  // new view and be reported again.
-  const height = measurePill(root);
-  if (height !== null && height !== view.contentHeight) window.pill.contentHeight(height);
+  // Tell main how tall the open list and how wide each label really is, so the window fits
+  // them (render.ts, where it can be tested).
+  reportMeasurements(root, view, {
+    contentHeight: (height) => window.pill.contentHeight(height),
+    labelWidths: (labels, widths) => window.pill.labelWidths(labels, widths),
+  });
 });
 
 // The window cannot take focus, so it never blurs. Where the pointer is stands in for it:

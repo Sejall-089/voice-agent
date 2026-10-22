@@ -1357,12 +1357,31 @@ real-window half is `scripts/ask-recon/confirm-waiting-line.ts`.
 A frameless, non-focusable, always-on-top window at the bottom right of the primary display's
 work area, excluded from screen capture, shown only with `showInactive()`.
 
-| Shows | When |
-|---|---|
-| amber, "N needs you" | a job is waiting. Pulses for 2.4 s when a job starts waiting, then steady |
-| "N didn't finish" | failed, expired or interrupted — see "How long a job stays" below |
-| "N running" | otherwise, while anything is running or queued |
-| green, "N done" | otherwise, while a finished background job has not been seen — see below (M26) |
+| Group, most urgent first | Counts | Colour, when it is the top group present |
+|---|---|---|
+| "N needs you" | jobs waiting | amber. Pulses for 2.4 s when a job starts waiting, then steady |
+| "N didn't finish" | failed, expired or interrupted — see "How long a job stays" below | red dot |
+| "N running" | running or queued | blue dot |
+| "N done" | finished background jobs not yet seen, then a minute — see below (M26) | green dot |
+
+**The label counts every group present, in that order, joined by " · "** — "1 running · 2
+done" (M27). The **colour and the pulse are the top group's alone.** Until M27 the label counted
+only the top group too, so a running job hid done ones, which since M26 can wait indefinitely
+(M26's third live finding). A cancelled job is in no group.
+
+**The collapsed pill is as wide as its label** (M27), between 232 px (`PILL_COLLAPSED`, the M23
+pill) and **`PILL_LABEL_MAX_WIDTH`, 348 px** — the open list's width, so opening it never moves
+the pill itself. Core writes the label every way it can be written, longest first: all the
+groups; then one group fewer plus "+N more", N being the **jobs** in the groups left off; down
+to the top group alone plus "+N more" (the top group is never the one left off). The page
+measures each form off-screen at its natural width and reports the widths *with the labels they
+are for*; main drops a report for labels it is no longer showing, then shows the longest form
+within the cap at that width. If none fits, the shortest at the cap. Before a measurement (the
+frame after the counts change) the full label is drawn at the last chosen width, so the pill
+does not shrink for a frame; the stylesheet ellipsizes rather than wraps. The same
+measure-then-resize path as the open list's height. Measured in a real window by
+`scripts/pill-label-recon.cjs`: all four groups with single-digit counts fit (330 px); "+N more"
+appears only with double- or triple-digit counts.
 
 **How long a job stays in the pill** (2026-10-14). The pill only — leaving it deletes nothing:
 the job's row and its action-log rows are kept.
@@ -4251,6 +4270,46 @@ Post-v0:
       **Known gaps:** the restart rule for unseen done jobs is tested, not watched live;
       `DONE_SEEN_CLEAR_MS` (one minute) is a first guess, named so it can be tuned; and the three
       findings above.
+
+- [ ] **M27 — three pill fixes from M26's live findings.** In progress. Each comes from an M23
+      rule built when a done job lasted 8 s. One commit per fix, in this order: C (the label),
+      A (Dismiss keeps the list open, plus "Dismiss all"), B (an outside click closes the list).
+
+      **Fix C — the label shows every group present (M26 finding 3).** Built. The rule is in §5c,
+      "The status pill": every group in priority order ("1 running · 2 done"), colour and pulse
+      from the top group, the collapsed pill widened to fit up to `PILL_LABEL_MAX_WIDTH` (348
+      px), past it the top groups and "+N more" (jobs left off). `core/jobs/pill.ts` builds the
+      forms and picks one; `renderer/pill/render.ts` measures them (`measureLabels`) and reports
+      (`reportMeasurements`, moved out of the page's `main.ts` so it can be tested); main checks
+      the report (`PillController.onLabelWidths`, IPC `pill:label-widths`).
+
+      Tests: `tests/pill.label.test.ts` (new; the real manager and controller on a fake clock
+      where a job's life matters) — two done plus one running reads "1 running · 2 done" and
+      still does ten minutes later; all four groups through the controller; the colour is the
+      top group's for all fifteen combinations of groups, handed over in reverse priority; a
+      cancelled job is in no count, including "+N more"; the forms and "+N more"; the cap (at it
+      fits, one pixel over does not), the floor, nothing fitting; a stale measurement dropped
+      (with the precondition that old and new labels are as many, so only the label check can
+      drop it); malformed reports dropped; the last width kept until re-measured.
+      `render.test.ts`: the pill drawn at main's width; each form measured at max-content with
+      the probe removed; widths reported only when main lacks them. **Re-justified, not just
+      re-run:** `pill.test.ts`'s "needs-you outranks everything" and "failed outranks running"
+      pinned one-group labels (M23's rule) and now assert the colour plus every group;
+      `pill.collapse.test.ts`'s "a job entering needs-you or failing while collapsed" now also
+      shows the failure arrived; `jobs.simulation.test.ts`'s "2 need you" was hiding a done job —
+      the live finding itself — and is now "2 need you · 1 done".
+
+      Mutations (each with the Edit tool, each reverted): the label back to the top group only —
+      18 failed; the colour from the last group present instead of the first — 6 failed; a
+      measurement accepted without checking its labels — **survived first** (the stale test sent
+      one width for a two-form label, so the count check dropped it first); the test was fixed to
+      send as many widths and assert that precondition, and the mutation then failed it.
+
+      Real window (`scripts/pill-label-recon.cjs`, built page, no pointer or keys): every case
+      drawn whole, no ellipsis, pill as wide as the window — "1 running" at 232, "1 running · 2
+      done" at 232 (160 measured), three groups at 249, four at 330, four with double-digit
+      counts at exactly 348, and triple-digit counts as "123 need you · 456 didn't finish · +889
+      more" at 313.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M26's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
