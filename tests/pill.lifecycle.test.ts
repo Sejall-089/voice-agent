@@ -54,6 +54,7 @@ const job = (state: JobView["state"], over: Partial<JobView> = {}): JobView => (
   updatedAt: T0,
   seenAt: null,
   cancelRequested: false,
+  stepsRun: 0,
   ...over,
 });
 const at = (jobs: JobView[], now: number): PillState =>
@@ -102,9 +103,14 @@ describe("the reducer: each state's lifecycle", () => {
     expect(modeAt([done, failed], T0 + HOUR)).toBe("hidden");
   });
 
-  it("CANCELLED by the user is removed immediately — not shown even for an instant", () => {
-    expect(modeAt([job("cancelled")], T0)).toBe("hidden");
-    expect(pillView(at([job("cancelled"), job("running")], T0))).toMatchObject({ mode: "running", label: "1 running" });
+  // RE-JUSTIFIED AT M27. Was "CANCELLED by the user is removed immediately": true then of every
+  // cancelled job. Now only of one cancelled BEFORE ANY STEP RAN — the precondition is explicit,
+  // and the contrast shows the rule is about stepsRun, not about "cancelled".
+  it("CANCELLED BEFORE ANY STEP RAN is removed immediately — not shown even for an instant", () => {
+    expect(modeAt([job("cancelled", { stepsRun: 0 })], T0)).toBe("hidden");
+    expect(pillView(at([job("cancelled", { stepsRun: 0 }), job("running")], T0))).toMatchObject({ mode: "running", label: "1 running" });
+    // The contrast: cancelled after a step ran IS shown.
+    expect(modeAt([job("cancelled", { stepsRun: 1 })], T0)).toBe("failed");
   });
 
   it.each(["failed", "expired"] as const)(
@@ -363,6 +369,9 @@ describe("seen: opening the list starts the one-hour clock", () => {
     w.controller.onExpand(true);
     w.controller.onAction(id, "cancel");
     expect(w.manager.get(id)?.state).toBe("cancelled");
+    // RE-JUSTIFIED AT M27: gone because it was cancelled at its first confirm, before any step
+    // ran — not because it was cancelled (tests/pill.cancelled.test.ts has the other case).
+    expect(w.manager.get(id)?.stepsRun).toBe(0);
     expect(w.mode()).toBe("hidden");
   });
 
@@ -598,14 +607,15 @@ describe("clearing from the pill deletes nothing", () => {
       pause_reason TEXT, pause_since INTEGER, in_flight_tool TEXT, in_flight_step INTEGER, result TEXT)`);
     m23.prepare(`INSERT INTO jobs (id, instruction, kind, state, background, created_at, updated_at, result) VALUES (?, ?, 'work', 'failed', 1, ?, ?, ?)`)
       .run("old-job", "send these notes", T0, T0, "Slack said no.");
-    expect(migrate(m23)).toEqual(["jobs.seen_at"]);
+    // RE-JUSTIFIED AT M27: the M23 table now gains steps_run as well, by the same guarded list.
+    expect(migrate(m23)).toEqual(["jobs.seen_at", "jobs.steps_run"]);
     expect(migrate(m23)).toEqual([]);
     m23.close();
 
     const db = createDatabase(path);
     const w = world({ store: new SqliteJobStore(db), startAt: T0 + 2 * HOUR });
-    // The old row reads as never seen, and is shown.
-    expect(w.manager.get("old-job")).toMatchObject({ state: "failed", seenAt: null, result: "Slack said no." });
+    // The old row reads as never seen, having run no steps, and is shown.
+    expect(w.manager.get("old-job")).toMatchObject({ state: "failed", seenAt: null, stepsRun: 0, result: "Slack said no." });
     expect(w.mode()).toBe("failed");
     db.close();
   });

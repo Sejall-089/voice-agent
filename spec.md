@@ -1365,14 +1365,17 @@ work area, excluded from screen capture, shown only with `showInactive()`.
 | Group, most urgent first | Counts | Colour, when it is the top group present |
 |---|---|---|
 | "N needs you" | jobs waiting | amber. Pulses for 2.4 s when a job starts waiting, then steady |
-| "N didn't finish" | failed, expired or interrupted — see "How long a job stays" below | red dot |
+| "N didn't finish" | failed, expired or interrupted — and cancelled after a step ran (M27) — see "How long a job stays" below | red dot |
 | "N running" | running or queued | blue dot |
 | "N done" | finished background jobs not yet seen, then a minute — see below (M26) | green dot |
 
 **The label counts every group present, in that order, joined by " · "** — "1 running · 2
 done" (M27). The **colour and the pulse are the top group's alone.** Until M27 the label counted
 only the top group too, so a running job hid done ones, which since M26 can wait indefinitely
-(M26's third live finding). A cancelled job is in no group.
+(M26's third live finding). A job cancelled before any step ran is in no group; one cancelled
+after a step ran is in "didn't finish" (M27) — it stopped partway, the same thing that group
+already counts, and its red, if it is the top group, is earned: something was done and
+something was not.
 
 **The collapsed pill is as wide as its label** (M27), between 232 px (`PILL_COLLAPSED`, the M23
 pill) and **`PILL_LABEL_MAX_WIDTH`, 348 px** — the open list's width, so opening it never moves
@@ -1395,14 +1398,20 @@ the job's row and its action-log rows are kept.
 |---|---|
 | running, queued, needs-you | while it is |
 | done | **until the user has seen it**, however long that is; then one minute more (`DONE_SEEN_CLEAR_MS`, tunable) — M26. Until M26: 8 s, then gone, seen or not |
-| cancelled by the user | not shown at all |
+| cancelled by the user **before any step ran** | not shown at all — nothing happened (M23) |
+| cancelled by the user **after a step ran** | like done: **until the user has seen it**, then one minute more, with the job's own message ("I'd already done step 1 of 2, but step 2 didn't run.") and Dismiss; brought back after a restart while unseen, however old (M27). Until M27 every cancelled job was hidden, so a job that had already done something vanished with no word of it |
+| done after a Cancel came too late (during its last step) | an ordinary done row whose detail reads **"Finished before it could be cancelled — <result>"** (M27). The request is in memory only, so after a restart the same row reads as plain done — still true |
 | failed, expired | **until the user has seen it**, however long that is; then one hour more |
 | interrupted | until it is dismissed, and only then — it may say "may or may not have gone through" |
 
 "Seen" means the list was open with the job in it. It is recorded once, as `seen_at` on the
 job's row (added by the same guarded migration as the action-log columns), so a restart
 neither resets the hour nor counts as a look; a failed job nobody opened the list for is
-brought back after a restart however old it is, and since M26 so is a done one. The minute
+brought back after a restart however old it is, and since M26 so is a done one — and since M27
+one cancelled after a step ran. Whether a step ran is `steps_run` on the job's row (M27, the
+same guarded migration; `JobRecord.stepsRun`): the count of its handlers that were called and
+returned or threw, incremented where the write-ahead marker is cleared. NULL on older rows,
+read as 0, so a job cancelled before M27 stays hidden as it was. The minute
 after a done job is seen is for finishing reading its result in the open list (the row shows
 it, up to 420 characters, as before) — nothing new is spoken and no chime plays. Dismiss
 clears a done job at once. A done job that finished in the bar was never background and never
@@ -1489,7 +1498,7 @@ and both are drawn as text. Everything the page sends is checked again in main
 currently offering is dropped.
 
 **Dismiss all** (M27), in the list's header row beside the chime toggle, dismisses every row **listed** that is
-**done, failed or expired** (`dismissAllTargets` in `core/jobs/pill.ts`) — never a running,
+**done, failed, expired or cancelled** (a cancelled row is listed only when a step had run) (`dismissAllTargets` in `core/jobs/pill.ts`) — never a running,
 queued or waiting job (it cancels nothing), never an **interrupted** one (it may say "may or
 may not have gone through", which is why it stays until dismissed on its own), and never a job
 past the list's cap of ten (not on screen; it is listed next). It is offered only while the
@@ -4453,7 +4462,8 @@ Post-v0:
       a waiting job cancels at once and is never drawn as Cancelling. Mutations (Edit, reverted):
       the field dropped from the view — 3 failed; the second Cancel kept — 3 failed.
 
-      **Fix B — a press outside the pill closes the open list (M26 finding 2).** Built. The rule
+      **Fix B — a press outside the pill closes the open list (M26 finding 2).** Committed
+      (718f09e). The rule
       and its measurements are in §5c, "The status pill". Recon FIRST, on a prototype
       (`scripts/pill-outside-click-recon.cjs`): no problem found — every click seen, 32 ms median
       reaction at 50 ms, no measurable CPU, 1.5 s start-up, inside/outside agreeing with
@@ -4499,6 +4509,48 @@ Post-v0:
       click does not count; a click on the list's heading, F24, a window hiding and re-showing
       and a message box leave it open; a click on another window closes it and stops watching;
       with it closed a click does nothing; reopened, a second outside click closes it again.
+
+      **A Cancel that came too late, and a job cancelled after a step ran (live finding,
+      2026-10-22/23).** Built. A person pressed Cancel on a running job: the row said
+      "Cancelling — finishing step…", then turned to Dismiss and the pill to "done". Investigated
+      read-only first, with the real manager, runner, planner and pill (scripted model): case (a)
+      — the cancel arrived during the job's LAST (or only) step; a cancel takes effect only at the
+      next gate, so that step finished and the job ended done, legitimately, with nothing saying
+      the Cancel had come too late. The same run found the other half: a job cancelled during step
+      1 of 2 ended `cancelled`, and every cancelled job was hidden (M23), so its own message — "I'd
+      already done step 1 of 2, but step 2 didn't run." — was never shown.
+      Decided and built: (1) **too late** — a done job with a cancel requested reads "Finished
+      before it could be cancelled — <result>"; green, "N done", Dismiss; wording only, in memory,
+      so after a restart it reads as plain done. (2) **Cancelled after a step ran** — shown like a
+      done job (until seen, then the minute), with its own message and Dismiss, counted in **"didn't
+      finish"** (chosen from the existing groups: it stopped partway, which is what that group
+      counts), an ended row for Dismiss all, and restored after a restart while unseen. Cancelled
+      before any step ran stays hidden. What tells the two apart is a new saved count,
+      `JobRecord.stepsRun` / `jobs.steps_run` (asked and approved: a column, added by the guarded
+      migration list, rather than overloading `acknowledged`, which `jobStatus` also reads).
+      Tests (`tests/pill.cancelled.test.ts`, the real manager, runner, planner and pill over
+      MockShell, scripted as the investigation was): one-step too late; last-of-two too late, both
+      handlers run; the contrast, nobody cancelling, reads plain; case B shows its message,
+      Dismiss, "1 didn't finish", list left open, step 2 never run; cancelled at the first confirm,
+      nothing run, stays hidden; cancelled while waiting for OK on step 2 (step 1 ran) — the
+      manager ends it before the planner writes its message, and the message still arrives and is
+      what the row shows (found by reviewing the diff, probed, then pinned); seen, it clears at the minute; unseen, it stays a day and is seen
+      on opening; Dismiss all takes it with a done row; on BOTH stores, an unseen one is restored
+      ten days later with its message and the before-any-step one is not, and a seen one past its
+      minute is not. **Re-justified, not just re-run** — each passed under the new rule for a
+      reason unrelated to it: `pill.dismiss.test.ts`'s "when the step ends … leaves the pill" never
+      ran a handler (its `midStep` only entered the step), so the job had run nothing; it now runs
+      the handler as the planner does and asserts the row STAYS with its message. "…while it is
+      mid-step" was a job still planning: retitled, with `stepsRun 0` asserted. The "cancelled is
+      never shown / never counted" tests in `pill.test.ts`, `pill.lifecycle.test.ts` and
+      `pill.label.test.ts` now say "before any step ran", assert `stepsRun 0`, and where the old
+      title would now be false carry a `stepsRun 1` contrast. The two column-list pins
+      (`jobStore.test.ts`, `pill.lifecycle.test.ts`'s migration test) gain `steps_run`, an old row
+      reading 0.
+      Mutations (Edit, each reverted): the too-late wording dropped — 2 failed; every cancelled
+      job hidden again — 9 failed; a job cancelled before any step shown — 12 failed; and the
+      in-memory store's restore clause dropped (M26's survivor shape) — 1 failed, its
+      `InMemoryJobStore` case.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M26's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

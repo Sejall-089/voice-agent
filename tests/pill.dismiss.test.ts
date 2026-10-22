@@ -153,6 +153,8 @@ describe("Dismiss and Cancel keep the list open while anything is listed (M27)",
     w.start().onExpand(true);
     w.controller.onAction(id, "cancel");
     expect(w.manager.get(id)?.state).toBe("cancelled");
+    // M27: the row goes because it was cancelled at its first confirm, having run nothing.
+    expect(w.manager.get(id)?.stepsRun).toBe(0);
     expect(w.open()).toBe(true);
     expect(w.listed()).toEqual([done]);
   });
@@ -165,12 +167,16 @@ describe("Dismiss and Cancel keep the list open while anything is listed (M27)",
     w.start().onExpand(true);
     expect(w.listed()).toEqual([id]); // the precondition: it is the only row
     w.controller.onAction(id, "cancel");
+    expect(w.manager.get(id)?.stepsRun).toBe(0); // M27: and it ran nothing, so its row goes
     expect(w.open()).toBe(false);
   });
 
-  // A job mid-step cannot be stopped mid-step (§5c): its row stays, running, until the step ends
-  // — so the list does too, and it closes when the row goes.
-  it("Cancel on the only row while it is mid-step: the row stays until the step ends, then the list closes", () => {
+  // A running job is not stopped on the spot (§5c): its row stays, running, until it stops — so
+  // the list does too, and it closes when the row goes.
+  // RE-JUSTIFIED AT M27. Was titled "while it is mid-step", but `running()` is still PLANNING and
+  // ran nothing — which is now exactly why its row goes. A job cancelled after a step ran stays
+  // (the "when the step ends" test below).
+  it("Cancel on the only row while it is still planning: the row stays until it stops, then — nothing having run — the list closes", () => {
     const w = world();
     const id = w.running();
     w.start().onExpand(true);
@@ -178,6 +184,7 @@ describe("Dismiss and Cancel keep the list open while anything is listed (M27)",
     expect(w.manager.get(id)?.state).toBe("running");
     expect(w.open()).toBe(true);
     w.manager.finish(id, "cancelled", null);
+    expect(w.manager.get(id)?.stepsRun).toBe(0);
     expect(w.open()).toBe(false);
   });
 
@@ -354,6 +361,9 @@ describe("a cancelled job shows Cancelling until its step ends (M27)", () => {
     const gate = w.manager.gateFor(id);
     await gate.admit({ tools: ["summarize", "sendMessage"], statusOnly: false });
     await gate.enterStep({ tool: "summarize", index: 1, total: 2, foregroundOnly: false });
+    // Inside its handler, as the planner marks it (M27: until then this helper never ran one,
+    // so a job "cancelled mid-step" here had run no step, which a real one always has).
+    gate.handlerStarting();
     return { id, gate };
   };
   const row = (w: ReturnType<typeof world>, id: string) => w.controller.view().items.find((item) => item.id === id);
@@ -398,17 +408,24 @@ describe("a cancelled job shows Cancelling until its step ends (M27)", () => {
     expect(w.lines.at(-1)).toMatch(/action dropped: "cancel" is not offered by this row \(running\)/);
   });
 
-  it("when the step ends, the job stops before the next one and leaves the pill — the list closes with its last row", async () => {
+  // RE-JUSTIFIED AT M27. Was "...and leaves the pill — the list closes with its last row". That
+  // passed only because `midStep` never ran a handler, so the job had run no step: the old rule
+  // (a cancelled job is never shown) and the new one (shown once a step ran) gave the same
+  // answer. A job cancelled mid-step has run that step, so it now STAYS, with its own message.
+  it("when the step ends, the job stops before the next one — and, having run step 1, is shown with its own message", async () => {
     const w = world();
     const { id, gate } = await midStep(w);
     w.start().onExpand(true);
     w.controller.onAction(id, "cancel");
+    gate.handlerFinished(); // step 1's handler returns
     // The planner asks to enter step 2 and is told no; the job runner then ends it as cancelled.
     await expect(gate.enterStep({ tool: "sendMessage", index: 2, total: 2, foregroundOnly: false })).resolves.toBe("cancelled");
-    w.manager.finish(id, "cancelled", null);
-    expect(w.manager.get(id)?.state).toBe("cancelled");
-    expect(row(w, id)).toBeUndefined();
-    expect(w.open()).toBe(false);
+    const message = "You cancelled that, so I stopped there. I'd already done step 1 of 2, but step 2 didn't run.";
+    w.manager.finish(id, "cancelled", message);
+    expect(w.manager.get(id)).toMatchObject({ state: "cancelled", stepsRun: 1 });
+    expect(row(w, id)).toMatchObject({ state: "cancelled", detail: message, actions: ["dismiss"] });
+    expect(w.controller.view()).toMatchObject({ mode: "failed", label: "1 didn't finish" });
+    expect(w.open()).toBe(true);
   });
 
   it("cancelled while still PLANNING (no step yet): 'Cancelling — stops before its first step', and it never enters one", async () => {

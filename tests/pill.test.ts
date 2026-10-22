@@ -44,6 +44,7 @@ const job = (state: JobView["state"], over: Partial<JobView> = {}): JobView => (
   updatedAt: T0,
   seenAt: null,
   cancelRequested: false,
+  stepsRun: 0,
   ...over,
 });
 
@@ -100,10 +101,13 @@ describe("the pill's state reducer", () => {
 
   // The rule changed (it used to fade like a finished job): the user cancelled it themselves,
   // so there is nothing to tell them. tests/pill.lifecycle.test.ts has every state's rule.
-  it("a job the user cancelled is not shown at all, not even for the done-fade", () => {
-    expect(pillView(withJobs([job("cancelled")])).mode).toBe("hidden");
-    // The contrast, so "hidden" above is the rule and not an empty harness: done IS shown.
+  // RE-JUSTIFIED AT M27: only BEFORE ANY STEP RAN. One cancelled after a step ran is shown.
+  it("a job cancelled before any step ran is not shown at all, not even for the done-fade", () => {
+    expect(pillView(withJobs([job("cancelled", { stepsRun: 0 })])).mode).toBe("hidden");
+    // The contrast, so "hidden" above is the rule and not an empty harness: done IS shown...
     expect(pillView(withJobs([job("done")])).mode).toBe("done");
+    // ...and so is a job cancelled after a step ran.
+    expect(pillView(withJobs([job("cancelled", { stepsRun: 1 })])).mode).toBe("failed");
   });
 
   it("never shows a status question, an attached-only job, or a dismissed one", () => {

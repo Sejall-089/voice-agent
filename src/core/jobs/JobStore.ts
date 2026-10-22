@@ -42,6 +42,11 @@ export interface JobRecord {
   // is written down with the job, so restarting the app neither resets that clock nor makes a
   // job the user has not seen look seen. Leaving the pill never deletes this record.
   seenAt: number | null;
+  // How many of its steps' handlers were called and have returned or thrown (M27) — something
+  // may have happened in each. What tells a job cancelled after doing something (shown in the
+  // pill, with its own message) from one cancelled before it did anything (never shown). Saved,
+  // so the difference survives a restart.
+  stepsRun: number;
 }
 
 export interface JobStore {
@@ -57,7 +62,8 @@ export interface JobStore {
   // background. Its sentence already says "may or may not have gone through".
   markInterrupted(now: number): number;
   // Jobs worth showing after a restart: background and unacknowledged, and either ended
-  // since `since` — or failed, expired or interrupted at ANY time, or done and never seen (M26).
+  // since `since` — or failed, expired or interrupted at ANY time, or done and never seen (M26),
+  // or cancelled after a step ran and never seen (M27).
   // Those wait for the user (core/jobs/pill.ts): one that happened last week and was never seen
   // is still owed.
   loadUnacknowledged(since: number): JobRecord[];
@@ -104,7 +110,9 @@ export class InMemoryJobStore implements JobStore {
           (record.updatedAt >= since ||
             WAITS_TO_BE_SEEN.includes(record.state) ||
             // M26: a done job nobody has seen waits for them too, however old it is.
-            (record.state === "done" && record.seenAt === null)),
+            (record.state === "done" && record.seenAt === null) ||
+            // M27: so does one cancelled AFTER a step ran — it did something.
+            (record.state === "cancelled" && record.stepsRun > 0 && record.seenAt === null)),
       )
       .map((record) => ({ ...record }));
   }
@@ -128,6 +136,7 @@ interface Row {
   in_flight_step: number | null;
   result: string | null;
   seen_at: number | null;
+  steps_run: number | null;
 }
 
 function fromRow(row: Row): JobRecord {
@@ -153,6 +162,8 @@ function fromRow(row: Row): JobRecord {
     result: row.result,
     // NULL on every row written before the column existed: never seen.
     seenAt: row.seen_at ?? null,
+    // NULL before M27: counted as none, so a job cancelled then stays hidden.
+    stepsRun: row.steps_run ?? 0,
   };
 }
 
@@ -166,17 +177,17 @@ export class SqliteJobStore implements JobStore {
       .prepare(
         `INSERT INTO jobs (id, instruction, kind, state, background, acknowledged, created_at,
                            updated_at, step, total, tool, pause_reason, pause_since,
-                           in_flight_tool, in_flight_step, result, seen_at)
+                           in_flight_tool, in_flight_step, result, seen_at, steps_run)
          VALUES (@id, @instruction, @kind, @state, @background, @acknowledged, @createdAt,
                  @updatedAt, @step, @total, @tool, @pauseReason, @pauseSince,
-                 @inFlightTool, @inFlightStep, @result, @seenAt)
+                 @inFlightTool, @inFlightStep, @result, @seenAt, @stepsRun)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, state = excluded.state, background = excluded.background,
            acknowledged = excluded.acknowledged, updated_at = excluded.updated_at,
            step = excluded.step, total = excluded.total, tool = excluded.tool,
            pause_reason = excluded.pause_reason, pause_since = excluded.pause_since,
            in_flight_tool = excluded.in_flight_tool, in_flight_step = excluded.in_flight_step,
-           result = excluded.result, seen_at = excluded.seen_at`,
+           result = excluded.result, seen_at = excluded.seen_at, steps_run = excluded.steps_run`,
       )
       .run({
         ...record,
@@ -212,7 +223,8 @@ export class SqliteJobStore implements JobStore {
           WHERE kind = 'work' AND background = 1 AND acknowledged = 0
             AND state NOT IN ('queued', 'running', 'needs-you')
             AND (updated_at >= ? OR state IN ('failed', 'expired', 'interrupted')
-                 OR (state = 'done' AND seen_at IS NULL))
+                 OR (state = 'done' AND seen_at IS NULL)
+                 OR (state = 'cancelled' AND steps_run > 0 AND seen_at IS NULL))
           ORDER BY created_at`,
       )
       .all(since)

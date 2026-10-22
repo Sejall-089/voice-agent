@@ -205,7 +205,10 @@ export const LIST_CAP = 10;
 //                                jobs, which left sends and creates behind. M25's outside click
 //                                sends THINKING jobs here, often a summary whose result is the
 //                                point, and live testing watched that result vanish unread.
-//   cancelled                    not at all. The user did that; there is nothing to tell them.
+//   cancelled                    BEFORE ANY STEP RAN: not at all. The user did that, and nothing
+//                                happened; there is nothing to tell them. AFTER A STEP RAN (M27):
+//                                like done — until seen, then DONE_SEEN_CLEAR_MS — with its own
+//                                message, because something did happen.
 //   failed, expired              UNTIL THE USER HAS SEEN IT, however long that takes — the
 //                                pill stays red for a week if nobody opens it. "Seen" is the
 //                                list being open with the job in it (`seenAt`, saved with the
@@ -220,7 +223,11 @@ function isShown(job: JobView, now: number): boolean {
     case "done":
       return job.seenAt === null || now - job.seenAt < DONE_SEEN_CLEAR_MS;
     case "cancelled":
-      return false;
+      // Before any step ran: the user stopped it and nothing happened, so there is nothing to
+      // tell them — not shown (M23). AFTER a step ran (M27): something did happen, and its own
+      // message says what ("I'd already done step 1 of 2, but step 2 didn't run."), so it is
+      // shown like a done job — until seen, then the same minute.
+      return job.stepsRun > 0 && (job.seenAt === null || now - job.seenAt < DONE_SEEN_CLEAR_MS);
     case "failed":
     case "expired":
       return job.seenAt === null || now - job.seenAt < SEEN_CLEAR_MS;
@@ -229,7 +236,9 @@ function isShown(job: JobView, now: number): boolean {
   }
 }
 
-const STOPPED: readonly JobState[] = ["failed", "interrupted", "expired"];
+// "Didn't finish": in the label's group and listed with it. A cancelled job reaches here only
+// when it is shown — cancelled after a step ran (M27) — and it did not finish: it stopped partway.
+const STOPPED: readonly JobState[] = ["failed", "interrupted", "expired", "cancelled"];
 
 function detailOf(job: JobView): string {
   const where = job.total > 1 && job.step > 0 ? `Step ${job.step} of ${job.total}` : "";
@@ -254,6 +263,12 @@ function detailOf(job: JobView): string {
       return at.length > 0 ? `Running — ${at}` : "Working…";
     default: {
       const said = job.result ?? job.lines[job.lines.length - 1] ?? "";
+      // TOO LATE (M27): Cancel was pressed during its last step, which finished; there was no
+      // later step to stop. Done is the truth — the row says why the Cancel did not stop it.
+      // In memory only: after a restart the same row reads as plain done, which is still true.
+      if (job.state === "done" && job.cancelRequested) {
+        return clip(`Finished before it could be cancelled — ${said}`, DETAIL_CHARS);
+      }
       return clip(said, DETAIL_CHARS);
     }
   }
@@ -273,7 +288,9 @@ function actionsOf(job: JobView): PillAction[] {
 // cancelled, and Dismiss all cancels nothing. Never an INTERRUPTED one: it may say "may or may
 // not have gone through", which is why it stays until dismissed on its own (§5c), and a bulk
 // button would let it go unread. Never a job past the list's cap: it is not on screen.
-const DISMISS_ALL_STATES: readonly string[] = ["done", "failed", "expired"];
+// A shown cancelled job (one cancelled after a step ran, M27) has ended and asked nothing: it is
+// an ended row like done.
+const DISMISS_ALL_STATES: readonly string[] = ["done", "failed", "expired", "cancelled"];
 
 export function dismissAllTargets(items: readonly PillItem[]): string[] {
   return items

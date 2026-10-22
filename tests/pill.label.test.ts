@@ -40,6 +40,7 @@ const job = (state: JobView["state"], over: Partial<JobView> = {}): JobView => (
   updatedAt: T0,
   seenAt: null,
   cancelRequested: false,
+  stepsRun: 0,
   ...over,
 });
 
@@ -150,8 +151,11 @@ describe("the label counts every group present (M27)", () => {
     }
   });
 
-  it("CANCELLED IS NEVER COUNTED: not as done, not as its own group, not in '+N more'", () => {
+  // RE-JUSTIFIED AT M27: true of a job cancelled BEFORE ANY STEP RAN (stepsRun 0, below). One
+  // cancelled after a step ran is counted in "didn't finish" — tests/pill.cancelled.test.ts.
+  it("CANCELLED BEFORE ANY STEP RAN IS NEVER COUNTED: not as done, not as its own group, not in '+N more'", () => {
     const cancelled = many("cancelled", 3);
+    expect(cancelled.every((one) => one.stepsRun === 0)).toBe(true);
     expect(pillView(withJobs([...cancelled, job("done")]))).toMatchObject({ mode: "done", label: "1 done" });
     expect(pillView(withJobs([...cancelled, job("running")]))).toMatchObject({ mode: "running", label: "1 running" });
     const alone = pillView(withJobs(cancelled));
@@ -172,6 +176,8 @@ describe("the label counts every group present (M27)", () => {
     expect(w.last()?.label).toBe("1 needs you · 1 done");
     w.manager.cancel(id);
     expect(w.manager.get(id)?.state).toBe("cancelled");
+    // RE-JUSTIFIED AT M27: in no count because nothing it was asked to do had run.
+    expect(w.manager.get(id)?.stepsRun).toBe(0);
     expect(w.last()).toMatchObject({ mode: "done", label: "1 done" });
   });
 

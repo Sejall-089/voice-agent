@@ -3,7 +3,7 @@
 > **NOT RUN YET.** Written before the live pass. This file grows one section per fix as each is
 > built: section 1 is fix C (the label), section 2 fix A (Dismiss keeps the list open, "Dismiss
 > all"), section 3 the Cancelling row, section 4 fix B (a click outside the pill closes the
-> list).
+> list), section 5 how a cancelled job ends (a follow-up from a live finding).
 >
 > M27 fixes the three status-pill findings from M26's live run (`spec.md` §9, M27; §5c, "The
 > status pill"). Everything a test or script can show is already shown and listed under
@@ -95,8 +95,9 @@ two-step chain ("summarize this and post it to Slack"), detached by clicking out
 - [ ] **3.1** Open the list while it is running and press **Cancel**. The row changes at once to
       **"Cancelling — finishing step 1 of 2"** (or "… of 1"), and has **no Cancel button** any
       more. The pill's label still counts it as running; any other rows are unchanged.
-- [ ] **3.2** Wait: when the step finishes, the row **goes**, and nothing after that step runs
-      (no Slack confirm appears). If it was the only row, the list closes.
+- [ ] **3.2** Wait: when the step finishes, nothing after it runs (no Slack confirm appears), and
+      the row becomes one of section 5's — it does **not** simply vanish once a step has run
+      (changed after a live finding; see section 5).
 - [ ] **3.3** Press Cancel on a job **waiting for your OK** instead: it goes at once and is never
       shown as Cancelling.
 
@@ -153,3 +154,31 @@ real mouse; then repeat 4.1 and 4.5 on a **touchpad** with **taps**, not presses
   PASS — opening click not counted; inside click, F24, hide/show and a message box leave it open;
   an outside click closes it and stops watching; closed, a click does nothing; works again after
   a reopen.
+
+## 5. How a cancelled job ends (follow-up from a live finding)
+
+Found by a person: Cancel on a running job, then the row turned to Dismiss and the pill to
+"done" — the cancel had arrived during the job's last step, which finished. Use the same kinds of
+job as section 3, detached, with the list open.
+
+- [ ] **5.1** **Too late — a one-step job** (a summary): Cancel while it runs. It says
+      "Cancelling — finishing step 1 of 1", then ends **green, counted in "done", with Dismiss**,
+      and the row reads **"Finished before it could be cancelled — "** followed by the summary.
+- [ ] **5.2** **Too late — the last step of two** ("summarize this and post it to Slack", approve
+      the post, then Cancel while the post is being sent): the same — done, with the
+      "Finished before it could be cancelled" wording on the last step's result. The post did go.
+      (A post is quick; if Cancel cannot be caught during it, leave this open and say so — it is
+      machine-verified below.)
+- [ ] **5.3** **Stopped partway — case B**: the same two-step chain, Cancel **during step 1**. When
+      step 1 finishes, no Slack confirm appears; the row **stays**, counted in **"didn't
+      finish"**, with Dismiss, and reads "You cancelled that, so I stopped there. I'd already done
+      step 1 of 2, but step 2 didn't run." With the list open it clears about a minute later; with
+      the list closed it stays until you open it (and survives quitting and restarting the app).
+- [ ] **5.4** Press **Dismiss all** with that row and a done one listed: both go.
+- [ ] **5.5** Cancel a job **waiting for your OK on its first step**: it goes at once, as before.
+
+**Machine-verified, not watched:** all five, against the real job manager, job runner, planner
+and pill controller with a scripted model — `tests/pill.cancelled.test.ts` — plus the restart
+on both stores (an unseen stopped-partway job restored ten days later with its message; one
+cancelled before any step not restored; a seen one past its minute not restored). The
+investigation that found it, read-only, produced the same row and pill sequences first.

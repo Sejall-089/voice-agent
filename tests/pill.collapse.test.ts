@@ -56,6 +56,7 @@ const job = (state: JobView["state"], over: Partial<JobView> = {}): JobView => (
   updatedAt: T0,
   seenAt: null,
   cancelRequested: false,
+  stepsRun: 0,
   ...over,
 });
 

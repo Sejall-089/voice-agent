@@ -56,6 +56,8 @@ export interface JobView {
   // step first (`cancel`), and until it does the pill says so instead of "Running". In memory
   // only, like `lines`: a job is never resumed after a restart, so nothing needs it saved.
   cancelRequested: boolean;
+  // How many of its steps ran (JobRecord.stepsRun): a job cancelled after one did is shown.
+  stepsRun: number;
 }
 
 // What moved a job off the bar (M25), carried on the "detached" change and written to the log
@@ -205,6 +207,7 @@ export class JobManager implements JobsReader {
       inFlightStep: null,
       result: null,
       seenAt: null,
+      stepsRun: 0,
       attached: !barIsTaken,
       lines: [],
       cancelRequested: false,
@@ -358,6 +361,8 @@ export class JobManager implements JobsReader {
     if (job === undefined) return;
     job.inFlightTool = null;
     job.inFlightStep = null;
+    // Returned or threw: either way it was called, and something may have happened (M27).
+    job.stepsRun += 1;
     this.store.save(job);
   }
 
@@ -687,5 +692,6 @@ function view(job: Live): JobView {
     updatedAt: job.updatedAt,
     seenAt: job.seenAt,
     cancelRequested: job.cancelRequested,
+    stepsRun: job.stepsRun,
   };
 }

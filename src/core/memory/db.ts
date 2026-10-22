@@ -75,6 +75,9 @@ const ADDED_COLUMNS: readonly { table: string; column: string; type: string }[] 
   // When the user first saw a job in the pill's open list. The `jobs` table itself shipped
   // with M23, so an install from that week has it without this column.
   { table: "jobs", column: "seen_at", type: "INTEGER" },
+  // M27: how many steps a job ran — whether one cancelled partway had done anything. NULL on
+  // older rows, read as 0: a job cancelled before M27 stays hidden, as it was.
+  { table: "jobs", column: "steps_run", type: "INTEGER" },
 ];
 
 export function migrate(db: DatabaseType): string[] {

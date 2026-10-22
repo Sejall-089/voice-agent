@@ -507,7 +507,10 @@ hotkey again, it carries on in the background while you say the next thing.
 - **Click the pill** to see the list. **Review…** opens the same confirm dialog as always — the
   pill itself never approves anything. **Resume** brings back a job that needs your screen.
   You can cancel a job, dismiss a finished one, or mute the chime there. A job cancelled in the
-  middle of a step finishes that step first; until then its row says *Cancelling*. Dismiss and Cancel
+  middle of a step finishes that step first; until then its row says *Cancelling*. If that was
+  its last step, it ends done and the row says *"Finished before it could be cancelled"*; if a
+  later step was stopped, the row stays (under "didn't finish") with what it had already done,
+  until you've seen it. A job cancelled before it did anything just goes. Dismiss and Cancel
   leave the list open so you can clear several in a row; it closes when the last one goes.
   **Dismiss all**, at the top of the list next to the chime toggle (both stay in view when the
   list scrolls), clears every finished, failed or expired job
@@ -1007,7 +1010,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3008 tests across 135 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3021 tests across 136 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1023,8 +1026,10 @@ counts every group present ("1 running · 2 done"), the pill widens to fit, and 
 says "+N more". Fix A is in: Dismiss and Cancel keep the list open while anything is left in
 it, and "Dismiss all" clears the finished, failed and expired jobs listed. A job cancelled
 mid-step now says "Cancelling — finishing step N of M" until it stops. Fix B is built: a click
-anywhere outside the pill closes its open list. The live checklist (`docs/M27-live-checklist.md`)
-has not been run yet. **3008 tests green across 135 files, 96 skipped.** See `spec.md` §9
+anywhere outside the pill closes its open list. Fix B is in, and a follow-up from a live run is
+built: a Cancel that came too late says so, and a job cancelled after it had done something stays
+in the pill with what it did. The live checklist (`docs/M27-live-checklist.md`) has not been run
+yet. **3021 tests green across 136 files, 96 skipped.** See `spec.md` §9
 (M27).
 
 **M26 (a finished background job stays in the pill until seen) is closed (22 Oct 2026), after

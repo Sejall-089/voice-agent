@@ -44,6 +44,7 @@ const record = (over: Partial<JobRecord>): JobRecord => ({
   inFlightStep: null,
   result: null,
   seenAt: null,
+  stepsRun: 0,
   ...over,
 });
 
@@ -132,6 +133,9 @@ describe("the action_log migration (addition C)", () => {
       // Added after M23 by the guarded migration: when the user first saw the job in the pill.
       // A timestamp, not content.
       "seen_at",
+      // M27: how many of its steps ran, so a job cancelled partway is told from one cancelled
+      // before it did anything. A count, not content.
+      "steps_run",
     ]);
   });
 });
