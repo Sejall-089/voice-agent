@@ -4645,9 +4645,10 @@ Post-v0:
       only (after a restart the row reads as plain done); `PILL_LABEL_MAX_WIDTH` (348 px) and
       "+N more" were reached only by script; the 16 open boxes above.
 
-- [ ] **M28 — refuse unfilled placeholders in plan arguments; the plan-choice eval set.**
-      **Code complete 2026-10-23, live pass pending (0 of 2 boxes ticked —
-      `docs/M28-live-checklist.md`). M27's plan-choice finding stays open.** M28 set out to fix that
+- [x] **M28 — refuse unfilled placeholders in plan arguments; the plan-choice eval set.**
+      **Closed 2026-10-23, after a live run by a person (2 of 2 boxes ticked —
+      `docs/M28-live-checklist.md`), with M27's plan-choice finding still open and two live
+      findings not fixed (the live record is at the end of this entry).** M28 set out to fix that
       finding with prompt wording. Two wordings were measured and both reverted; what shipped is
       a deterministic check the measurement turned up, and the eval set as the baseline for the
       next attempt. One commit.
@@ -4752,7 +4753,38 @@ Post-v0:
       its M19 expectation (readEmail first) on gpt-5-mini — summarize ×3 on the shipped wording,
       which stops at the summary for want of text; that expectation was recorded on gpt-5. The
       eval does not record a lone call's arguments, so the two "summarize this and file it" lone
-      creates under wording 2 are unexplained. Both live boxes unwatched.
+      creates under wording 2 are unexplained.
+
+      **Live, by a person (2 of 2 ticked, 2026-10-23), on the shipped wording.** 1.1: with the
+      clipboard empty, "log this as an issue and let #bugs know" filed nothing. 2.1: with the long
+      clipboard, "create a linear issue and send to fun" showed no summarize step in any try,
+      cancelled at every Linear dialog. One plan was three steps and two were two steps (create
+      with the clipboard as the description, then post). So the case box 2.1 was written for, a
+      summary step shown in the preview, did not occur. `npm test` at the close (plain run, SQLite
+      rebuilt for node): **3039 passed across 137 files, 96 skipped**; both typechecks clean.
+      Eval skipped at the close (not run against the real model).
+
+      **Live findings, from the action log (rows 647–652, read read-only) and the code; neither
+      fixed, no code changed:**
+      1. **A step labelled "Capture the selected text unchanged to use as the issue
+         description" was `rewrite`.**
+         - **What it did.** With `tone: ""`, `rewrite` fell back to "clear, natural, and
+           concise". It reworded the text with a model call and **copied the rewrite over the
+           user's clipboard**. It is `reversible`, so it ran unnarrated and unconfirmed.
+         - **What reached the dialog.** Its whole result, including the tool's own line
+           "Rewritten (clear, natural, and concise) and copied to clipboard.", became the
+           create's description through `{step1}`.
+         - **It spread to the later tries.** The two later two-step plans used the clipboard as
+           given, which by then held the rewrite.
+         - **Who wrote the label.** The preview line is the step's model-written `describe`
+           (`previewPlan`). The tool's name is used only when that phrase is empty, so nothing
+           on screen said `rewrite` until the dialog showed reworded text.
+         - **Related.** The same family as M27's finding (an extra step before a create), with
+           a tool the eval never saw there.
+      2. **With nothing copied, the request for the text was the model's prose** (`no_tool`,
+         row 647). It offered to re-log SEJ-21, taken from the previous turn: `getLast()` skips
+         detached rows, and the last attached one was row 642, a cancelled post naming SEJ-21.
+         No state waited for an answer: M21's lesson, live.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

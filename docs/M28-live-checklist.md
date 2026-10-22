@@ -1,8 +1,12 @@
 # M28 — live verification checklist (by hand)
 
-> **NOT YET RUN.** A ticked box means **a person at the keyboard watched it happen in the
-> running app** — no test, eval or recon script earns a tick here. An open box means *not seen
-> by a person*, not *failing*.
+> **RUN 2026-10-23, by a person; M28 CLOSED the same day with the plan-choice finding still
+> open.** 2 boxes ticked, 0 open. A ticked box means a person saw it in the running app.
+>
+> Two findings from the run, neither fixed in M28 (see **Findings** at the end): with a long
+> clipboard, one plan's first step was **`rewrite`** under the model's label "Capture the selected
+> text unchanged…", which rewrote the text and replaced the clipboard; and with nothing copied,
+> the "question" asking for the text was the model's prose, with nothing waiting for an answer.
 >
 > M28 adds one deterministic check: the planner refuses a plan or a call whose arguments hold a
 > placeholder nothing fills, like `{selected_text}` (`spec.md` §5b, "A blank nothing fills").
@@ -41,7 +45,9 @@ as plain node.) Restart it after pulling: the main process is built once at star
 Empty the clipboard first. In a terminal: `cmd /c "echo off | clip"` (the app reads an empty
 clipboard as nothing selected). Then type **"log this as an issue and let #bugs know"**.
 
-- [ ] **1.1** **Expect: no Linear issue is filed, and no create dialog offers one with no
+- [x] **1.1** *(2026-10-23. Nothing was filed. The app showed a reply asking for the text and
+      offering to re-log SEJ-21. Action log row 647: `no_tool`, so that reply was the model's
+      prose — finding 2.)* **Expect: no Linear issue is filed, and no create dialog offers one with no
       description, a made-up one, or the characters `{selected_text}`.** Any of these is a
       pass:
       - refused before anything runs, with *"I didn't file that issue. Nothing in my plan
@@ -80,7 +86,11 @@ Going to leave it for now and pick it up after lunch. If anyone has seen pg drop
 Then type **"create a linear issue and send to fun"**. Up to three tries; the step does not
 appear every time.
 
-- [ ] **2.1** **Expect: when the plan includes a summary, the plan preview names that step
+- [x] **2.1** *(2026-10-23. No summarize step in any try; cancelled at every Linear dialog. Try
+      1 was three steps, "Capture the selected text unchanged to use as the issue description",
+      create, post to fun — step 1 was `rewrite` (finding 1). Two later tries were two steps:
+      create with the clipboard as the description, then post. So the case this box was written
+      for, a summary step shown in the preview, did not occur.)* **Expect: when the plan includes a summary, the plan preview names that step
       before anything runs** (a step like "Summarize the selected clipboard text"), and the
       Linear dialog then shows the summary as the description, not the text you copied. This is
       the finding as it stands: an extra step nobody asked for, but one a person can see in the
@@ -117,5 +127,37 @@ appear every time.
 
 **Findings**
 
-<!-- Filled in only from what the person who ran it reports. One entry per finding: what was
-seen, the cause if known, whether it is fixed, and whether the fix was re-watched live. -->
+Both from the live run of 2026-10-23, established from the action log (`action_log` in
+`%APPDATA%\voice-agent\memory.db`, read read-only, rows 647–652) and the code. Neither is fixed;
+no code was changed for either.
+
+1. **"Capture the selected text unchanged" was `rewrite`: it changed the text and replaced the
+   clipboard.** Box 2.1, try 1 (rows 648–649, one job). The plan was `rewrite` (`{"tone": ""}`) >
+   `linear__create_issue` (description `{step1}`) > `sendMessage`.
+   - **Which tool.** There is no tool that returns the clipboard as it is. Step 1 was the
+     `rewrite` tool. An empty `tone` falls back to "clear, natural, and concise". It sent the
+     text to the model to be reworded, and **copied the rewrite onto the clipboard**, replacing
+     what the person had copied. It is a `reversible` tool, so it ran with no narration and no
+     confirm.
+   - **What reached the dialog.** Its whole result became the issue description: the rewritten
+     text, after the tool's own first line, "Rewritten (clear, natural, and concise) and copied
+     to clipboard." The person cancelled there, so nothing was filed or sent.
+   - **It spread to the later tries.** The two-step plans that followed (rows 651, 652) used the
+     clipboard as given, and by then the clipboard held the rewrite: both descriptions begin "Ran
+     the migration on staging again this morning", which is the rewrite's wording, not the text
+     copied ("Tried the migration again…").
+   - **Who wrote the label.** The model. A plan step's line in the preview is the step's
+     `describe`, a phrase the model writes for each step (`PLAN_TOOL`, `core/llm/plan.ts`), shown
+     as written (`previewPlan`, `core/chain.ts`). The tool's name is used only when that phrase is
+     empty, and the preview never names the tool otherwise. So the preview said "unchanged" over a
+     step that changed the text and the clipboard, and nothing on screen contradicted it until
+     the Linear dialog.
+   - **Status.** Not fixed in M28. This is the same family as M27's finding (an extra step before
+     the create), with a different tool: the eval only ever saw `summarize` there.
+
+2. **With nothing copied, the request for the text was the model's prose, not an app question.**
+   Box 1.1, row 647: `no_tool`, no result stored. The reply asked for the text and offered to
+   re-log SEJ-21. The SEJ-21 came from the previous turn the model was shown: `getLast()` skips
+   detached rows, and the last attached one was row 642, the cancelled post "New issue filed:
+   Created SEJ-21…". Nothing in the app was waiting for an answer: it was M21's case of model
+   prose looking like a prompt. Nothing was filed, which is what the box checks. Not fixed.

@@ -5,8 +5,8 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-23): M0-M27 shipped and closed; M28 code complete
-2026-10-23, live pass pending. M27's plan-choice finding stays open.**
+**Current status (as of 2026-10-23): M0-M28 shipped; M28 closed 2026-10-23, with M27's
+plan-choice finding still open and two live findings not fixed.**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
 only**. For M20 to M28 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
@@ -50,9 +50,12 @@ only**. For M20 to M28 the status lives in `spec.md` (§9's entry for each, and 
   fixed**, under investigation: with clipboard text selected, "create a linear issue and send to
   fun" planned an extra "summarize the clipboard" step. 3021 tests passed across 136 files at
   the close, 96 skipped.
-- **M28 - refuse unfilled placeholders in plan arguments; the plan-choice eval set.** Code
-  complete 2026-10-23, **live pass pending**; M27's plan-choice finding **still open**. `docs/M28-live-checklist.md`: 0
-  ticked, 2 open (not yet run). The finding was reproduced and measured with a new eval set
+- **M28 - refuse unfilled placeholders in plan arguments; the plan-choice eval set.** Closed
+  2026-10-23 after a live run by a person; M27's plan-choice finding **still open**.
+  `docs/M28-live-checklist.md`: 2 ticked, 0 open. Two live findings, not fixed: a step the
+  preview called "Capture the selected text unchanged" was `rewrite`, which reworded the text
+  and replaced the clipboard (preview lines are the model's own `describe`); and a prose reply
+  asking for the text, with nothing waiting. The finding was reproduced and measured with a new eval set
   (gpt-5-mini, 3 trials a case): the extra summarize step comes with a long clipboard. Two
   wordings fixed it and each broke a control, so both were reverted; the baseline and the two
   runs are in `spec.md` §9 (M28). Shipped: the planner refuses a plan whose arguments hold a

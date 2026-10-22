@@ -7,8 +7,7 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M27, which closed on 2026-10-23 with named gaps. M28 is code complete, live pass pending —
-  close it out before starting another. The next one is whatever is agreed and
+  M28, which closed on 2026-10-23 with M27's plan-choice finding still open. The next one is whatever is agreed and
   added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
@@ -263,6 +262,13 @@ patterns behind them — each cost a real debugging session.
   And **record the fixture dimension that decides whether a failure reproduces**: a one-line
   clipboard never showed this bug (0 of 6), a long one did (4 of 6), and M27's live clipboard
   was not recorded.
+- **A plan preview shows what the model SAYS each step does, not which tool it is — check the
+  action log for the tool (M28).** Live, a step previewed as "Capture the selected text unchanged"
+  was `rewrite`: it reworded the text and copied the rewrite over the user's clipboard, unnarrated
+  because the tool is `reversible`, and every later try then used the rewrite as "the clipboard".
+  The preview line is the step's model-written `describe`, and the tool's name appears only when
+  that is empty. When a live report quotes a step's wording, read the tool name from the action
+  log before reasoning about what ran.
 
 ## Scope added mid-milestone
 

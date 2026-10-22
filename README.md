@@ -1029,8 +1029,13 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M28 (refuse unfilled placeholders; the plan-choice eval set) is code complete (23 Oct 2026),
-live pass pending: its two live boxes are not yet run. M27's plan-choice finding stays open.** M27's finding — with
+**M28 (refuse unfilled placeholders; the plan-choice eval set) is closed (23 Oct 2026), after a
+live run by a person: both live boxes ticked. M27's plan-choice finding stays open, and the live
+run found two more, not fixed:** a plan step the preview called "Capture the selected text
+unchanged" was the `rewrite` tool, which reworded the copied text and replaced the clipboard with
+it (the preview shows the model's own description of each step, not the tool); and with nothing
+copied, the reply asking for the text was the model's prose, with nothing in the app waiting for
+an answer. M27's finding — with
 a long clipboard, "create a linear issue and send to fun" adds a "summarize the clipboard" step
 nobody asked for — was reproduced and measured: it comes with length (0 of 6 trials with a
 one-line clipboard, 4 of 6 with a long one). Two prompt wordings removed the extra step but each
