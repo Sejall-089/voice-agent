@@ -4,7 +4,6 @@ import type { JobView } from "../src/core/jobs/JobManager.ts";
 import { InMemoryJobStore } from "../src/core/jobs/JobStore.ts";
 import { FOREGROUND_BUSY } from "../src/core/jobs/messages.ts";
 import {
-  DONE_FADE_MS,
   initialPillState,
   PILL_COLLAPSED,
   PILL_MARGIN,
@@ -84,13 +83,13 @@ describe("the pill's state reducer", () => {
     expect(pillView(withJobs([job("expired"), job("interrupted")])).label).toBe("2 didn't finish");
   });
 
-  it("done fades: shown, then gone, with no click", () => {
+  // RE-JUSTIFIED AT M26. Was "done fades: shown, then gone, with no click" (8 s). A done job now
+  // waits to be seen: with no click it stays, labelled with how many there are.
+  it("done stays until seen: no click, and it is still there long after", () => {
     const state = withJobs([job("done", { result: "Sent." })]);
-    expect(pillView(state)).toMatchObject({ mode: "done", label: "Done" });
-    const almost = reducePill(state, { type: "tick", now: T0 + DONE_FADE_MS - 1 });
-    expect(pillView(almost).mode).toBe("done");
-    const faded = reducePill(state, { type: "tick", now: T0 + DONE_FADE_MS });
-    expect(pillView(faded)).toMatchObject({ mode: "hidden", items: [] });
+    expect(pillView(state)).toMatchObject({ mode: "done", label: "1 done" });
+    const later = reducePill(state, { type: "tick", now: T0 + 24 * 60 * 60 * 1000 });
+    expect(pillView(later)).toMatchObject({ mode: "done", label: "1 done" });
   });
 
   // The rule changed (it used to fade like a finished job): the user cancelled it themselves,

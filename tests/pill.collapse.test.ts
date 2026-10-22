@@ -5,6 +5,7 @@ import { InMemoryJobStore } from "../src/core/jobs/JobStore.ts";
 import { interruptedText, EXPIRED } from "../src/core/jobs/messages.ts";
 import {
   clip,
+  DONE_SEEN_CLEAR_MS,
   IDLE_COLLAPSE_MS,
   initialPillState,
   isPointInRect,
@@ -116,9 +117,11 @@ describe("the reducer: collapsed by default, opened only by a click", () => {
   });
 
   it("THE BUG: opened once, emptied, and the next job comes — the pill returns COLLAPSED", () => {
-    let state = opened([job("done", { result: "Sent." })]);
-    // The job fades and the pill goes away with its list still open...
-    state = reducePill(state, { type: "tick", now: T0 + 9_000 });
+    // M26: a done job no longer fades unseen — this one was seen at T0, so it clears a minute
+    // later on its own, which is the case this test is about (emptied with the list open).
+    let state = opened([job("done", { result: "Sent.", seenAt: T0 })]);
+    // The job clears and the pill goes away with its list still open...
+    state = reducePill(state, { type: "tick", now: T0 + DONE_SEEN_CLEAR_MS + 1_000 });
     expect(pillView(state).mode).toBe("hidden");
     // ...and this is the assertion the old code failed: the flag is cleared, not just hidden.
     expect(state.expanded).toBe(false);

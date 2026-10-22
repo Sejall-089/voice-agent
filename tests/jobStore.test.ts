@@ -240,6 +240,26 @@ describe("a restart: interrupted, never resumed", () => {
       // A second start has nothing left to interrupt.
       expect(store.markInterrupted(6000)).toBe(0);
     });
+
+    // M26: a done job waits to be seen, as a failure does. Every record here is OLDER than
+    // `since`, so the recent-window clause cannot be what brings any of them back.
+    it(`${name}: an old done job comes back only while it is unseen; a seen one does not`, () => {
+      const store = make();
+      const since = 10_000;
+      const saved = [
+        record({ id: "done-unseen", state: "done", result: "A summary.", updatedAt: 1000 }),
+        record({ id: "done-seen", state: "done", result: "A summary.", updatedAt: 1000, seenAt: 2000 }),
+        record({ id: "done-dismissed", state: "done", updatedAt: 1000, acknowledged: true }),
+        record({ id: "failed-seen", state: "failed", updatedAt: 1000, seenAt: 2000 }),
+      ];
+      for (const r of saved) {
+        expect(r.updatedAt, r.id).toBeLessThan(since);
+        store.save(r);
+      }
+
+      const ids = store.loadUnacknowledged(since).map((job) => job.id).sort();
+      expect(ids).toEqual(["done-unseen", "failed-seen"]);
+    });
   }
 
   // Live finding after M23: a job that never left the bar, killed with the app, showed nowhere

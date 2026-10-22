@@ -7,8 +7,9 @@ import type { JobState } from "../types.ts";
 // when to drop it. All of it is pure or runs on an injected clock, and audio only ever leaves
 // through the `play` it is handed — a fake in every test.
 //
-//   - Only `needs-you`. A job finishing or failing is not announced: the pill shows it, and a
-//     sound for every completion is exactly what a background job is supposed to spare you.
+//   - Only `needs-you`. A job finishing or failing is not announced: the pill shows it — until
+//     the user has seen it, for done jobs as well since M26 — and a sound for every completion
+//     is exactly what a background job is supposed to spare you.
 //   - Never over the microphone or the app's own voice. Whisper would transcribe it into an
 //     instruction or a dictation, and it would talk over a sentence in progress. While any of
 //     those is active the chime is DEFERRED, not dropped.

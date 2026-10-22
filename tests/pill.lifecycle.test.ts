@@ -8,7 +8,7 @@ import type { JobView } from "../src/core/jobs/JobManager.ts";
 import { InMemoryJobStore, SqliteJobStore } from "../src/core/jobs/JobStore.ts";
 import type { JobStore } from "../src/core/jobs/JobStore.ts";
 import {
-  DONE_FADE_MS,
+  DONE_SEEN_CLEAR_MS,
   initialPillState,
   LIST_CAP,
   pillView,
@@ -23,7 +23,7 @@ import { PillController } from "../src/main/pill/PillController.ts";
 
 // HOW LONG EACH KIND OF JOB STAYS IN THE PILL, and the one-line-per-event log.
 //
-//   done          a few seconds, then gone
+//   done          until the user has SEEN it, then one minute (M26 — it used to fade after 8 s)
 //   cancelled     never shown
 //   failed        until the user has SEEN it (the list open with it in it), then one hour
 //   expired       the same
@@ -60,12 +60,45 @@ const at = (jobs: JobView[], now: number): PillState =>
 const modeAt = (jobs: JobView[], now: number): string => pillView(at(jobs, now)).mode;
 
 describe("the reducer: each state's lifecycle", () => {
-  it("DONE fades after a few seconds (unchanged)", () => {
-    const done = job("done", { result: "Sent." });
-    expect(modeAt([done], T0 + DONE_FADE_MS - 1)).toBe("done");
-    expect(modeAt([done], T0 + DONE_FADE_MS)).toBe("hidden");
-    // Being seen has nothing to do with it.
-    expect(modeAt([{ ...done, seenAt: T0 }], T0 + DONE_FADE_MS)).toBe("hidden");
+  // RE-JUSTIFIED AT M26. Was "DONE fades after a few seconds (unchanged)" — 8 s, seen or not.
+  // A done job now waits to be seen, like a failure, with a one-minute tail instead of an hour.
+  it("DONE that nobody has seen stays — at 8 s, a minute, a day, a month", () => {
+    const done = job("done", { result: "A summary." });
+    for (const later of [8_000, 60_000, HOUR, 24 * HOUR, 30 * 24 * HOUR]) {
+      expect(pillView(at([done], T0 + later)), `done after ${later} ms`).toMatchObject({ mode: "done", label: "1 done" });
+    }
+  });
+
+  it("DONE, once SEEN: still shown just under a minute later, cleared at a minute", () => {
+    const seen = job("done", { result: "A summary.", seenAt: T0 + 5_000 });
+    expect(modeAt([seen], T0 + 5_000 + DONE_SEEN_CLEAR_MS - 1)).toBe("done");
+    expect(modeAt([seen], T0 + 5_000 + DONE_SEEN_CLEAR_MS)).toBe("hidden");
+    expect(DONE_SEEN_CLEAR_MS).toBe(60_000);
+  });
+
+  it("several done jobs are counted: '3 done'", () => {
+    const three = [job("done"), job("done"), job("done")];
+    expect(pillView(at(three, T0 + HOUR))).toMatchObject({ mode: "done", label: "3 done" });
+    expect(pillView(at(three, T0 + HOUR)).items).toHaveLength(3);
+  });
+
+  it("a done job that was never detached (finished in the bar) never appears", () => {
+    const attached = job("done", { attached: true, background: false, result: "Shown in the bar." });
+    expect(modeAt([attached], T0)).toBe("hidden");
+    expect(modeAt([attached], T0 + HOUR)).toBe("hidden");
+  });
+
+  // M26 must not move a failure onto the done job's minute, nor a done job onto the hour.
+  it("seen together, a done job leaves at a minute and a failed one keeps its hour", () => {
+    const done = job("done", { result: "A summary.", seenAt: T0 });
+    const failed = job("failed", { result: "It did not happen.", seenAt: T0 });
+    expect(pillView(at([done, failed], T0 + DONE_SEEN_CLEAR_MS - 1)).items.map((i) => i.id)).toEqual(
+      expect.arrayContaining([done.id, failed.id]),
+    );
+    const afterMinute = pillView(at([done, failed], T0 + DONE_SEEN_CLEAR_MS));
+    expect(afterMinute).toMatchObject({ mode: "failed", label: "1 didn't finish" });
+    expect(afterMinute.items.map((i) => i.id)).toEqual([failed.id]);
+    expect(modeAt([done, failed], T0 + HOUR)).toBe("hidden");
   });
 
   it("CANCELLED by the user is removed immediately — not shown even for an instant", () => {
@@ -332,12 +365,76 @@ describe("seen: opening the list starts the one-hour clock", () => {
     expect(w.mode()).toBe("hidden");
   });
 
-  it("DONE still fades on its own, opened or not", () => {
+  // RE-JUSTIFIED AT M26. Was "DONE still fades on its own, opened or not". Through the real
+  // manager and controller now: unseen it stays; opening the list marks it seen and starts the
+  // minute; dismiss clears it at once.
+  it("DONE stays until the list is opened, then clears a minute after — through the real controller", () => {
     const w = world();
     const id = w.background("summarize this");
     w.manager.finish(id, "done", "A summary.");
+    w.clock.now += 60_000;
+    w.controller.tick();
+    expect(w.controller.view()).toMatchObject({ mode: "done", label: "1 done" });
+    expect(w.manager.get(id)?.seenAt).toBeNull();
+
+    w.controller.onExpand(true); // the list is open with it in it: seen
+    const seenAt = w.clock.now;
+    expect(w.manager.get(id)?.seenAt).toBe(seenAt);
+    expect(w.controller.view().items[0]).toMatchObject({ id, detail: "A summary." });
+
+    w.clock.now = seenAt + DONE_SEEN_CLEAR_MS - 1;
+    w.controller.tick();
     expect(w.mode()).toBe("done");
-    w.clock.now += DONE_FADE_MS;
+    w.clock.now = seenAt + DONE_SEEN_CLEAR_MS;
+    w.controller.tick();
+    expect(w.mode()).toBe("hidden");
+  });
+
+  // Showing it is not seeing it: a collapsed pill reading "1 done" says only that something
+  // finished. Ticked every second, as main.ts's re-check does, so a mark made on any redraw of
+  // the collapsed pill would be caught, not just one made on the first.
+  it("DONE shown collapsed for two minutes is NOT seen; opening the list is what sees it", () => {
+    const w = world();
+    const id = w.background("summarize this");
+    w.manager.finish(id, "done", "A summary.");
+    const finishedAt = w.clock.now;
+    for (let second = 1; second <= 120; second += 1) {
+      w.clock.now = finishedAt + second * 1_000;
+      w.controller.tick();
+    }
+    const drawn = w.views[w.views.length - 1];
+    expect(drawn).toMatchObject({ mode: "done", label: "1 done", expanded: false });
+    expect(w.controller.view()).toMatchObject({ mode: "done", label: "1 done", expanded: false });
+    expect(w.manager.get(id)?.seenAt).toBeNull();
+
+    w.controller.onExpand(true);
+    const seenAt = w.clock.now;
+    expect(seenAt).toBe(finishedAt + 120_000);
+    expect(w.manager.get(id)?.seenAt).toBe(seenAt);
+
+    w.clock.now = seenAt + DONE_SEEN_CLEAR_MS - 1_000;
+    w.controller.tick();
+    expect(w.mode()).toBe("done");
+    w.clock.now = seenAt + DONE_SEEN_CLEAR_MS;
+    w.controller.tick();
+    expect(w.mode()).toBe("hidden");
+  });
+
+  it("DONE: Dismiss clears it at once", () => {
+    const w = world();
+    const id = w.background("summarize this");
+    w.manager.finish(id, "done", "A summary.");
+    w.controller.onExpand(true);
+    w.controller.onAction(id, "dismiss");
+    expect(w.mode()).toBe("hidden");
+    expect(w.manager.get(id)?.acknowledged).toBe(true);
+  });
+
+  it("DONE in the bar (never detached) is never in the pill", () => {
+    const w = world();
+    const id = w.manager.submit("summarize this"); // attached, and stays so
+    w.manager.finish(id, "done", "Shown in the bar.");
+    w.clock.now += HOUR;
     w.controller.tick();
     expect(w.mode()).toBe("hidden");
   });
@@ -436,6 +533,57 @@ describe("clearing from the pill deletes nothing", () => {
     expect(after.mode()).toBe("hidden");
     // Still in the store.
     expect((second.prepare(`SELECT COUNT(*) AS n FROM jobs`).get() as { n: number }).n).toBe(1);
+    second.close();
+  });
+
+  // M26: a done job waits to be seen across a restart, as a failure does.
+  it("DONE, UNSEEN, survives a restart however old it is — ten days later it is still waiting", () => {
+    const path = tempDb();
+    const first = createDatabase(path);
+    const before = world({ store: new SqliteJobStore(first) });
+    const id = before.background("summarize this");
+    before.manager.finish(id, "done", "A summary.");
+    first.close();
+
+    const second = createDatabase(path);
+    const after = world({ store: new SqliteJobStore(second), startAt: T0 + 240 * HOUR });
+    expect(after.manager.get(id)).toMatchObject({ state: "done", seenAt: null, result: "A summary." });
+    expect(after.controller.view()).toMatchObject({ mode: "done", label: "1 done" });
+    second.close();
+  });
+
+  it("DONE, seen just before a restart, keeps only what is left of its minute", () => {
+    const path = tempDb();
+    const first = createDatabase(path);
+    const before = world({ store: new SqliteJobStore(first) });
+    const id = before.background("summarize this");
+    before.manager.finish(id, "done", "A summary.");
+    before.controller.onExpand(true);
+    const seenAt = before.clock.now;
+    first.close();
+
+    const second = createDatabase(path);
+    const after = world({ store: new SqliteJobStore(second), startAt: seenAt + 30_000 });
+    expect(after.mode()).toBe("done");
+    after.clock.now = seenAt + DONE_SEEN_CLEAR_MS;
+    after.controller.tick();
+    expect(after.mode()).toBe("hidden");
+    second.close();
+  });
+
+  it("DONE, seen and a day old, is not brought back by a restart", () => {
+    const path = tempDb();
+    const first = createDatabase(path);
+    const before = world({ store: new SqliteJobStore(first) });
+    const id = before.background("summarize this");
+    before.manager.finish(id, "done", "A summary.");
+    before.controller.onExpand(true);
+    first.close();
+
+    const second = createDatabase(path);
+    const after = world({ store: new SqliteJobStore(second), startAt: T0 + 48 * HOUR });
+    expect(after.manager.get(id)).toBeNull();
+    expect(after.mode()).toBe("hidden");
     second.close();
   });
 

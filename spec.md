@@ -1362,7 +1362,7 @@ work area, excluded from screen capture, shown only with `showInactive()`.
 | amber, "N needs you" | a job is waiting. Pulses for 2.4 s when a job starts waiting, then steady |
 | "N didn't finish" | failed, expired or interrupted — see "How long a job stays" below |
 | "N running" | otherwise, while anything is running or queued |
-| "Done" | for 8 s after the last job finishes cleanly, then the window hides |
+| green, "N done" | otherwise, while a finished background job has not been seen — see below (M26) |
 
 **How long a job stays in the pill** (2026-10-14). The pill only — leaving it deletes nothing:
 the job's row and its action-log rows are kept.
@@ -1370,7 +1370,7 @@ the job's row and its action-log rows are kept.
 | Job | Stays |
 |---|---|
 | running, queued, needs-you | while it is |
-| done | 8 s, then gone |
+| done | **until the user has seen it**, however long that is; then one minute more (`DONE_SEEN_CLEAR_MS`, tunable) — M26. Until M26: 8 s, then gone, seen or not |
 | cancelled by the user | not shown at all |
 | failed, expired | **until the user has seen it**, however long that is; then one hour more |
 | interrupted | until it is dismissed, and only then — it may say "may or may not have gone through" |
@@ -1378,7 +1378,11 @@ the job's row and its action-log rows are kept.
 "Seen" means the list was open with the job in it. It is recorded once, as `seen_at` on the
 job's row (added by the same guarded migration as the action-log columns), so a restart
 neither resets the hour nor counts as a look; a failed job nobody opened the list for is
-brought back after a restart however old it is. The list shows at most **ten** jobs, the most
+brought back after a restart however old it is, and since M26 so is a done one. The minute
+after a done job is seen is for finishing reading its result in the open list (the row shows
+it, up to 420 characters, as before) — nothing new is spoken and no chime plays. Dismiss
+clears a done job at once. A done job that finished in the bar was never background and never
+appears. The pill's 1 s re-check is what notices a seen job's minute is up. The list shows at most **ten** jobs, the most
 recent — except that a job waiting for the user is never the one left off. A job past the ten
 is still counted in the pill's label and is not "seen" until it is listed.
 
@@ -4161,6 +4165,56 @@ Post-v0:
       not blocked and detaches the attached job (addendum C); any focus loss counts as an
       outside click while a job is thinking; the renderer's own Escape fallback still only hides
       the bar.
+
+- [ ] **M26 — a finished background job stays in the pill until it has been seen.** M25's
+      finding (option A): a done detached job left the pill after 8 s (`DONE_FADE_MS`, M23) plus
+      the 1 s re-check, and its result could not be read after that. One commit.
+
+      **The rule (§5c, "How long a job stays").** A done background job stays in the pill —
+      green, "N done" — until its list has been opened with that job in it, then one minute more
+      (`DONE_SEEN_CLEAR_MS` in `core/jobs/pill.ts`, named and tunable). It reuses the `seenAt` /
+      `seen_at` mechanism failed and expired jobs already use, unchanged: `PillController` already
+      marked every listed row with a Dismiss button seen, done rows included, so no new marking
+      code. Dismiss clears it at once. The row shows the result as before (up to 420 characters).
+      Nothing new is spoken and no chime plays (`chime.ts` comment updated). A done job that
+      finished in the bar was never background and never appears. The 1 s re-check is kept: it
+      is what notices the minute is up. `DONE_FADE_MS` is removed.
+
+      **Restart.** A done job nobody has seen is brought back after a restart however old it is
+      (`JobStore.loadUnacknowledged`, both stores — as failed jobs already were). Until M26 a
+      done job was restored only inside the 24 h window, and then faded. A seen one keeps only
+      what was left of its minute.
+
+      **Tests** (the real pill rules and controller, a fake clock): `pill.lifecycle.test.ts` —
+      unseen done stays at 8 s, a minute, a day, a month; seen, it is shown just under a minute
+      later and gone at a minute; "3 done"; a done job seen alongside a failed one leaves at a
+      minute while the failed one keeps its hour; never-detached done never appears; through the
+      real controller, still shown at 60 s, opening the list sets `seenAt` and shows the result,
+      gone a minute later; Dismiss clears at once; and on SQLite, unseen done survives a restart
+      ten days later, seen-just-before keeps the rest of its minute, seen-a-day-old is not
+      restored; shown COLLAPSED for two minutes, ticked every second as the app's re-check does,
+      it reads "1 done" and is not seen — only opening the list sets `seenAt`, and it clears a
+      minute after that. `jobStore.test.ts`, for both stores: an old done job (older than the
+      restore window, so the window cannot explain it) comes back only while unseen and not
+      dismissed. Re-justified, not just re-run: `pill.test.ts`'s "done fades" became "done stays
+      until seen", and `pill.collapse.test.ts`'s "THE BUG" now seeds a seen done job and waits
+      out its minute (it relied on the 8 s fade to empty the pill). Failed, expired and
+      interrupted tests are untouched and pass.
+
+      **Mutations** (each with the Edit tool, each reverted): the 8 s fade restored in `isShown`
+      — 7 failed; marking seen skipped for done rows in `PillController` (failed rows still
+      marked) — 3 failed; a done job given the failure's hour instead of the minute — 5 failed
+      (the seen-together test among them); the done clause dropped from the SQLite restore query
+      — re-run on its own, 1 failed ("DONE, UNSEEN, survives a restart"); marking seen whenever
+      the pill shows a row instead of when the list is open — 9 failed, the collapsed test among
+      them. **One survivor, now pinned:** the same done clause dropped from the IN-MEMORY store's
+      copy of the rule failed nothing (every restart test runs on SQLite). The two-store
+      `jobStore.test.ts` test above was added for it, and the mutation then failed exactly its
+      `InMemoryJobStore` case.
+
+      **Live** (`docs/M26-live-checklist.md`, only what needs a person): an outside-click-detached
+      summary still green after 30 s; clicking the pill shows the result and the job clears; and
+      Dismiss clears it at once.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

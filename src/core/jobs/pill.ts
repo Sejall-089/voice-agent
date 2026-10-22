@@ -19,10 +19,10 @@ export type { PillAction, PillItem, PillMode, PillView };
 //   failed      stays until each failure is dismissed. Interrupted and expired jobs are
 //               shown the same way — each is something that did not happen.
 //   running     a count.
-//   done        shown briefly, then gone. Nothing was asked of the user.
+//   done        green, "N done", until its list has been opened with it in it — then a minute
+//               more (M26). Until M26 it faded after 8 s whether anyone had looked or not.
 //   hidden      no window at all.
 
-export const DONE_FADE_MS = 8_000;
 export const PULSE_MS = 2_400;
 
 // How long the list stays open with the pointer off it.
@@ -165,6 +165,11 @@ export function clip(text: string, max: number): string {
 
 // How long a failed or expired job stays in the pill AFTER the user has seen it.
 export const SEEN_CLEAR_MS = 60 * 60 * 1000;
+
+// How long a DONE job stays in the pill after the user has seen it (M26). Short, because a done
+// job asked nothing of the user: the minute is for finishing reading its result in the open list,
+// not for being reminded of it. Tunable; the rule is "until seen", this is only the tail after.
+export const DONE_SEEN_CLEAR_MS = 60 * 1000;
 // How many jobs the open list shows. Older ones are not listed; nothing is deleted.
 export const LIST_CAP = 10;
 
@@ -172,7 +177,11 @@ export const LIST_CAP = 10;
 // the job's record and its action-log rows are untouched (core/jobs/JobStore.ts).
 //
 //   running, queued, needs-you   while they are.
-//   done                         a few seconds, then gone. Nothing was asked of the user.
+//   done                         UNTIL THE USER HAS SEEN IT, then DONE_SEEN_CLEAR_MS (M26). It
+//                                used to fade after 8 s — safe while only the hotkey detached
+//                                jobs, which left sends and creates behind. M25's outside click
+//                                sends THINKING jobs here, often a summary whose result is the
+//                                point, and live testing watched that result vanish unread.
 //   cancelled                    not at all. The user did that; there is nothing to tell them.
 //   failed, expired              UNTIL THE USER HAS SEEN IT, however long that takes — the
 //                                pill stays red for a week if nobody opens it. "Seen" is the
@@ -186,7 +195,7 @@ function isShown(job: JobView, now: number): boolean {
   if (job.kind !== "work" || !job.background || job.acknowledged) return false;
   switch (job.state) {
     case "done":
-      return now - job.updatedAt < DONE_FADE_MS;
+      return job.seenAt === null || now - job.seenAt < DONE_SEEN_CLEAR_MS;
     case "cancelled":
       return false;
     case "failed":
@@ -249,8 +258,9 @@ export function pillView(state: PillState): PillView {
     mode = "running";
     label = countLabel(working.length, "running", "running");
   } else if (shown.length > 0) {
+    // Everything left is done (cancelled is never shown): say how many are waiting to be read.
     mode = "done";
-    label = "Done";
+    label = countLabel(shown.length, "done", "done");
   } else {
     mode = "hidden";
     label = "";

@@ -37,7 +37,8 @@ export interface JobRecord {
   inFlightStep: number | null;
   result: string | null;
   // When the user first SAW this job in the pill's open list, or null if they never have.
-  // It starts the one-hour clock after which a failed or expired job leaves the pill — and it
+  // It starts the one-hour clock after which a failed or expired job leaves the pill, and the
+  // minute after which a done one does (M26) — and it
   // is written down with the job, so restarting the app neither resets that clock nor makes a
   // job the user has not seen look seen. Leaving the pill never deletes this record.
   seenAt: number | null;
@@ -56,8 +57,9 @@ export interface JobStore {
   // background. Its sentence already says "may or may not have gone through".
   markInterrupted(now: number): number;
   // Jobs worth showing after a restart: background and unacknowledged, and either ended
-  // since `since` — or failed, expired or interrupted at ANY time. Those three wait for the
-  // user (core/jobs/pill.ts): one that happened last week and was never seen is still owed.
+  // since `since` — or failed, expired or interrupted at ANY time, or done and never seen (M26).
+  // Those wait for the user (core/jobs/pill.ts): one that happened last week and was never seen
+  // is still owed.
   loadUnacknowledged(since: number): JobRecord[];
 }
 
@@ -99,7 +101,10 @@ export class InMemoryJobStore implements JobStore {
           record.background &&
           !record.acknowledged &&
           !LIVE.includes(record.state) &&
-          (record.updatedAt >= since || WAITS_TO_BE_SEEN.includes(record.state)),
+          (record.updatedAt >= since ||
+            WAITS_TO_BE_SEEN.includes(record.state) ||
+            // M26: a done job nobody has seen waits for them too, however old it is.
+            (record.state === "done" && record.seenAt === null)),
       )
       .map((record) => ({ ...record }));
   }
@@ -206,7 +211,8 @@ export class SqliteJobStore implements JobStore {
         `SELECT * FROM jobs
           WHERE kind = 'work' AND background = 1 AND acknowledged = 0
             AND state NOT IN ('queued', 'running', 'needs-you')
-            AND (updated_at >= ? OR state IN ('failed', 'expired', 'interrupted'))
+            AND (updated_at >= ? OR state IN ('failed', 'expired', 'interrupted')
+                 OR (state = 'done' AND seen_at IS NULL))
           ORDER BY created_at`,
       )
       .all(since)

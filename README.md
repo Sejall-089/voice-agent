@@ -509,6 +509,10 @@ hotkey again, it carries on in the background while you say the next thing.
   You can cancel a job, dismiss a finished one, or mute the chime there. Pressing the hotkey
   while that dialog is up says *"There's a confirmation waiting"* in the bar; the line goes
   away once the dialog is answered, or as soon as you run something new from the bar.
+- **A finished background job stays in the pill until you've seen it** — green, "N done",
+  however long that takes, and across a restart. Click the pill to read its result; a minute
+  after that it clears by itself, or Dismiss clears it at once. Nothing is spoken and no chime
+  plays when it finishes. (Until M26 it faded after 8 seconds, read or not.)
 - **A wait nobody answers expires after 30 minutes** — "expired, not run". The step is never
   run on its own.
 - **Ask "are my agents done yet?"** and it tells you: what is waiting for you, what is still
@@ -1000,6 +1004,11 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M26 (a finished background job stays in the pill until seen) is built and tested, not yet
+live-checked.** M25's finding is fixed: a done job sent to the pill no longer leaves after about
+10 seconds; it stays, green, until you've opened the list with it in it, then a minute more.
+See `docs/M26-live-checklist.md` and `spec.md` §9 (M26).
 
 **M25 (three live findings from M24; Escape and an outside click on a running instruction) is
 closed (22 Oct 2026), after a live run by a person and a loopback-recorded scripted run, with
