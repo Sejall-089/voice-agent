@@ -1,7 +1,7 @@
 import { Chime } from "../../core/jobs/chime.ts";
 import type { JobManager } from "../../core/jobs/JobManager.ts";
 import { FOREGROUND_BUSY } from "../../core/jobs/messages.ts";
-import { initialPillState, pillView, reducePill } from "../../core/jobs/pill.ts";
+import { dismissAllTargets, initialPillState, pillView, reducePill } from "../../core/jobs/pill.ts";
 import type { PillEvent, PillState, PillView } from "../../core/jobs/pill.ts";
 import { CHIME_MUTED, readFlag, writeFlag } from "../../core/settings.ts";
 import type { SettingsStore } from "../../core/settings.ts";
@@ -17,6 +17,8 @@ import type { SettingsStore } from "../../core/settings.ts";
 //   resume    bring a job that needs the screen back in front of the user.
 //   cancel    stop a job.
 //   dismiss   take a finished or failed job out of the list.
+//   dismiss all  take every listed done, failed or expired job out of the list (M27) — never a
+//             live or interrupted one.
 //   mute      the chime, on or off.
 //   expand    open or close the list.
 //
@@ -162,9 +164,33 @@ export class PillController {
     if (!["ok", "cancelled", "dismissed"].includes(outcome)) {
       this.say(`action "${rawAction}" on ${rawId} -> ${outcome}`);
     }
-    // A row's button was used: the list has done its job and gets out of the way — in
-    // particular out of the way of the dialog "Review…" is about to open.
-    this.dispatch({ type: "collapse" }, `the "${rawAction}" button`);
+    // Review… and Resume: the list has done its job and gets out of the way — in particular
+    // out of the way of the dialog "Review…" is about to open, or of the screen a resumed job
+    // needs. Dismiss and Cancel DO NOT CLOSE IT (M27): someone clearing several rows had to
+    // reopen the pill for each (M26's first live finding). The list stays open while anything
+    // is still listed, and closes when the last row goes — the reducer's "nothing left to show",
+    // reached through the job change above.
+    if (rawAction === "review" || rawAction === "resume") {
+      this.dispatch({ type: "collapse" }, `the "${rawAction}" button`);
+    }
+  }
+
+  // "Dismiss all", beside the chime toggle in the open list (M27). Acts on exactly the rows the open list is
+  // showing that are done, failed or expired (`dismissAllTargets`) — never a live job, never an
+  // interrupted one, never one past the cap — and only while the view is offering the button: a
+  // press that arrives after the list closed, or with nothing to dismiss, is dropped. It
+  // cancels nothing. The page sends no arguments; nothing it could send would be read.
+  onDismissAll(): void {
+    const view = this.view();
+    if (view.dismissAll !== true) {
+      this.say(`action "dismiss all" dropped: not offered ${view.expanded ? "(nothing ended is listed)" : "(the list is closed)"}`);
+      return;
+    }
+    const ids = dismissAllTargets(view.items);
+    this.say(`action "dismiss all" on ${ids.length} rows: ${ids.join(", ")}`);
+    const refused = ids.filter((id) => !this.deps.manager.acknowledge(id));
+    if (refused.length > 0) this.say(`action "dismiss all" -> not ended yet: ${refused.join(", ")}`);
+    this.dispatch({ type: "jobs", jobs: this.deps.manager.views(), now: this.now() }, "nothing left to show");
   }
 
   // A click on the pill itself. The ONLY thing that opens the list.

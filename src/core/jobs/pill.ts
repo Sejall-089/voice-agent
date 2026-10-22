@@ -61,7 +61,9 @@ export type PillEvent =
   | { type: "tick"; now: number }
   // A click on the pill itself: open, or close.
   | { type: "expand"; expanded: boolean; now: number }
-  // Anything that means the user has moved on: the hotkey, a new instruction, a row's button.
+  // Anything that means the user has moved on: the hotkey, a new instruction, Review… or
+  // Resume. NOT Dismiss or Cancel since M27: those leave the list open while anything is still
+  // listed, and it closes when the last row goes (the `jobs` case below).
   | { type: "collapse" }
   // The pointer entered or left the pill's window.
   | { type: "hover"; inside: boolean; now: number }
@@ -257,6 +259,19 @@ function actionsOf(job: JobView): PillAction[] {
   return ["dismiss"];
 }
 
+// What "Dismiss all" acts on (M27): the rows LISTED right now that have ended and asked nothing
+// — done, failed, expired. Never a running, queued or waiting job: it would have to be
+// cancelled, and Dismiss all cancels nothing. Never an INTERRUPTED one: it may say "may or may
+// not have gone through", which is why it stays until dismissed on its own (§5c), and a bulk
+// button would let it go unread. Never a job past the list's cap: it is not on screen.
+const DISMISS_ALL_STATES: readonly string[] = ["done", "failed", "expired"];
+
+export function dismissAllTargets(items: readonly PillItem[]): string[] {
+  return items
+    .filter((item) => DISMISS_ALL_STATES.includes(item.state) && item.actions.includes("dismiss"))
+    .map((item) => item.id);
+}
+
 function countLabel(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
@@ -365,6 +380,7 @@ export function pillView(state: PillState): PillView {
     expanded: state.expanded && mode !== "hidden",
     muted: state.muted,
     items,
+    ...(state.expanded && dismissAllTargets(items).length > 0 ? { dismissAll: true } : {}),
     ...(state.expanded && state.contentHeight !== null ? { contentHeight: state.contentHeight } : {}),
     ...(mode !== "hidden" ? { labelOptions: options } : {}),
     ...(measured !== null && mode !== "hidden" ? { labelWidths: [...measured] } : {}),

@@ -129,12 +129,30 @@
         padding: 8px 10px;
       }
 
+      /* The list's own row: heading, "Dismiss all" (M27) and the chime toggle. STICKY: past the
+         panel's height ceiling the list scrolls — four rows are enough — and that is exactly
+         when Dismiss all is wanted. Unpinned, the header scrolled out of reach after 21 px
+         (measured: scripts/pill-dismiss-all-recon.cjs). -8px cancels the list's own top padding
+         so rows do not show through above it. Its background is OPAQUE (--surface's colour at
+         full alpha): at --surface's 0.96 the rows scrolling under it showed through (seen in the
+         recon's screenshot). */
       .header {
+        position: sticky;
+        top: -8px;
+        z-index: 1;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding-bottom: 6px;
+        gap: 8px;
+        margin-top: -8px;
+        padding: 8px 0 6px;
         border-bottom: 1px solid var(--line);
+        background: rgb(24, 24, 27);
+      }
+      .controls {
+        display: flex;
+        gap: 6px;
+        flex: 0 0 auto;
       }
       .heading {
         font-weight: 600;
@@ -194,6 +212,15 @@
       .action-review,
       .action-resume {
         border-color: var(--amber);
+      }
+
+      /* "Dismiss all" (M27), in the header beside the chime toggle, styled like it. */
+      .dismiss-all {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: transparent;
+        padding: 2px 8px;
+        color: var(--muted);
       }
     </style>
   </head>

@@ -38,6 +38,9 @@ export interface PillView {
   expanded: boolean;
   muted: boolean;
   items: PillItem[];
+  // Is "Dismiss all" offered beside the chime toggle in the open list (M27)? Only while the list is open
+  // with at least one done, failed or expired row in it. Absent: not offered.
+  dismissAll?: boolean;
   // A sentence shown for a moment (a resume that could not happen yet), or null/absent.
   notice?: string | null;
   // How tall the open list's content is, in CSS pixels, once the page has measured it and

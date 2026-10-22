@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { PillView } from "../../core/jobs/pillView.ts";
 import { ChimePlayer } from "../audio/chime.ts";
-import { ACTION_LABEL, measureLabels, measurePill, renderPill, reportMeasurements } from "./render.ts";
+import { ACTION_LABEL, DISMISS_ALL_LABEL, measureLabels, measurePill, renderPill, reportMeasurements } from "./render.ts";
 
 // What the pill actually DRAWS (M23). CLAUDE.md: a log line proves what the app decided, not
 // what the user saw — so this inspects the DOM the page ends up with, and clicks its buttons.
@@ -27,6 +28,7 @@ function draw(view: PillView) {
     onAction: (id, action) => calls.push(`action:${id}:${action}`),
     onExpand: (expanded) => calls.push(`expand:${expanded}`),
     onMute: (muted) => calls.push(`mute:${muted}`),
+    onDismissAll: () => calls.push("dismiss-all"),
   });
   const text = (selector: string): string[] =>
     [...root.querySelectorAll(selector)].map((node) => node.textContent ?? "");
@@ -69,7 +71,9 @@ describe("renderPill", () => {
 
   it("NO BUTTON SAYS APPROVE, SEND OR YES: the labels are fixed, and none of them is a decision", () => {
     expect(ACTION_LABEL).toEqual({ review: "Review…", resume: "Resume", cancel: "Cancel", dismiss: "Dismiss" });
-    const { root } = draw(VIEW);
+    // With "Dismiss all" offered too (M27), so its label is checked with the rest.
+    const { root } = draw({ ...VIEW, dismissAll: true });
+    expect(root.querySelector(".dismiss-all")).not.toBeNull();
     const words = [...root.querySelectorAll("button")].map((button) => (button.textContent ?? "").toLowerCase());
     for (const word of words) {
       expect(word).not.toMatch(/approve|send|yes|confirm|ok\b/);
@@ -125,11 +129,54 @@ describe("renderPill", () => {
 
   it("redrawing replaces what was there instead of adding to it", () => {
     const root = document.createElement("div");
-    const handlers = { onAction: () => undefined, onExpand: () => undefined, onMute: () => undefined };
+    const handlers = { onAction: () => undefined, onExpand: () => undefined, onMute: () => undefined, onDismissAll: () => undefined };
     renderPill(root, VIEW, handlers);
     renderPill(root, { ...VIEW, items: VIEW.items.slice(0, 1) }, handlers);
     expect(root.querySelectorAll(".row").length).toBe(1);
     expect(root.querySelectorAll(".summary").length).toBe(1);
+  });
+
+  it("'Dismiss all' (M27): beside the chime toggle in the list's header, only when main offers it, and its click carries nothing", () => {
+    const plain = draw(VIEW);
+    expect(plain.root.querySelector(".dismiss-all")).toBeNull();
+    // Not offered: the header holds the chime toggle alone, as before M27.
+    expect(plain.text(".list > .header .controls button")).toEqual(["Chime on"]);
+    const offered = draw({ ...VIEW, dismissAll: true });
+    expect(DISMISS_ALL_LABEL).toBe("Dismiss all");
+    // In the same row as the chime toggle, just before it — the list's first child, above the rows.
+    expect(offered.text(".list > .header .controls button")).toEqual([DISMISS_ALL_LABEL, "Chime on"]);
+    expect(offered.root.querySelector(".list")?.firstElementChild?.className).toBe("header");
+    expect(offered.root.querySelectorAll(".row .dismiss-all")).toHaveLength(0);
+    // Clicking it asks for Dismiss all and nothing else — not the chime beside it.
+    offered.click(".dismiss-all");
+    expect(offered.calls).toEqual(["dismiss-all"]);
+    // Never on a closed pill, whatever the view says.
+    expect(draw({ ...VIEW, expanded: false, dismissAll: true }).root.querySelector(".dismiss-all")).toBeNull();
+  });
+
+  // jsdom does no layout, so it cannot say whether the button stays on screen when the list
+  // scrolls — scripts/pill-dismiss-all-recon.cjs measures that in a real window. What jsdom CAN
+  // do is apply pill.html's own stylesheet: this pins the two properties that recon showed are
+  // load-bearing, so dropping either fails `npm test`, not only a script someone has to run.
+  it("the header holding Dismiss all and the chime toggle is PINNED and OPAQUE (pill.html's own stylesheet)", () => {
+    // From the repo root, where the suite runs (as tests/nativeTarget.test.ts reads package.json):
+    // under jsdom, import.meta.url is not a file: URL.
+    const html = readFileSync("src/renderer/pill.html", "utf8");
+    const sheet = document.createElement("style");
+    sheet.textContent = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1] ?? "";
+    document.head.append(sheet);
+    try {
+      const { root } = draw({ ...VIEW, dismissAll: true });
+      const header = root.querySelector(".list > .header") as HTMLElement;
+      expect(header.querySelector(".dismiss-all")).not.toBeNull();
+      const style = getComputedStyle(header);
+      expect(style.position).toBe("sticky");
+      expect(style.top).toBe("-8px");
+      // Opaque: rows scrolling under it showed through at --surface's 0.96 (recon screenshot).
+      expect(style.backgroundColor).toBe("rgb(24, 24, 27)");
+    } finally {
+      sheet.remove();
+    }
   });
 
   it("shows a notice when there is one, and nothing when there is not", () => {

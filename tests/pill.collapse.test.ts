@@ -416,26 +416,34 @@ describe("PillController: what closes an open list", () => {
     expect(w.last()?.expanded).toBe(false);
   });
 
-  it.each(["review", "cancel"] as const)("a row's %s button closes it", async (action) => {
+  // RE-JUSTIFIED AT M27. Was it.each(["review", "cancel"]) "a row's button closes it", with one
+  // job — so for Cancel it could not tell "the button closes the list" from "the only row went".
+  // Review… still closes it on purpose: asserted with the waiting job still listed afterwards
+  // (resumed, running), so only the rule can have closed it. Cancel's cases are in
+  // tests/pill.dismiss.test.ts, with the precondition that says which row it was.
+  it("a row's Review… button closes it, with the row still listed", async () => {
     const w = await world();
     const id = await w.waitingJob();
     await w.pageLoaded();
     w.controller.onExpand(true);
     expect(w.controller.view().expanded).toBe(true);
-    w.controller.onAction(id, action);
-    // Asked of the controller, not of the last view sent to the page: after Cancel the job
-    // leaves the pill at once and the window is hidden, so nothing more is sent.
+    w.controller.onAction(id, "review");
+    expect(w.controller.view().items.map((item) => item.id)).toEqual([id]);
     expect(w.controller.view().expanded).toBe(false);
   });
 
-  it("Dismiss closes it (with another job still listed, so the pill stays)", async () => {
+  // RE-JUSTIFIED AT M27. Was "Dismiss closes it (with another job still listed, so the pill
+  // stays)" — M26's first live finding, pinned. The rule is reversed: with another job still
+  // listed, the list STAYS OPEN, and is sent to the page open.
+  it("Dismiss with another job still listed leaves it open (M27)", async () => {
     const w = await world();
     await w.waitingJob();
     const failed = w.failedJob("It broke.");
     await w.pageLoaded();
     w.controller.onExpand(true);
     w.controller.onAction(failed, "dismiss");
-    expect(w.last()).toMatchObject({ mode: "needs-you", expanded: false });
+    expect(w.last()).toMatchObject({ mode: "needs-you", expanded: true });
+    expect(w.last()?.items).toHaveLength(1);
   });
 
   it("Resume closes it", async () => {

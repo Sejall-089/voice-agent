@@ -11,6 +11,7 @@ if (!root) {
 window.pill.onView((view) => {
   renderPill(root, view, {
     onAction: (id, action) => window.pill.action(id, action),
+    onDismissAll: () => window.pill.dismissAll(),
     onExpand: (expanded) => window.pill.expand(expanded),
     onMute: (muted) => window.pill.mute(muted),
   });

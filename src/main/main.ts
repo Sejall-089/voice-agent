@@ -677,6 +677,9 @@ app.whenReady().then(() => {
   ipcMain.on("pill:action", (event, id: unknown, action: unknown) => {
     if (fromPill(event)) pillController.onAction(id, action);
   });
+  ipcMain.on("pill:dismiss-all", (event) => {
+    if (fromPill(event)) pillController.onDismissAll();
+  });
   ipcMain.on("pill:expand", (event, expanded: unknown) => {
     if (fromPill(event)) pillController.onExpand(expanded);
   });

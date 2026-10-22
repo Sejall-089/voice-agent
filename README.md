@@ -506,7 +506,12 @@ hotkey again, it carries on in the background while you say the next thing.
   **chime** plays.
 - **Click the pill** to see the list. **Review…** opens the same confirm dialog as always — the
   pill itself never approves anything. **Resume** brings back a job that needs your screen.
-  You can cancel a job, dismiss a finished one, or mute the chime there. Pressing the hotkey
+  You can cancel a job, dismiss a finished one, or mute the chime there. Dismiss and Cancel
+  leave the list open so you can clear several in a row; it closes when the last one goes.
+  **Dismiss all**, at the top of the list next to the chime toggle (both stay in view when the
+  list scrolls), clears every finished, failed or expired job
+  listed — never a running or waiting one, and never one marked *interrupted*, which you
+  dismiss on its own. Pressing the hotkey
   while that dialog is up says *"There's a confirmation waiting"* in the bar; the line goes
   away once the dialog is answered, or as soon as you run something new from the bar.
 - **A finished background job stays in the pill until you've seen it** — green, "N done",
@@ -998,7 +1003,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (2957 tests across 133 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (2975 tests across 134 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1009,10 +1014,12 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M27 (three pill fixes from M26's live findings) is in progress.** Fix C is built: the label
+**M27 (three pill fixes from M26's live findings) is in progress.** Fix C is in: the label
 counts every group present ("1 running · 2 done"), the pill widens to fit, and past a cap it
-says "+N more". Dismiss keeping the list open, and an outside click closing it, are next.
-**2957 tests green across 133 files, 96 skipped.** See `spec.md` §9 (M27).
+says "+N more". Fix A is built: Dismiss and Cancel keep the list open while anything is left in
+it, and "Dismiss all" clears the finished, failed and expired jobs listed. An outside click
+closing the list is next. **2975 tests green across 134 files, 96 skipped.** See `spec.md` §9
+(M27).
 
 **M26 (a finished background job stays in the pill until seen) is closed (22 Oct 2026), after
 a live run by a person, with named gaps.** M25's finding is fixed: a done job sent to the pill

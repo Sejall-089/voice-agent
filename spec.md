@@ -1414,10 +1414,15 @@ words only.
 **The list always starts collapsed** (fixed 2026-10-13, after a live run in which a list opened
 once stayed open for every later instruction). Whether it is open is one in-memory flag in the
 pill's state — never a setting, never persisted. It becomes true only on a click of the pill,
-and goes back to false on: a second click; any row's button that took effect; an accepted
+and goes back to false on: a second click; **Review…** or **Resume** that took effect (a
+dialog or the screen is about to need the user); an accepted
 press of the instruction or dictation hotkey (the same hook that detaches the attached job,
 `main/jobs/startingSomethingElse.ts`); ten seconds with the pointer off the pill's window; and
-the pill emptying. Nothing about a job — a new one, one that starts waiting, one that fails —
+the pill emptying. **Dismiss, Cancel and Dismiss all do not close it** (M27): it stays open
+while anything is still listed and closes when the last row goes — the pill emptying. Until M27
+every row button closed it, so clearing several done jobs meant reopening the pill for each
+(M26's first live finding). A Cancel on a job mid-step leaves its row, still running, until the
+step ends (§5c, States); the list stays open with it. Nothing about a job — a new one, one that starts waiting, one that fails —
 opens it. The window cannot take focus, so there is no blur: the page reports the pointer
 entering and leaving, and once a second main also asks the OS where the pointer is, because
 the window is resized under it and a `mouseleave` was measured not arriving.
@@ -1434,6 +1439,22 @@ page's code; a row's title is the user's instruction and its detail may be a too
 and both are drawn as text. Everything the page sends is checked again in main
 (`pill/PillController.ts`): an unknown action, an unknown job, or an action that row is not
 currently offering is dropped.
+
+**Dismiss all** (M27), in the list's header row beside the chime toggle, dismisses every row **listed** that is
+**done, failed or expired** (`dismissAllTargets` in `core/jobs/pill.ts`) — never a running,
+queued or waiting job (it cancels nothing), never an **interrupted** one (it may say "may or
+may not have gone through", which is why it stays until dismissed on its own), and never a job
+past the list's cap of ten (not on screen; it is listed next). It is offered only while the
+list is open with at least one such row; the page sends no arguments (`pill:dismiss-all`), and
+main works the rows out from what it is showing at the press, so a press after the list closed,
+or with nothing ended listed, is dropped. The **header row is sticky and opaque**: past the
+panel's 440 px ceiling the list scrolls, which is when Dismiss all is most wanted, and the header
+— heading, Dismiss all, chime toggle — stays pinned to the top of what is visible, with rows
+scrolling under it. Measured by `scripts/pill-dismiss-all-recon.cjs` (six rows, at the top and
+scrolled to the bottom): unpinned, the header was out of reach after 21 px of scroll; at
+`--surface`'s 0.96 alpha the rows showed through it. The chime toggle had been scrolling away
+since M23 for the same reason. `render.test.ts` pins both properties from `pill.html`'s own
+stylesheet.
 
 Only **background** jobs appear — one that was detached at some point, or, after a restart,
 one the app closed on while a step was running even if it never left the bar (its write-ahead
@@ -4275,7 +4296,7 @@ Post-v0:
       rule built when a done job lasted 8 s. One commit per fix, in this order: C (the label),
       A (Dismiss keeps the list open, plus "Dismiss all"), B (an outside click closes the list).
 
-      **Fix C — the label shows every group present (M26 finding 3).** Built. The rule is in §5c,
+      **Fix C — the label shows every group present (M26 finding 3).** Committed (6aa77f4). The rule is in §5c,
       "The status pill": every group in priority order ("1 running · 2 done"), colour and pulse
       from the top group, the collapsed pill widened to fit up to `PILL_LABEL_MAX_WIDTH` (348
       px), past it the top groups and "+N more" (jobs left off). `core/jobs/pill.ts` builds the
@@ -4310,6 +4331,61 @@ Post-v0:
       done" at 232 (160 measured), three groups at 249, four at 330, four with double-digit
       counts at exactly 348, and triple-digit counts as "123 need you · 456 didn't finish · +889
       more" at 313.
+
+      **Fix A — Dismiss no longer closes the list; "Dismiss all" (M26 finding 1).** Built. The
+      rule is in §5c, "The status pill": Dismiss, Cancel and Dismiss all leave the list open while
+      anything is listed, and it closes when the last row goes; Review… and Resume still close it.
+      `PillController.onAction` collapses only for those two; the closing on the last row is the
+      reducer's existing "nothing left to show". Dismiss all: `dismissAllTargets` (core),
+      `PillView.dismissAll`, `PillController.onDismissAll`, IPC `pill:dismiss-all` with no
+      arguments, and the button in the list's header beside the chime toggle, the header made
+      sticky and opaque in `pill.html`. Decision taken here: a Cancel on the only row
+      while it is mid-step leaves the list open, showing it running, until the step ends — the
+      row has not gone.
+
+      Tests: `tests/pill.dismiss.test.ts` (new; the real manager and controller, interrupted jobs
+      made by a real restart on a shared store) — dismiss one of four and the list stays open,
+      down to the last; dismissing the last closes it and the next job arrives collapsed; Cancel
+      on a row that is not the last stays open, on the last closes (with the precondition that it
+      was the only row), mid-step stays until the step ends; Review… and Resume still close it
+      with other rows listed; dropped presses and a refused Resume (the user busy) change no job
+      and leave it open, with the contrast that the same Resume closes it once free; Dismiss all
+      offered only when open with an ended row, clears done/failed/expired and leaves running,
+      needs-you and interrupted with no cancel requested of any (asked of the manager, because a
+      running job told to cancel stays "running"), closes the list when nothing is left, covers
+      only the ten listed and not the two past the cap, is dropped when closed or with nothing
+      ended listed, and covers what is listed at the press, not at the draw. `render.test.ts`:
+      the button beside the chime toggle only when offered, its click carries nothing, the header
+      sticky and opaque read from `pill.html`'s own stylesheet, its label in the
+      no-approve-words check. **Re-justified:** `pill.collapse.test.ts`'s `it.each(["review",
+      "cancel"])` "a row's button closes it" had one job, so for Cancel it could not tell the old
+      rule from the last row going — it is now Review… alone, asserted with the row still
+      listed, and Cancel's cases moved to the new file with their precondition; "Dismiss closes
+      it" (the finding, pinned) is reversed to "stays open". `scripts/ask-recon/pill-collapse.ts`
+      step 6 relabelled: after Dismiss with a row left, the list is expected open.
+
+      Mutations (each with the Edit tool, each reverted): close on any row button again — 4
+      failed; Dismiss all includes interrupted — 2 failed; Dismiss all cancels the live rows — 1
+      failed, through the needs-you row only; **narrowed to cancelling only running rows it would
+      have survived** (a cancelled running job stays "running"), so the test now asks
+      `isCancelRequested` of every row left and the narrowed mutation failed it; Review… no
+      longer closing — 3 failed.
+
+      Real window (`scripts/pill-dismiss-all-recon.cjs`, built page, a DOM click, no pointer;
+      ends PASS or FAIL, and refuses to PASS when the list did not scroll):
+      **first found the button under the scroll** when it sat in a foot under the last row —
+      four rows measure 461 px against the 440 px ceiling, and it was neither visible in the list
+      nor what a click at its centre hits; a sticky foot fixed that. **Then moved beside the chime
+      toggle (2026-10-22, at the user's request), it found the header itself scrolled out of
+      reach** after 21 px — the chime toggle had been doing so since M23. The header was made
+      sticky; the recon's screenshot then showed rows through it at `--surface`'s 0.96 alpha, so
+      it was made opaque. Now, with six rows at the top and scrolled 152 px to the bottom, Dismiss
+      all and the chime toggle are visible and are what a click at their centre hits; the press
+      reaches main as `pill:dismiss-all` with no arguments; a view without `dismissAll` draws no
+      button. **Mutation: the header unpinned (`position: static`)** — the recon on that build
+      reported FAIL (visible at the top, not scrolled to the bottom), and the jsdom suite did
+      not notice (no layout), so `render.test.ts` now reads `pill.html`'s stylesheet and pins
+      sticky, `top: -8px` and the opaque background; it failed on the same mutation.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M26's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

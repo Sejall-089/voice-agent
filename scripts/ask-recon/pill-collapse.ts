@@ -245,12 +245,13 @@ void app.whenReady().then(async () => {
   log(`   from the page: ${received.filter((r) => r.startsWith("hover")).join(" ")}`);
   await shot("collapse-5-after-idle");
 
-  // --- A row's button closes it. ---
+  // --- Dismiss with another row still listed: since M27 the list STAYS OPEN (until M27 every
+  // row button closed it). It closes when its last row goes — step 7. ---
   await clickPill();
   const dismiss = await centreOf(".action-dismiss");
   mouse(dismiss.x, dismiss.y, true);
   await sleep(700);
-  log(`6. after a real click on "Dismiss":      ${await state()}  label=${JSON.stringify(controller.view().label)}`);
+  log(`6. after a real click on "Dismiss" (expect still open): ${await state()}  label=${JSON.stringify(controller.view().label)}`);
 
   // --- How long a job stays: cancelled goes at once; failed stays until seen, then an hour. ---
   manager.cancel(waiting);

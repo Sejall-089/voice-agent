@@ -6,7 +6,7 @@ import type { PillView } from "../core/jobs/pillView.ts";
 // business with the microphone, the speaker or the instruction input, and a window that is on
 // screen while other things happen should be holding as little as possible.
 //
-// One channel in, six out. Every outgoing message is a REQUEST that main checks again
+// One channel in, seven out. Every outgoing message is a REQUEST that main checks again
 // (PillController): the page is handed strings and booleans and cannot approve, send or run
 // anything by sending one.
 const pill = {
@@ -20,6 +20,11 @@ const pill = {
   // can answer it.
   action(id: string, action: string): void {
     ipcRenderer.send("pill:action", id, action);
+  },
+  // pill → main: "Dismiss all", beside the chime toggle (M27). No arguments: main decides which
+  // rows it covers from what it is showing, so nothing the page sends can widen it.
+  dismissAll(): void {
+    ipcRenderer.send("pill:dismiss-all");
   },
   // pill → main: open or close the list.
   expand(expanded: boolean): void {

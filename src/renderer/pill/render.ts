@@ -13,6 +13,7 @@ import type { PillAction, PillView } from "../../core/jobs/pillView.ts";
 
 export interface PillHandlers {
   onAction(id: string, action: PillAction): void;
+  onDismissAll(): void;
   onExpand(expanded: boolean): void;
   onMute(muted: boolean): void;
 }
@@ -24,6 +25,9 @@ export const ACTION_LABEL: Readonly<Record<PillAction, string>> = {
   cancel: "Cancel",
   dismiss: "Dismiss",
 };
+
+// The list's own button, beside the chime toggle (M27). Fixed here like the row buttons.
+export const DISMISS_ALL_LABEL = "Dismiss all";
 
 // The pill's own height and the gap above it (pill.html's stylesheet): what the window needs
 // besides the list.
@@ -99,14 +103,27 @@ export function renderPill(root: HTMLElement, view: PillView, handlers: PillHand
   if (view.expanded) {
     const list = el(doc, "div", "list");
 
+    // The list's own row: its heading, and its own buttons — "Dismiss all" (M27) when main
+    // offers it, then the chime toggle. Pinned to the top of the list by the stylesheet, so both
+    // stay reachable however far the rows are scrolled.
     const header = el(doc, "div", "header");
     header.append(el(doc, "span", "heading", "Background jobs"));
+    const controls = el(doc, "div", "controls");
+    // Only when main offers it: it covers the done, failed and expired rows listed, and main
+    // decides which those are — the page does not tell it.
+    if (view.dismissAll === true) {
+      const all = el(doc, "button", "dismiss-all", DISMISS_ALL_LABEL);
+      all.type = "button";
+      all.addEventListener("click", () => handlers.onDismissAll());
+      controls.append(all);
+    }
     const mute = el(doc, "button", "mute", view.muted ? "Chime off" : "Chime on");
     mute.type = "button";
     mute.setAttribute("aria-pressed", String(view.muted));
     mute.title = view.muted ? "The needs-you chime is muted" : "Mute the needs-you chime";
     mute.addEventListener("click", () => handlers.onMute(!view.muted));
-    header.append(mute);
+    controls.append(mute);
+    header.append(controls);
     list.append(header);
 
     if (typeof view.notice === "string" && view.notice.length > 0) {
