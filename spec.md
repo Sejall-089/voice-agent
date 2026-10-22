@@ -1293,7 +1293,12 @@ queued / running / needs-you ─► interrupted   (only at startup)
   handler is never called. Once a job has been resumed the clock no longer applies: the
   dialog's answer decides.
 - **Cancel**: a queued or waiting job stops at once. A job mid-step is left to finish that
-  step — a handler cannot be un-called — and nothing after it starts.
+  step — a handler cannot be un-called — and nothing after it starts. **Until it does, its row
+  in the pill says "Cancelling — finishing step N of M"** (or "Cancelling — stops before its
+  first step" while it is still planning) **and offers no second Cancel** (M27). The pill's
+  label and the rest of the list are unchanged: it still counts as running. Until M27 the row
+  went on saying "Running" and offered Cancel again, so the press seemed to do nothing. The
+  pending cancel is `JobView.cancelRequested`, in memory only.
 - **Restart**: jobs are rows in the `jobs` table of the same SQLite file. On startup every live
   job becomes `interrupted` and is **never resumed**. A marker written immediately before each
   handler call and cleared after it is what lets the record say *"it may or may not have gone
@@ -4332,7 +4337,8 @@ Post-v0:
       counts at exactly 348, and triple-digit counts as "123 need you · 456 didn't finish · +889
       more" at 313.
 
-      **Fix A — Dismiss no longer closes the list; "Dismiss all" (M26 finding 1).** Built. The
+      **Fix A — Dismiss no longer closes the list; "Dismiss all" (M26 finding 1).** Committed
+      (6d5029d). The
       rule is in §5c, "The status pill": Dismiss, Cancel and Dismiss all leave the list open while
       anything is listed, and it closes when the last row goes; Review… and Resume still close it.
       `PillController.onAction` collapses only for those two; the closing on the last row is the
@@ -4386,6 +4392,22 @@ Post-v0:
       reported FAIL (visible at the top, not scrolled to the bottom), and the jsdom suite did
       not notice (no layout), so `render.test.ts` now reads `pill.html`'s stylesheet and pins
       sticky, `top: -8px` and the opaque background; it failed on the same mutation.
+
+      **A cancelled job shows Cancelling (found while building fix A).** Built. Read through the
+      real manager and controller: after Cancel on a job mid-step, its row still said "Running —
+      Step 1 of 2 · summarize", the label "1 running", and Cancel was offered again; a second
+      press did nothing visible. Nothing was stuck — the next step is refused and the runner ends
+      the job — but nothing said the press had registered. Now `JobView` carries
+      `cancelRequested` (in memory only; the stored `JobRecord` is unchanged), and the row says
+      "Cancelling — finishing step N of M", or "Cancelling — stops before its first step" while
+      still planning, with no buttons. Label, mode and the other rows unchanged (§5c, States).
+      Tests (`pill.dismiss.test.ts`, real manager and controller): the contrast (not cancelled:
+      Running, Cancel offered); mid-step Cancel shows the wording, no buttons, the label "1
+      running · 1 done" and every other row exactly as before, the list open; a second press is
+      dropped and changes nothing; the step ending refuses step 2 and, ended by the runner, the
+      row goes and the list closes; still planning shows the planning wording and admit refuses;
+      a waiting job cancels at once and is never drawn as Cancelling. Mutations (Edit, reverted):
+      the field dropped from the view — 3 failed; the second Cancel kept — 3 failed.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M26's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

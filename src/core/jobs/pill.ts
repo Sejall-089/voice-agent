@@ -243,6 +243,14 @@ function detailOf(job: JobView): string {
     case "queued":
       return "Queued — starts when a running job finishes";
     case "running":
+      // CANCELLING (M27): cancel was pressed, but a step in flight finishes first (§5c). Until
+      // M27 the row went on saying "Running" and offered Cancel again, so a press seemed to do
+      // nothing. A job still planning has no step yet: it stops before its first one.
+      if (job.cancelRequested) {
+        return job.step > 0
+          ? `Cancelling — finishing step ${job.step} of ${job.total}`
+          : "Cancelling — stops before its first step";
+      }
       return at.length > 0 ? `Running — ${at}` : "Working…";
     default: {
       const said = job.result ?? job.lines[job.lines.length - 1] ?? "";
@@ -255,7 +263,8 @@ function actionsOf(job: JobView): PillAction[] {
   if (job.state === "needs-you") {
     return [job.waitingFor === "foreground-only" ? "resume" : "review", "cancel"];
   }
-  if (job.state === "running" || job.state === "queued") return ["cancel"];
+  // No second Cancel on a job already cancelling (M27): there is nothing more it could do.
+  if (job.state === "running" || job.state === "queued") return job.cancelRequested ? [] : ["cancel"];
   return ["dismiss"];
 }
 

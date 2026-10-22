@@ -52,6 +52,10 @@ export interface JobView {
   updatedAt: number;
   // When the user first saw it in the pill's open list, or null.
   seenAt: number | null;
+  // The user asked to cancel it and it has not ended yet (M27): a job mid-step finishes that
+  // step first (`cancel`), and until it does the pill says so instead of "Running". In memory
+  // only, like `lines`: a job is never resumed after a restart, so nothing needs it saved.
+  cancelRequested: boolean;
 }
 
 // What moved a job off the bar (M25), carried on the "detached" change and written to the log
@@ -682,5 +686,6 @@ function view(job: Live): JobView {
     lines: [...job.lines],
     updatedAt: job.updatedAt,
     seenAt: job.seenAt,
+    cancelRequested: job.cancelRequested,
   };
 }

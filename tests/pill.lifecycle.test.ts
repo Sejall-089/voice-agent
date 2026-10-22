@@ -53,6 +53,7 @@ const job = (state: JobView["state"], over: Partial<JobView> = {}): JobView => (
   lines: [],
   updatedAt: T0,
   seenAt: null,
+  cancelRequested: false,
   ...over,
 });
 const at = (jobs: JobView[], now: number): PillState =>

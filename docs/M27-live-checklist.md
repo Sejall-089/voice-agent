@@ -2,7 +2,8 @@
 
 > **NOT RUN YET.** Written before the live pass. This file grows one section per fix as each is
 > built: section 1 is fix C (the label), section 2 fix A (Dismiss keeps the list open, "Dismiss
-> all"). The section for fix B (an outside click closes the list) is added with that fix.
+> all"), section 3 the Cancelling row. The section for fix B (an outside click closes the list)
+> is added with that fix.
 >
 > M27 fixes the three status-pill findings from M26's live run (`spec.md` §9, M27; §5c, "The
 > status pill"). Everything a test or script can show is already shown and listed under
@@ -85,3 +86,22 @@ click the pill to open the list.
   scrolled 152 px to the bottom, Dismiss all and the chime toggle are visible and are what a
   click at their centre hits — PASS. With the header unpinned (a deliberate mutation) the same
   check reported FAIL. The press reaches main as `pill:dismiss-all` with no arguments.
+
+## 3. A cancelled job says Cancelling until its step ends
+
+Something with a step that takes a few seconds works best: a summary of a long copied text, or a
+two-step chain ("summarize this and post it to Slack"), detached by clicking outside the bar.
+
+- [ ] **3.1** Open the list while it is running and press **Cancel**. The row changes at once to
+      **"Cancelling — finishing step 1 of 2"** (or "… of 1"), and has **no Cancel button** any
+      more. The pill's label still counts it as running; any other rows are unchanged.
+- [ ] **3.2** Wait: when the step finishes, the row **goes**, and nothing after that step runs
+      (no Slack confirm appears). If it was the only row, the list closes.
+- [ ] **3.3** Press Cancel on a job **waiting for your OK** instead: it goes at once and is never
+      shown as Cancelling.
+
+**Machine-verified, not watched:** the wording for mid-step and still-planning, no second
+Cancel, a second press dropped, label and other rows unchanged, the next step refused, a waiting
+job never drawn as Cancelling — `tests/pill.dismiss.test.ts` against the real job manager and
+pill controller. Mutations: the field dropped from the view (3 failed); the second Cancel kept
+(3 failed).

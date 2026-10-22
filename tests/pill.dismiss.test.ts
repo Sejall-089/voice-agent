@@ -346,3 +346,91 @@ describe("Dismiss all (M27)", () => {
     expect(w.manager.get(id)).toMatchObject({ state: "cancelled", acknowledged: false });
   });
 });
+
+describe("a cancelled job shows Cancelling until its step ends (M27)", () => {
+  // A detached job inside step 1 of 2, as the planner would leave it mid-handler.
+  const midStep = async (w: ReturnType<typeof world>) => {
+    const id = w.running("summarize then post");
+    const gate = w.manager.gateFor(id);
+    await gate.admit({ tools: ["summarize", "sendMessage"], statusOnly: false });
+    await gate.enterStep({ tool: "summarize", index: 1, total: 2, foregroundOnly: false });
+    return { id, gate };
+  };
+  const row = (w: ReturnType<typeof world>, id: string) => w.controller.view().items.find((item) => item.id === id);
+
+  it("THE CONTRAST: a job nobody cancelled says Running and offers Cancel", async () => {
+    const w = world();
+    const { id } = await midStep(w);
+    w.start().onExpand(true);
+    expect(row(w, id)).toMatchObject({ detail: "Running — Step 1 of 2 · summarize", actions: ["cancel"] });
+    expect(w.manager.get(id)?.cancelRequested).toBe(false);
+  });
+
+  it("Cancel mid-step: the row says 'Cancelling — finishing step 1 of 2' and offers no second Cancel; the label and the list are otherwise unchanged", async () => {
+    const w = world();
+    const done = w.ended("done");
+    const { id } = await midStep(w);
+    w.start().onExpand(true);
+    const before = w.controller.view();
+    w.controller.onAction(id, "cancel");
+
+    // Still running — a handler cannot be un-called — and the view says a cancel is pending.
+    expect(w.manager.get(id)).toMatchObject({ state: "running", cancelRequested: true });
+    expect(row(w, id)).toMatchObject({ state: "running", detail: "Cancelling — finishing step 1 of 2", actions: [] });
+    // Otherwise unchanged: same label, same mode, same rows, the done one untouched, still open.
+    const after = w.controller.view();
+    expect(after.label).toBe(before.label);
+    expect(after.label).toBe("1 running · 1 done");
+    expect(after.mode).toBe(before.mode);
+    expect(after.items.map((item) => item.id).sort()).toEqual([done, id].sort());
+    expect(row(w, done)).toEqual(before.items.find((item) => item.id === done));
+    expect(w.open()).toBe(true);
+  });
+
+  it("a second Cancel press on a cancelling row is DROPPED: not offered, nothing changes", async () => {
+    const w = world();
+    const { id } = await midStep(w);
+    w.start().onExpand(true);
+    w.controller.onAction(id, "cancel");
+    const viewsBefore = JSON.stringify(w.manager.views());
+    w.controller.onAction(id, "cancel");
+    expect(JSON.stringify(w.manager.views())).toBe(viewsBefore);
+    expect(w.lines.at(-1)).toMatch(/action dropped: "cancel" is not offered by this row \(running\)/);
+  });
+
+  it("when the step ends, the job stops before the next one and leaves the pill — the list closes with its last row", async () => {
+    const w = world();
+    const { id, gate } = await midStep(w);
+    w.start().onExpand(true);
+    w.controller.onAction(id, "cancel");
+    // The planner asks to enter step 2 and is told no; the job runner then ends it as cancelled.
+    await expect(gate.enterStep({ tool: "sendMessage", index: 2, total: 2, foregroundOnly: false })).resolves.toBe("cancelled");
+    w.manager.finish(id, "cancelled", null);
+    expect(w.manager.get(id)?.state).toBe("cancelled");
+    expect(row(w, id)).toBeUndefined();
+    expect(w.open()).toBe(false);
+  });
+
+  it("cancelled while still PLANNING (no step yet): 'Cancelling — stops before its first step', and it never enters one", async () => {
+    const w = world();
+    const id = w.running("summarize this");
+    w.start().onExpand(true);
+    w.controller.onAction(id, "cancel");
+    expect(row(w, id)).toMatchObject({ detail: "Cancelling — stops before its first step", actions: [] });
+    await expect(w.manager.gateFor(id).admit({ tools: ["summarize"], statusOnly: false })).resolves.toBe("cancelled");
+  });
+
+  it("a waiting job cancels at once and is never shown as Cancelling", async () => {
+    const w = world();
+    w.ended("done");
+    const id = await w.waiting();
+    w.start().onExpand(true);
+    const drawn: string[] = [];
+    const watch = w.views.length;
+    w.controller.onAction(id, "cancel");
+    for (const view of w.views.slice(watch)) for (const item of view.items) drawn.push(item.detail);
+    expect(drawn.some((detail) => detail.startsWith("Cancelling"))).toBe(false);
+    expect(w.manager.get(id)?.state).toBe("cancelled");
+    expect(row(w, id)).toBeUndefined();
+  });
+});
