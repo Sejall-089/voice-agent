@@ -1021,16 +1021,17 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M27 (three pill fixes from M26's live findings) is in progress.** Fix C is in: the label
-counts every group present ("1 running · 2 done"), the pill widens to fit, and past a cap it
-says "+N more". Fix A is in: Dismiss and Cancel keep the list open while anything is left in
-it, and "Dismiss all" clears the finished, failed and expired jobs listed. A job cancelled
-mid-step now says "Cancelling — finishing step N of M" until it stops. Fix B is built: a click
-anywhere outside the pill closes its open list. Fix B is in, and a follow-up from a live run is
-built: a Cancel that came too late says so, and a job cancelled after it had done something stays
-in the pill with what it did. The live checklist (`docs/M27-live-checklist.md`) has not been run
-yet. **3021 tests green across 136 files, 96 skipped.** See `spec.md` §9
-(M27).
+**M27 (three pill fixes from M26's live findings) is closed (23 Oct 2026), after a live run by a
+person, with named gaps.** The label counts every group present ("1 running · 2 done") and the
+pill widens to fit; Dismiss and Cancel keep the list open, and "Dismiss all" sits beside the
+chime toggle; a click anywhere outside the pill closes its open list. Added along the way: a job
+cancelled mid-step says "Cancelling — finishing step N of M"; a Cancel that came too late says
+so; a job cancelled after it had done something stays in the pill with what it did. A person
+watched 10 of the checklist's 26 boxes; the rest are covered by tests or scripts against real
+windows. One finding is **not fixed**, under investigation: with clipboard text selected, "create
+a linear issue and send to fun" planned an extra "summarize the clipboard" step nobody asked
+for. **3021 tests green across 136 files, 96 skipped.** See `docs/M27-live-checklist.md` and
+`spec.md` §9 (M27).
 
 **M26 (a finished background job stays in the pill until seen) is closed (22 Oct 2026), after
 a live run by a person, with named gaps.** M25's finding is fixed: a done job sent to the pill

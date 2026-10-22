@@ -732,6 +732,14 @@ flowchart LR
 - **The pill** draws a pure reducer's view (`core/jobs/pill.ts`) and cannot take focus; every
   action it sends is checked again in main. A failed or finished job stays in it until the user
   has opened the list with that job in it (`seen_at`, saved with the job; M26 for done jobs).
+  Since M27 its label counts every group present, and a job cancelled after a step ran is shown
+  too (`steps_run`, saved with the job); one cancelled before any step is not.
+  **Outside clicks (M27):** because it never takes focus it never blurs, so while its list is
+  open — and only then — `WindowsPointerWatcher` (`main/shell/`, behind `PointerPressSource`; a
+  persistent PowerShell host like the input injector's) samples the mouse buttons every 50 ms,
+  and `PillController` closes the list on a press outside the pill's bounds. The press rule
+  (first read discarded, both `GetAsyncKeyState` bits) is `judgeSample`, in TypeScript. If the
+  helper cannot start, the list works as before: it closes 10 s after the pointer leaves.
   **The chime** waits for the microphone and the
   app's own voice.
 - **Restart:** live jobs become `interrupted` and are never resumed; a write-ahead marker around

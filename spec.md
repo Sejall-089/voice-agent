@@ -4349,9 +4349,14 @@ Post-v0:
       `DONE_SEEN_CLEAR_MS` (one minute) is a first guess, named so it can be tuned; and the three
       findings above.
 
-- [ ] **M27 — three pill fixes from M26's live findings.** In progress. Each comes from an M23
-      rule built when a done job lasted 8 s. One commit per fix, in this order: C (the label),
-      A (Dismiss keeps the list open, plus "Dismiss all"), B (an outside click closes the list).
+- [x] **M27 — three pill fixes from M26's live findings.** **Closed 2026-10-23, after a live run
+      by a person (10 boxes ticked, 16 open — `docs/M27-live-checklist.md`), with named gaps and
+      one finding not fixed (plan choice, under investigation).** The close-out record is at the
+      end of this entry. Each fix comes from an M23 rule built when a done job lasted 8 s. One
+      commit per fix, in this order: C (the label), A (Dismiss keeps the list open, plus "Dismiss
+      all"), B (an outside click closes the list); added during the milestone and committed
+      separately: the Cancelling row (d5b90e0), and a live finding's follow-up — a Cancel that
+      came too late, and a job cancelled after a step ran (c698d04).
 
       **Fix C — the label shows every group present (M26 finding 3).** Committed (6aa77f4). The rule is in §5c,
       "The status pill": every group in priority order ("1 running · 2 done"), colour and pulse
@@ -4552,8 +4557,67 @@ Post-v0:
       in-memory store's restore clause dropped (M26's survivor shape) — 1 failed, its
       `InMemoryJobStore` case.
 
+      **Close-out record (2026-10-23).** Plain `npm test` (the dev app closed, SQLite rebuilt for
+      node — the first plain run of M27; every run during the build used a scratch SQLite copy
+      because the dev app held the real one): **3021 passed across 136 files, 96 skipped** (the
+      opt-in real-model evals and real-Piper check). Both typechecks clean. Eval skipped (not run
+      against the real model — no M27 change routes through the model).
+
+      **Mutation table** (each with the Edit tool, each reverted, recorded per fix above):
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Label counts every group (C) | top group only | 18 tests |
+      | Colour from the top group (C) | colour from the last group | 6 |
+      | A measurement applies only to the labels shown (C) | label check removed | **survived first**; test fixed to send as many widths, then 1 |
+      | Dismiss/Cancel keep the list open (A) | close on any row button | 4 |
+      | Review… still closes (A) | Review… no longer closes | 3 |
+      | Dismiss all: ended rows only (A) | include interrupted | 2 |
+      | Dismiss all cancels nothing (A) | cancel running rows | **would have survived**; test now asks `isCancelRequested`, then 1 |
+      | Header pinned (A, the move) | `position: static` | the recon (FAIL); jsdom suite blind — stylesheet test added, then 1 |
+      | Cancelling row (d5b90e0) | field dropped / second Cancel kept | 3 / 3 |
+      | Outside press closes, inside does not (B) | inside as outside | 1 |
+      | Watch only while open (B) | keep polling after close | 3 |
+      | Helper failure is said (B) | swallowed silently | 2 |
+      | First read after watching is not a press (B) | discard removed | **survived** while in the C# string; rule moved to `judgeSample`, then 5 |
+      | Too-late wording (c698d04) | wording dropped | 2 |
+      | Cancelled after a step ran is shown (c698d04) | all cancelled hidden | 9 |
+      | Cancelled before any step stays hidden (c698d04) | shown | 12 |
+      | Restore rule, both stores (c698d04) | in-memory clause dropped | 1 |
+
+      **Live, by a person (10 of 26 ticked, 2026-10-23):** the label with mixed states (1.1,
+      1.2); dismissing several jobs in a row (2.1); Dismiss all beside the chime toggle, and with
+      a scrolling list (2.4, 2.5); the Cancelling row (3.1); an outside click on the desktop with a
+      real mouse and a touchpad (4.1); and the three cancel cases — too late (5.1), cancelled after
+      a step ran (5.3), cancelled before any step (5.5). **By tests or scripts only (16):** the
+      label widening (1.3; widths measured in a real window, the transition not watched), a
+      cancelled job not counted (1.4), the last row closing the list (2.2), Review… closing it
+      (2.3), Dismiss all leaving an interrupted job (2.6), the step-ends and waiting-job cancels
+      (3.2, 3.3), an outside click on another app and on the bar (4.2, 4.3; another window clicked
+      by the real-window scenario, the bar by tests only), inside clicks and the opening click
+      (4.4, 4.5; the real-window scenario), hotkeys and dialogs (4.6; F24 and a message box by
+      script — the dictation hotkey and Escape not run), right and middle clicks (4.7; the
+      prototype recon), clicks while closed (4.8), the last of two steps too late (5.2), Dismiss
+      all with a stopped-partway row (5.4).
+
+      **Findings.** (1) Found during M27 and fixed in it: a Cancel during a job's last step ended
+      it "done" with no word, and a job cancelled after a step ran vanished — fixed in c698d04,
+      re-watched (5.1, 5.3, 5.5). (2) **Not fixed in M27, under investigation:** "'create a linear
+      issue and send to fun' with clipboard text selected planned three steps, including
+      'Summarize the selected clipboard text', which the instruction did not ask for. Under
+      investigation." No M27 change touches planning; the cause is not known, and the next step
+      is to reproduce it — with the clipboard state recorded, as M19's plan-choice lesson says —
+      before anything is edited.
+
+      **Known gaps / open limits:** another program polling the mouse buttons can take the
+      "pressed since" bit, so a very short tap may then be missed; taps under ~15 ms rely on that
+      bit; a press in the pill window's transparent margin counts as inside; a pill on a
+      secondary display or with mixed scaling is not measured; the too-late wording is in memory
+      only (after a restart the row reads as plain done); `PILL_LABEL_MAX_WIDTH` (348 px) and
+      "+N more" were reached only by script; the 16 open boxes above.
+
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
-current count is in M26's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
+current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
 993, in five new files: 17 for the connection and failure classification
 (`mcpConnection.test.ts`), 16 for the config loader (`mcpConfig.test.ts`), 50 for the adapter,

@@ -5,9 +5,9 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-22): M0-M26 shipped; M26 closed 2026-10-22, with named gaps.**
+**Current status (as of 2026-10-23): M0-M27 shipped; M27 closed 2026-10-23, with named gaps.**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M26 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M27 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -38,8 +38,17 @@ only**. For M20 to M26 the status lives in `spec.md` (§9's entry for each, and 
   live run by a person, with named gaps. `docs/M26-live-checklist.md`: 3 ticked, 0 open. Three
   live findings about the pill, none fixed, all planned for M27: Dismiss closes the list; an
   outside click does not; and the label shows only the most urgent group ("1 running" hides
-  done jobs). `npm test` now passes 2934 across 132 files, 96 skipped (the opt-in real-model
-  evals and real-Piper check).
+  done jobs). 2934 tests passed across 132 files at the close, 96 skipped.
+- **M27 - three pill fixes from M26's findings, and what grew from them.** Closed 2026-10-23
+  after a live run by a person, with named gaps. `docs/M27-live-checklist.md`: 10 ticked, 16 open
+  (all 16 covered by tests or scripts against real windows; the dictation hotkey and Escape with
+  the list open not run). The label counts every group; Dismiss keeps the list open and Dismiss
+  all sits beside the chime toggle; a click outside the pill closes its list (a PowerShell helper
+  polls the mouse buttons while the list is open); a mid-step cancel says Cancelling, a too-late
+  one says so, and a job cancelled after a step ran stays with its message. One finding **not
+  fixed**, under investigation: with clipboard text selected, "create a linear issue and send to
+  fun" planned an extra "summarize the clipboard" step. `npm test` now passes 3021 across 136
+  files, 96 skipped (the opt-in real-model evals and real-Piper check).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -57,7 +66,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26) and the seven checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27) and the eight checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`

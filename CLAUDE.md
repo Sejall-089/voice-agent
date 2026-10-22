@@ -7,7 +7,7 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M26, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
+  M27, which closed on 2026-10-23 with named gaps. The next one is whatever is agreed and
   added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
@@ -245,6 +245,12 @@ patterns behind them — each cost a real debugging session.
   summary whose result is the whole point, and the live run watched that result vanish. Nothing
   in the 8 s rule changed; who arrives at it did. **When a change opens a mode to a new trigger,
   re-read the rules downstream of that mode for what they assumed about how it was reached.**
+
+### M27
+
+- **A rule that lives inside a script string (the pointer helper's C#) can't be tested from
+  node (M27).** The discard-first-poll rule survived its mutation until the decision moved into
+  a TypeScript function a test could reach (`judgeSample`); the host now only samples.
 
 ## Scope added mid-milestone
 
