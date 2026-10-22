@@ -7,7 +7,7 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M23, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
+  M24, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
   added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
@@ -214,6 +214,19 @@ patterns behind them — each cost a real debugging session.
   that ran only after it — and live, the real model never produced such a plan (2 of 3 trials:
   the wrapper again). As M19's lesson says: before turning a refusal into a second chance, ask
   what the second answer can go on to do, and make the bad case visible if it cannot be stopped.
+
+### M24
+
+- **A bound written for one wait silently governs every other wait that reuses its helper
+  (M24).** `RENDERER_REPLY_TIMEOUT_MS` (15 s) was written in M7 so a crashed renderer could not
+  leave the recorder stuck — a bound on a *reply*. M14 reused the same helper to wait for a clip
+  to finish *playing*, and from then on every utterance over 15 s was treated as finished at
+  15 s: the chime played over it, and the next utterance cut it off. Nothing about the helper
+  said what kind of wait its bound was for, so the reuse looked free. **When a timeout is reused,
+  ask what it was sized for; a wait that lasts as long as the thing it waits on needs a bound
+  computed from that thing.** And when the fix makes something run longer, re-check every rule
+  that measured time against the old length — M24's own stale rule then dropped a "Sent." for
+  waiting behind a clip that was finally allowed to finish.
 
 ## Scope added mid-milestone
 

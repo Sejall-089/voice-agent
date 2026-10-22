@@ -5,10 +5,10 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-22): M0-M23 shipped; M23 closed 2026-10-22, with named gaps.**
+**Current status (as of 2026-10-22): M0-M24 shipped; M24 closed 2026-10-22, with named gaps.**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M23 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c
-for the design) and in each milestone's live checklist:
+only**. For M20 to M24 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+§4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
   ticked, 12 open.
@@ -20,8 +20,13 @@ for the design) and in each milestone's live checklist:
   timeout, the 429 tests).
 - **M23 - background jobs, the status pill, the needs-you chime.** Closed 2026-10-22 after a
   live run by a person, with named gaps. `docs/M23-live-checklist.md`: 12 ticked, 30 open (25 of those covered by a
-  scripted run against the real app or by tests). `npm test` now passes 2824 across 124 files,
-  95 skipped (the opt-in real-model evals).
+  scripted run against the real app or by tests). 2824 tests passed across 124 files at the
+  close, 95 skipped.
+- **M24 - speech longer than 15 s plays to its end.** Closed 2026-10-22 after a live run by a
+  person and a loopback-recorded scripted run against the real app, with named gaps.
+  `docs/M24-live-checklist.md`: 3 ticked, 11 open (9 of those machine-verified from what reached
+  the speakers, 2 not run). Four live findings, none a regression, became M25. `npm test` now
+  passes 2870 across 127 files, 96 skipped (the opt-in real-model evals and real-Piper check).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -39,7 +44,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23) and the four checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24) and the five checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`

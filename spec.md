@@ -3935,9 +3935,11 @@ Post-v0:
       whatever is playing. Pre-dates M23 (M14's timeout); M23's chime is what exposes it.
       **Fixed in M24** (below): the M24 repro measured the second case too — the next utterance
       does not start over the first, it *stops* it.
-- [ ] **M24 — speech longer than 15 s plays to its end.** **Code complete 2026-10-22; the live
-      pass (`docs/M24-live-checklist.md`) has not been run.** Agreed as the fix for M23's open
-      limit. Three separate changes, each its own commit:
+- [x] **M24 — speech longer than 15 s plays to its end.** **Closed 2026-10-22, after a live run
+      by a person and a loopback-recorded scripted run (3 boxes ticked, 11 open —
+      `docs/M24-live-checklist.md`), with named gaps.** Agreed as the fix for M23's open limit.
+      The close-out record is at the end of this entry. Three separate changes, each its own
+      commit:
 
       1. **Playback waits as long as the clip lasts** (§4d). Root cause, found before any code
          was changed: `WindowsShell.play()` waited for `speech:ended` under M7's 15 s
@@ -3983,6 +3985,30 @@ Post-v0:
       in `main.ts` and has no test that could fail (the microphone-opening path that also stops
       speech is tested); a renderer reload mid-clip is neither a crash nor a report, so it waits
       out the clip's limit.
+
+      **Close-out record (2026-10-22).** `npm test`: 2870 passed across 127 files, 96 skipped (the
+      opt-in real-model evals and the opt-in real-Piper check); both typechecks clean. Eval
+      skipped (not run against the real model).
+
+      **Live, by a person (3 ticked):** a "read the rest" over 30 s heard to its last sentence
+      (1.1); a long answer interrupted with the hotkey and a short question answered out loud
+      (3.2); the blocked microphone on the instruction hotkey (5.1). **By script only (9, open):**
+      the real app (dev build, real Piper, a scratch profile, a fake model and Slack webhook on
+      localhost) driven over CDP, SendInput and UI Automation, with what reached the speakers
+      recorded by WASAPI loopback — auto-hide mid-clip, the capped answer, the chime after the
+      last speech sample (410 ms gap), a narration queued 15.9 s before a clip's end said after
+      it, Escape / dictation hotkey silence within 0.1 s, a confirm answered mid-question, a
+      renderer reload's single timeout line at exactly clip + 5 s, and the dictation hotkey with
+      the microphone denied (1.2, 1.3, 2.1, 2.2, 3.1, 3.3, 3.4, 4.2, 5.2). **Not run (2):** 2.3
+      (optional), 4.1 (needs the output device disabled).
+
+      **Findings** (none a regression of M24; all four are M25): "read the rest" after a short
+      answer said nothing more (`say()` cleared the slot — M14.4's rule); Escape while
+      "Thinking…" did not stop the instruction, and Escape during transcription did not discard
+      it; a job reached the pill after one Escape: most likely an earlier run was still thinking
+      when the hotkey was pressed (hotkey detaches by design); not reproduced with Escape alone;
+      the M25 log lines will confirm live;
+      "what's the time" got a long answer (no time tool).
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

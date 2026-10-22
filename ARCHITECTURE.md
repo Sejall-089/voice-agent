@@ -511,8 +511,15 @@ text is on screen — which is what makes barge-in safe rather than destructive.
 - the microphone is never open while the app is talking, enforced in the shell's
   `startRecording()` — the one chokepoint every path to the mic passes through — because
   otherwise whisper transcribes the app's own voice into the user's instruction;
-- an utterance queued more than 8s ago is **dropped rather than said**: speech describes a
-  moment, and a queue that always drains eventually will happily announce one that has passed;
+- an utterance that has **waited** more than 8s is **dropped rather than said**: speech describes
+  a moment, and a queue that always drains eventually will happily announce one that has passed.
+  Time spent behind a clip that is still *playing* does not count as waiting (M24) — the user was
+  listening — so a "Sent." queued during a 30 s read-out is said after it;
+- a clip is **waited for as long as it lasts** (M24): `WindowsShell.play()` reads the clip's
+  length from its WAV header and waits that long plus a 5 s grace for the renderer's report,
+  never a fixed bound. Each clip is numbered and the renderer names the number when it reports,
+  so a late report cannot end the next clip's wait; a barge-in settles the player's `play()`, so
+  the wait ends the moment the sound does;
 - while a confirm dialog waits, **both hotkeys are blocked and say so** rather than starting a
   second run over the top of an undecided one;
 - while a confirm dialog waits, **the bar is not on screen and cannot be put there** (M19 live

@@ -983,18 +983,19 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M24 (long speech plays to its end) is code complete (22 Oct 2026); its live pass has not been
-run.** Speech over 15 s is no longer treated as finished at 15 s; an utterance waiting behind a
-playing clip is no longer dropped as stale; and a blocked microphone is now reported instead of
-looking like a recording. **2870 tests green across 127 files, 96 skipped.** Every item in
-`docs/M24-live-checklist.md` ends in sound, so only a person can tick it. See `spec.md` §4d and
-§9 (M24).
+**M24 (long speech plays to its end) is closed (22 Oct 2026), after a live run by a person and a
+loopback-recorded scripted run, with named gaps.** Speech over 15 s is no longer treated as
+finished at 15 s; an utterance waiting behind a playing clip is no longer dropped as stale; and a
+blocked microphone is now reported instead of looking like a recording. A person heard 3 of the
+checklist's boxes; 9 more are machine-verified from what reached the speakers (WASAPI loopback);
+2 were not run. Four live findings, none a regression, went into M25. **2870 tests green across
+127 files, 96 skipped.** See `docs/M24-live-checklist.md` and `spec.md` §4d and §9 (M24).
 
 **M23 (background jobs, the status pill, the needs-you chime) is closed (22 Oct 2026), after a
 live run by a person, with named gaps.** A person watched 12 of the checklist's boxes; 25 more are
 covered by a scripted run against the real app or by tests; 5 were not run. One live finding
 (a stale "confirmation waiting" line) is fixed; one long-speech timing bug is recorded as an
-open limit. **2824 tests green across 124 files, 95 skipped** (the opt-in real-model evals). See
+open limit. **2824 tests green across 124 files at its close, 95 skipped** (the opt-in real-model evals). See
 `docs/M23-live-checklist.md` and `spec.md` §9 (M23).
 
 **M22 (Slack bot-token mode) is closed (13 Oct 2026), after a live run by a person.** Messages
