@@ -243,6 +243,10 @@ nothing is said. If it had already started doing something, it moves to the stat
 where it finishes quietly and can still be cancelled. Escape while your spoken instruction is
 still being transcribed throws it away.
 
+Click somewhere else instead (or Alt+Tab) while it's thinking, and it keeps going without you:
+it moves to the status pill, finishes quietly, and keeps its Cancel button. Clicking away while
+you're recording, typing, or just reading a finished answer works as before.
+
 **"What's the time?" gets a short answer (M25).** "It's 2:51 PM." — or, for "what's the date?",
 "It's Thursday, 22 October." The time is read from the clock, not worded by the model.
 

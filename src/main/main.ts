@@ -299,6 +299,9 @@ app.whenReady().then(() => {
   // M25: Escape cancels the job that has the bar if it has not acted yet, else detaches it
   // (JobManager.escapeAttached — the rule and its tests live there, not here).
   shell.attachEscapeJob(() => void jobs.escapeAttached());
+  // M25: an outside click on a bar whose job is still working moves that job to the pill.
+  // `detachAttached` does nothing with no job working, and refuses one holding the foreground.
+  shell.attachFocusLeft(() => void jobs.detachAttached("outside-click"));
   const interruptedJobs = jobs.restore();
   if (interruptedJobs > 0) {
     console.log(

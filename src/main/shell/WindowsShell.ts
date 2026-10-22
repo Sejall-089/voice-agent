@@ -112,6 +112,8 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // What Escape does to the job that has the bar (M25), once main.ts has built the jobs. The
   // shell never learns what a job is — it only knows that Escape should mean never mind.
   private escapeJob: (() => void) | null = null;
+  // And what focus leaving a visible bar does to it (M25, an outside click).
+  private focusLeft: (() => void) | null = null;
   private snapshotTarget: (() => Promise<void>) | null = null;
   // Every confirm dialog, one at a time (M23). Through M22 this was a boolean,
   // `confirmPending`, set around a single dialog — which two jobs' confirms overlapping would
@@ -467,8 +469,17 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
     // it asked for. Only an answer, Escape or its own timeout ends it.
     if (this.pendingAsk !== null) return;
     // `confirm()` has already hidden the bar and will put it back; a blur arriving while the
-    // dialog is up must not run the dismissal path over the top of that.
+    // dialog is up must not run the dismissal path over the top of that. (M25: this guard is also
+    // what keeps a dialog from counting as an outside click — a message box opened on a visible
+    // window blurs it while it is still visible, measured by scripts/blur-recon.cjs.)
     if (this.confirmPending) return;
+    // M25: focus went to another window while the bar was still on screen — an outside click, or
+    // Alt+Tab. A blur caused by the app hiding the bar itself (Escape, the auto-hide, a dismissal)
+    // arrives AFTER the hide, with the window already invisible (measured), so it never gets here
+    // as visible. With an open capture (the user is typing) there is no job yet. Whatever job is
+    // still working gets detached by main's hook; the bar then hides as it always did. Speech is
+    // never touched.
+    if (this.window.isVisible() && this.pendingInput === null) this.focusLeft?.();
     this.hide();
   }
 
@@ -627,6 +638,12 @@ export class WindowsShell implements OSShell, VoiceShell, SpeechShell {
   // question times out (that also goes through neverMind) — before the bar is hidden.
   attachEscapeJob(handler: () => void): void {
     this.escapeJob = handler;
+  }
+
+  // M25. Run when focus leaves the bar for another window while the bar is still on screen —
+  // never for a blur the app caused by hiding it, and never while a dialog is up (handleBlur).
+  attachFocusLeft(handler: () => void): void {
+    this.focusLeft = handler;
   }
 
   // M16.9. Same shape as attachPointer: the shell is handed the thing to call, and never learns

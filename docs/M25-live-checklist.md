@@ -56,7 +56,26 @@
       Escape mid-way. **Expect:** it moves to the pill, finishes quietly, and the console says
       `detached by escape`.
 
+## 5. Clicking outside a thinking bar
+
+- [ ] **5.1** Give an instruction with a slow answer. While the bar says "Thinking…", **click
+      another window**. **Expect:** the bar closes, the job appears in the pill and finishes
+      there without being spoken, and the console says `detached by outside-click`.
+- [ ] **5.2** The same with **Alt+Tab** instead of a click. **Expect:** the same.
+- [ ] **5.3** Click outside while a **finished** answer is showing. **Expect:** the bar just
+      closes; nothing in the pill.
+- [ ] **5.4** Click outside while **recording**. **Expect:** as before — the bar stays, the
+      recording goes on.
+- [ ] **5.5** Click outside while the app is still **speaking** an earlier answer and a new
+      instruction is thinking. **Expect:** the speech carries on to its end.
+- [ ] **5.6** Ask for something `dangerous`; when the confirm dialog opens, click into it.
+      **Expect:** nothing is detached; the dialog stays, and answering it works as before.
+
 ## Known gaps, so nobody mistakes them for failures while testing
+
+- Any focus loss counts as an outside click while a job is thinking — Alt+Tab, the Windows key,
+  or another app taking focus on its own (a notification that grabs focus) — not only a mouse
+  click.
 
 - The renderer's own Escape (a fallback used only if the global Escape could not be
   registered) still just hides the bar.

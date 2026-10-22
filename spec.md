@@ -1237,6 +1237,25 @@ returns nothing if the session was abandoned while whisper worked (until M25 the
 run anyway). The renderer's own Escape key (`commandbar:close`), a fallback that only fires if
 the global Escape could not be registered, still only hides the bar.
 
+**An outside click while the attached job is still working (M25).** Focus leaving a *visible*
+bar for another window — a click elsewhere, or Alt+Tab — while its job is planning or working
+**detaches** that job (trigger `outside-click`): it moves to the pill, runs silent, and keeps its
+Cancel button. The bar hides as it always did, and speech that is playing is not stopped.
+Nothing else that blurs the bar does this:
+
+| the blur | what happens |
+|---|---|
+| the app hid the bar itself (Escape, the 12 s auto-hide, a dismissal) | no detach — measured: the blur arrives *after* the hide, with the window already invisible |
+| a confirm dialog opened | no detach — a message box blurs its window while it is still visible (measured), so the confirm-pending guard is what stops it |
+| recording, transcribing, or dictation inserting | nothing changes: the bar is pinned, as before |
+| typing (a capture is open, no job yet) | the bar hides, as before |
+| a finished result is showing | the bar hides, as before — there is no job working |
+
+`WindowsShell.handleBlur` decides it was focus leaving a visible bar; `main.ts` passes that to
+`JobManager.detachAttached("outside-click")`, which does nothing when no job is working and
+refuses one that holds the foreground. Measured by `scripts/blur-recon.cjs` (Electron 33,
+Windows); `tests/outsideClick.test.ts`'s fake window copies what it measured.
+
 ### `Tool.background`
 
 Required on every tool, with no default (`core/types.ts`):
@@ -4099,7 +4118,17 @@ Post-v0:
          the Escape key not telling the jobs (3). One survivor, and it was dead code: an
          explicit "holds the foreground" check — a job only holds the foreground after it has
          started, and `detachAttached` already refuses it; the check was removed.
-      5. An outside click on a thinking bar detaches its job.
+      5. **An outside click on a thinking bar detaches its job** (addendum A; §5c, next to the
+         Escape rule). Decided: "outside click" is any focus loss to another window the app did
+         not cause, Alt+Tab included; while recording the bar stays pinned, as before. Recon
+         first (`scripts/blur-recon.cjs`, real windows): the app's own hide blurs AFTER the
+         hide with the window invisible — so a flag around `hide()`, as planned, would never
+         have been set, and visibility is the test instead; a message box blurs its window
+         while it is still visible — so the confirm-pending guard is load-bearing. Tests:
+         `outsideClick.test.ts` (7: the five agreed cases, speech untouched, typing). Mutations:
+         every blur treated as an outside click (5 failed, the Escape test among them, as
+         required); the visibility check dropped (1, the Escape test); the hook before the
+         confirm guard (2, the dialog test among them); the open-capture check dropped (1).
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
