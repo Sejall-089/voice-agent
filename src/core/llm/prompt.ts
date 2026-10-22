@@ -103,7 +103,8 @@ export const CHOOSE_SYSTEM = [
 
 // The user's local zone, resolved from the runtime. Reading it here rather than in `/core`'s
 // callers keeps it a defaulted argument everywhere it is used, so tests stay deterministic.
-function localZone(): string {
+// Exported for `tellTime` (M25), which says the time in the same zone the planner is told.
+export function localZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 

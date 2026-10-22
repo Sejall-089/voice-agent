@@ -22,6 +22,16 @@
       **Expect:** the rest, with **no** "From the earlier answer:".
 - [ ] **1.3** Say "read the rest" a second time. **Expect:** "There's nothing more to read out."
 
+## 2. The time and the date
+
+- [ ] **2.1** Ask **"what's the time?"** (typed and spoken). **Expect:** one sentence, the time
+      only — "It's 2:51 PM." — shown and said ("two fifty-one PM"). Pre-M25: a long sentence
+      with the date and zone, worded differently each time.
+- [ ] **2.2** Ask **"what's the date?"** / "what day is it?". **Expect:** "It's Thursday, 22
+      October." — the date only.
+- [ ] **2.3** Ask it while a job is running in the pill. **Expect:** answered at once, and no new
+      row appears in the pill.
+
 ## Known gaps, so nobody mistakes them for failures while testing
 
 - A remainder survives any number of answers in between, for up to 5 minutes; "read the rest"

@@ -20,6 +20,7 @@ import { moveEventTool } from "./tools/moveEvent.ts";
 import { elaborateTool } from "./tools/elaborate.ts";
 import { pointAtTool } from "./tools/pointAt.ts";
 import { jobStatusTool } from "./tools/jobStatus.ts";
+import { tellTimeTool } from "./tools/tellTime.ts";
 
 // The closed-world menu of tools the app can do (spec.md §6). Adding a tool is additive:
 // a handler file plus an entry here. The planner never changes.
@@ -47,6 +48,8 @@ export const registry: Tool[] = [
   systemVolumeTool,
   mediaControlTool,
   searchSpotifyTool,
+  // M25. UNGATED: every machine has a clock, and there is nothing to configure.
+  tellTimeTool,
 ];
 
 // The Gmail tools (M10). They only work against a Chrome started with remote debugging, so they

@@ -237,6 +237,9 @@ time", then say "read the rest": you get the summary's rest, introduced with "Fr
 answer:" so it's clear what it belongs to. Before M25 the short answer in between made the app
 say there was nothing more to read.
 
+**"What's the time?" gets a short answer (M25).** "It's 2:51 PM." — or, for "what's the date?",
+"It's Thursday, 22 October." The time is read from the clock, not worded by the model.
+
 **156 tests**, and `scripts/tts-recon.mjs` — which interrogates a real Piper binary rather than
 guessing at it, the M11 "never hand-author a fixture" lesson applied to an audio engine. It is
 what established that the engine mis-decodes non-ASCII without `PYTHONUTF8=1`, applies no time

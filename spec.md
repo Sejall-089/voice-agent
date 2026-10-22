@@ -1403,6 +1403,17 @@ waiting, and on screen that sentence plus one line per job. It makes no model ca
 jobs that are live or ended in the last 30 minutes, and never itself. Completions are
 otherwise silent.
 
+### `tellTime` (M25)
+
+The second status-only tool. "What's the time?" used to have no tool: the model answered in
+prose from the planning prompt's clock line — long, different each time, and logged as a miss.
+`tellTime` (`safe`, `statusOnly`, ungated) reads the clock in code and says one sentence:
+*"It's 2:51 PM."* for the time, *"It's Thursday, 22 October."* for the date — time only or date
+only, never both. The sentence is assembled from `Intl` parts with every separator written in
+code, because ICU versions disagree on what goes before "PM" (some use U+202F) and node and
+electron ship different ICU. Status-only, like `jobStatus`: answered at once without a job slot,
+and never listed as a job.
+
 ### Action log
 
 `action_log` gains two nullable columns, added by a guarded migration that checks for each
@@ -1418,7 +1429,7 @@ but the primary; a tray icon; answering a confirm from the pill or by voice.
 
 ---
 
-## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16, +1 in M18 and +2 more with Spotify, +1 in M19 and 3 connector tools, +3 connector tools in M20)
+## 6. Tool registry (core/registry.ts) — seven demo tasks, six tools (+3 in M10, +1 in M11, +3 in M13, +1 in M14, +1 in M15, regrounded in M16, +1 in M18 and +2 more with Spotify, +1 in M19 and 3 connector tools, +3 connector tools in M20, +1 in M25)
 
 Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 `description` and `inputSchema` are what the LLM sees (they double as the prompt).
@@ -4033,7 +4044,17 @@ Post-v0:
          also checks a detached job does not mark the slot). Mutations: `clear()` put back (2
          tests failed); no lead-in (2); `passOver` marks nothing (4); a detached job's
          `passOver` reaches the slot (1); a new `hold` inherits the mark (1).
-      2. A short, exact time and date answer.
+      2. **A short, exact time and date answer** (§5c, `tellTime`). Root cause: there was no
+         time tool, so the model answered in its own words through the no-tool path (logged as a
+         miss). `tellTime` answers "It's 2:51 PM." or "It's Thursday, 22 October." from the clock.
+         Tests: `tellTime.test.ts` (17: literal expectations in two zones across midnight and
+         noon, the spoken form, a planner run logged as `ok`), and two approval lists in
+         `background.test.ts` widened on purpose (re-justified: a status-only tool must be on the
+         approved list and `safe`). Mutations: 24-hour output (6 failed); the date added to the
+         time answer (7); the zone ignored (6); `statusOnly` dropped (1); Intl's whole formatted
+         string used — **survived at first**, because this node's ICU (78) puts a plain space
+         before "PM"; the parts source was made injectable and a test now hands in U+202F and a
+         lowercase "pm" (1). Not run: a real-model eval of the routing (only when asked).
       3. Detach triggers and three log lines; the unguarded-hotkey known gap documented.
       4. Escape cancels a running instruction that has not acted yet, otherwise detaches it; a
          transcript that finishes after Escape is discarded.

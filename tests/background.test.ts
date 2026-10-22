@@ -48,6 +48,7 @@ const APPROVED: Readonly<Record<string, "ok" | "foreground-only">> = {
   moveEvent: "ok",
   sendMessage: "ok",
   jobStatus: "ok",
+  tellTime: "ok", // M25: reads the clock; nothing on screen is touched
   linear__create_issue: "ok",
   linear__search_issues: "ok",
   linear__get_issue: "ok",
@@ -97,10 +98,14 @@ describe("every tool says whether it may run in the background", () => {
     expect(byName.get("sendMessage")!.background).toBe("ok");
   });
 
-  it("jobStatus is the only status-only tool, and it is safe", () => {
+  // RE-JUSTIFIED AT M25. Was "jobStatus is the only status-only tool". What it protects is that a
+  // tool skips the job queue only when it is on an approved list and is `safe` — a status-only
+  // tool is admitted with no slot and never listed, so it must not be able to act. `tellTime`
+  // (reads the clock) joins on purpose; the safe check now covers every one of them.
+  it("only the approved tools are status-only, and every one of them is safe", () => {
     const statusOnly = MENU.filter((tool) => tool.statusOnly === true);
-    expect(statusOnly.map((tool) => tool.name)).toEqual(["jobStatus"]);
-    expect(declaredTiers(statusOnly[0]!.risk)).toEqual(["safe"]);
+    expect(statusOnly.map((tool) => tool.name).sort()).toEqual(["jobStatus", "tellTime"]);
+    for (const tool of statusOnly) expect(declaredTiers(tool.risk), tool.name).toEqual(["safe"]);
   });
 
   it("jobStatus is on the menu only when there are job records to read", () => {
