@@ -994,7 +994,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (2922 tests across 132 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (2934 tests across 132 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1005,10 +1005,15 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M26 (a finished background job stays in the pill until seen) is built and tested, not yet
-live-checked.** M25's finding is fixed: a done job sent to the pill no longer leaves after about
-10 seconds; it stays, green, until you've opened the list with it in it, then a minute more.
-See `docs/M26-live-checklist.md` and `spec.md` §9 (M26).
+**M26 (a finished background job stays in the pill until seen) is closed (22 Oct 2026), after
+a live run by a person, with named gaps.** M25's finding is fixed: a done job sent to the pill
+no longer leaves after about 10 seconds; it stays, green, until you've opened the list with it
+in it, then a minute more, and Dismiss clears it at once. A person watched all 3 of the
+checklist's boxes. Three live findings about the pill, planned for M27: Dismiss on one of
+several jobs closes the list; clicking elsewhere doesn't close an open list (it closes 10 s
+after the pointer leaves); and with a job running, the label says only "1 running" and hides
+the done ones. **2934 tests green across 132 files, 96 skipped.** See
+`docs/M26-live-checklist.md` and `spec.md` §9 (M26).
 
 **M25 (three live findings from M24; Escape and an outside click on a running instruction) is
 closed (22 Oct 2026), after a live run by a person and a loopback-recorded scripted run, with
@@ -1019,7 +1024,7 @@ logged with what caused it. A person watched 4 of the checklist's boxes; 3 more 
 the scripted run, 12 by tests only. One live finding, investigated: a finished background job
 leaves the pill after about 10 seconds (M23's deliberate 8 s fade), and its result can't be read
 after that. The fix is decided for M26: a done job stays in the pill until you've seen it. **2922 tests green across 132
-files, 96 skipped.** See `docs/M25-live-checklist.md` and `spec.md` §9 (M25).
+files at its close, 96 skipped.** See `docs/M25-live-checklist.md` and `spec.md` §9 (M25).
 
 **M24 (long speech plays to its end) is closed (22 Oct 2026), after a live run by a person and a
 loopback-recorded scripted run, with named gaps.** Speech over 15 s is no longer treated as

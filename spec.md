@@ -4166,7 +4166,10 @@ Post-v0:
       outside click while a job is thinking; the renderer's own Escape fallback still only hides
       the bar.
 
-- [ ] **M26 — a finished background job stays in the pill until it has been seen.** M25's
+- [x] **M26 — a finished background job stays in the pill until it has been seen.** **Closed
+      2026-10-22, after a live run by a person (3 boxes ticked, 0 open —
+      `docs/M26-live-checklist.md`), with named gaps and three live findings planned for M27.**
+      The close-out record is at the end of this entry. M25's
       finding (option A): a done detached job left the pill after 8 s (`DONE_FADE_MS`, M23) plus
       the 1 s re-check, and its result could not be read after that. One commit.
 
@@ -4216,8 +4219,41 @@ Post-v0:
       summary still green after 30 s; clicking the pill shows the result and the job clears; and
       Dismiss clears it at once.
 
+      **Close-out record (2026-10-22).** `npm test`: 2934 passed across 132 files, 96 skipped
+      (the opt-in real-model evals and real-Piper check); both typechecks clean. Eval skipped
+      (not run against the real model — nothing in M26 routes through the model). The mutation
+      pass is recorded above: six mutations, every one caught, the one first-run survivor (the
+      in-memory store's restore rule) pinned by a new test before the commit.
+
+      **Live, by a person (3 of 3 ticked):** a done job detached by an outside click is still
+      green after 30 s (1.1); opening the pill shows its result and it clears about a minute
+      later (1.2); Dismiss clears it at once (1.3). **By tests only:** a done job surviving a
+      restart, unseen, however old; the exact one-minute tail; "N done" with several; a done job
+      in the bar never appearing; failed and expired unchanged.
+
+      **Findings (2026-10-22), investigated without code changes; none fixed in M26, all three
+      planned for M27.** Each comes from a rule M23 chose on purpose, which M26 made matter more
+      by letting done jobs stay and accumulate:
+      1. **Dismiss on one of several done jobs closes the list**, so the pill has to be reopened
+         for each. Every row button that takes effect closes the list
+         (`PillController.onAction`, 2026-10-13, so the list is out of the way of the dialog
+         Review… opens); Dismiss and Cancel inherited it. Pinned by `pill.collapse.test.ts`,
+         "Dismiss closes it".
+      2. **With the list open, clicking elsewhere does not close it.** The pill is
+         `focusable: false` and shown inactive so it never takes the keyboard (M23, measured);
+         it therefore never blurs, and nothing reports an outside click. The list closes only
+         10 s after the pointer leaves.
+      3. **With done jobs in the pill and another job running, the label shows only "1
+         running"**, hiding the done jobs until the list is opened. The pill shows one mode at a
+         time (needs-you, didn't finish, running, done) and counts only that group
+         (`pillView`). Before M26 a done job left after 8 s; now it can be hidden indefinitely.
+
+      **Known gaps:** the restart rule for unseen done jobs is tested, not watched live;
+      `DONE_SEEN_CLEAR_MS` (one minute) is a first guess, named so it can be tuned; and the three
+      findings above.
+
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
-current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
+current count is in M26's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
 the opt-in real-model evals, which make no API calls unless asked. M19 added 132 over M18's
 993, in five new files: 17 for the connection and failure classification
 (`mcpConnection.test.ts`), 16 for the config loader (`mcpConfig.test.ts`), 50 for the adapter,

@@ -730,7 +730,9 @@ flowchart LR
   screen at a time. A detached dialog hangs off the pill, so it never hides the bar or ends a
   capture.
 - **The pill** draws a pure reducer's view (`core/jobs/pill.ts`) and cannot take focus; every
-  action it sends is checked again in main. **The chime** waits for the microphone and the
+  action it sends is checked again in main. A failed or finished job stays in it until the user
+  has opened the list with that job in it (`seen_at`, saved with the job; M26 for done jobs).
+  **The chime** waits for the microphone and the
   app's own voice.
 - **Restart:** live jobs become `interrupted` and are never resumed; a write-ahead marker around
   each handler decides between "may or may not have gone through" and "nothing was sent".

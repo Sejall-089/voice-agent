@@ -7,7 +7,7 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M25, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
+  M26, which closed on 2026-10-22 with named gaps. The next one is whatever is agreed and
   added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).

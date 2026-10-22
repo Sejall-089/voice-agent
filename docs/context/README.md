@@ -5,9 +5,9 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-22): M0-M25 shipped; M25 closed 2026-10-22, with named gaps.**
+**Current status (as of 2026-10-22): M0-M26 shipped; M26 closed 2026-10-22, with named gaps.**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M25 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M26 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -32,8 +32,14 @@ only**. For M20 to M25 the status lives in `spec.md` (§9's entry for each, and 
   and a loopback-recorded scripted run, with named gaps. `docs/M25-live-checklist.md`: 4 ticked,
   15 open (3 covered by the script, 12 by tests only). One live finding, investigated: a
   finished background job leaves the pill after about 10 s (M23's deliberate 8 s fade), and its
-  result is unreadable after that; the fix is decided for M26 (keep a done job until seen). `npm test` now passes
-  2922 across 132 files, 96 skipped (the opt-in real-model evals and real-Piper check).
+  result is unreadable after that; the fix is decided for M26 (keep a done job until seen). 2922
+  tests passed across 132 files at the close, 96 skipped.
+- **M26 - a finished background job stays in the pill until seen.** Closed 2026-10-22 after a
+  live run by a person, with named gaps. `docs/M26-live-checklist.md`: 3 ticked, 0 open. Three
+  live findings about the pill, none fixed, all planned for M27: Dismiss closes the list; an
+  outside click does not; and the label shows only the most urgent group ("1 running" hides
+  done jobs). `npm test` now passes 2934 across 132 files, 96 skipped (the opt-in real-model
+  evals and real-Piper check).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -51,7 +57,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25) and the six checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26) and the seven checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`
