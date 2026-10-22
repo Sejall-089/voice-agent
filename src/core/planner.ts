@@ -1056,9 +1056,13 @@ export class Planner {
   // the action anyway would turn "there was nothing to say" into an error in the log. The
   // remainder is stored even when it will never be asked for — it costs one assignment, and the
   // alternative is the planner guessing at what the user is about to say next.
+  //
+  // An answer that holds nothing back no longer CLEARS what an earlier one held (M25): a short
+  // "It's 2:51 PM." in the middle of a long summary would throw the summary's remainder away.
+  // It is marked instead, so "read the rest" can say whose rest it is.
   private async say(spoken: SpokenText): Promise<void> {
     if (spoken.remainder !== null) this.speech.hold(spoken.remainder);
-    else this.speech.clear();
+    else this.speech.passOver();
 
     if (spoken.text.trim().length === 0) return;
     await this.shell.executeAction({ kind: "speak", payload: spoken.text });

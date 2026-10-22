@@ -2,6 +2,12 @@ import { UserFixableError } from "../errors.ts";
 import type { SpokenText } from "../speech.ts";
 import type { Tool, ToolDeps, ToolInput } from "../types.ts";
 
+// Said before a remainder that is not from the last thing the user heard (M25). Since a short
+// answer no longer clears the slot, "read the rest" after "what's the time" reads the SUMMARY's
+// rest — right, but only if the user is told that is what it is. A fixed string, never model
+// text, and plain ASCII so the engine voices it as written.
+export const EARLIER_LEAD_IN = "From the earlier answer:";
+
 // M14 task 2: "go on, read the rest."
 //
 // The other half of the terseness decision. Speech is deliberately brief — a ten-event schedule
@@ -37,7 +43,7 @@ export const elaborateTool: Tool = {
       // verbatim instead of wrapping it in "Something went wrong".
       throw new UserFixableError("There's nothing more to read out.");
     }
-    return held;
+    return held.fromEarlier ? `${EARLIER_LEAD_IN} ${held.text}` : held.text;
   },
   // Verbatim, and this is the whole point of the hook here: the held text is ALREADY the
   // remainder of something that was shortened once. Letting the generic derivation shorten it

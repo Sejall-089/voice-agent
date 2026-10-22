@@ -232,6 +232,11 @@ itself, plus a few seconds' grace). Something queued behind a long answer — a 
 step's narration — waits its turn and is said after it, not dropped. Interrupting is unchanged:
 Escape or either hotkey still stops it at once, and what you say next is answered out loud.
 
+**"Read the rest" survives a quick question (M25).** Interrupt a long summary, ask "what's the
+time", then say "read the rest": you get the summary's rest, introduced with "From the earlier
+answer:" so it's clear what it belongs to. Before M25 the short answer in between made the app
+say there was nothing more to read.
+
 **156 tests**, and `scripts/tts-recon.mjs` — which interrogates a real Piper binary rather than
 guessing at it, the M11 "never hand-author a fixture" lesson applied to an audio engine. It is
 what established that the engine mis-decodes non-ASCII without `PYTHONUTF8=1`, applies no time

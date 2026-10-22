@@ -4,7 +4,7 @@ import type {
   LocalAction,
   OSShell,
 } from "../../main/shell/OSShell.ts";
-import type { SpeechStore } from "../speechStore.ts";
+import type { HeldSpeech, SpeechStore } from "../speechStore.ts";
 import type { ActionLog, ActionLogEntry } from "../types.ts";
 
 // What one job sees where a planner expects the shell, the action log and the speech store
@@ -167,7 +167,11 @@ export class JobSpeechStore implements SpeechStore {
     if (this.job.isAttached()) this.real.hold(text);
   }
 
-  take(now?: number): string | null {
+  passOver(): void {
+    if (this.job.isAttached()) this.real.passOver();
+  }
+
+  take(now?: number): HeldSpeech | null {
     return this.job.isAttached() ? this.real.take(now) : null;
   }
 

@@ -2132,6 +2132,16 @@ rather than "Something went wrong". Its own `speakResult` returns the held text 
 letting the generic derivation shorten an already-shortened remainder would let "read me the
 rest" answer with another "want me to read the rest?".
 
+**An answer that holds nothing back no longer empties the slot (M25).** Until M25 every spoken
+answer without a remainder CLEARED it, so "read them out" could never answer with a list from two
+instructions ago — and a live run showed the price: a one-second "what's the time" in the middle
+of a long summary threw away the rest the user was hearing. Now such an answer only marks the
+slot (`SpeechStore.passOver()`), and when the marked remainder is read out it starts with a
+fixed lead-in, *"From the earlier answer:"* — so the old worry (old content with nothing saying
+so) is answered by saying so, not by forgetting. A new remainder still replaces the old one, it
+is still delivered once, and the 5-minute TTL is unchanged. A detached job's answers neither
+fill, mark nor empty the slot: nobody heard them.
+
 Gated in `buildRegistry` on `speech: true`, a third kind of gate beside Gmail's browser and the
 calendar's account: whether this install can speak at all. With no synthesizer nothing ever
 fills the store, so the tool could only ever refuse, and an unofferable capability does not
@@ -4009,6 +4019,25 @@ Post-v0:
       when the hotkey was pressed (hotkey detaches by design); not reproduced with Escape alone;
       the M25 log lines will confirm live;
       "what's the time" got a long answer (no time tool).
+- [ ] **M25 — three live findings from M24, and what Escape and an outside click do to a running
+      instruction.** **In progress; nothing committed before M24 is closed.** Each finding was
+      investigated without code changes first (a scripted repro on the real planner, job runner
+      and shell). Build order, one commit each, each diff approved first:
+
+      1. **"Read the rest" survives a short answer in between** (§6, `elaborate`). Root cause:
+         `Planner.say()` cleared the remainder on every answer that held nothing back. Now it is
+         kept and marked, and read out after *"From the earlier answer:"*. Tests:
+         `readTheRest.test.ts` (3, the live sequence through the real job runner),
+         `speechTools.test.ts` (+5), and two re-justified (`plannerSpeech.test.ts`, whose old
+         "clears a stale remainder" pinned the rule being changed; `jobs.run.test.ts`, which now
+         also checks a detached job does not mark the slot). Mutations: `clear()` put back (2
+         tests failed); no lead-in (2); `passOver` marks nothing (4); a detached job's
+         `passOver` reaches the slot (1); a new `hold` inherits the mark (1).
+      2. A short, exact time and date answer.
+      3. Detach triggers and three log lines; the unguarded-hotkey known gap documented.
+      4. Escape cancels a running instruction that has not acted yet, otherwise detaches it; a
+         transcript that finishes after Escape is discarded.
+      5. An outside click on a thinking bar detaches its job.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M23's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

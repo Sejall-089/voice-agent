@@ -9,15 +9,28 @@
 // to saying is neither — it is scratch state that should evaporate. Writing it to SQLite would
 // make "the second half of Tuesday's schedule" a fact about the user, which it is not.
 
+// What `take()` hands back: the withheld text, and whether something else has been SAID since it
+// was held (M25). Not whether anything happened — whether the user has heard another answer in
+// between, which is what makes "the rest" ambiguous enough to need saying where it came from.
+export interface HeldSpeech {
+  text: string;
+  fromEarlier: boolean;
+}
+
 export interface SpeechStore {
   // Remember what was withheld. Replaces whatever was there — a new result supersedes an older
   // one, so "read them out" can only ever mean the most recent thing that was cut short.
   hold(text: string): void;
+  // Another answer was spoken that held nothing back (M25). The slot is KEPT — before M25 it was
+  // cleared here, so a one-second "what's the time" threw away a remainder the user was in the
+  // middle of hearing — but it is marked as belonging to an earlier answer, so whoever reads it
+  // out can say so.
+  passOver(): void;
   // Read it AND clear it. One slot, delivered once: "read them out" twice in a row should not
   // read the same list twice, it should tell you there is nothing more. Returns null once the
   // hold has gone stale, so a caller cannot tell "expired" from "never existed" — both mean
   // "there is nothing more to read", which is the only useful answer (DraftStore's own rule).
-  take(now?: number): string | null;
+  take(now?: number): HeldSpeech | null;
   clear(): void;
 }
 
@@ -29,7 +42,7 @@ export interface SpeechStore {
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
 export class InMemorySpeechStore implements SpeechStore {
-  private held: { text: string; at: number } | null = null;
+  private held: { text: string; at: number; fromEarlier: boolean } | null = null;
 
   constructor(private readonly ttlMs: number = DEFAULT_TTL_MS) {}
 
@@ -40,14 +53,18 @@ export class InMemorySpeechStore implements SpeechStore {
       this.held = null;
       return;
     }
-    this.held = { text: trimmed, at: Date.now() };
+    this.held = { text: trimmed, at: Date.now(), fromEarlier: false };
   }
 
-  take(now: number = Date.now()): string | null {
+  passOver(): void {
+    if (this.held !== null) this.held.fromEarlier = true;
+  }
+
+  take(now: number = Date.now()): HeldSpeech | null {
     const held = this.held;
     this.held = null;
     if (held === null) return null;
-    return now - held.at > this.ttlMs ? null : held.text;
+    return now - held.at > this.ttlMs ? null : { text: held.text, fromEarlier: held.fromEarlier };
   }
 
   clear(): void {

@@ -187,18 +187,23 @@ describe("the planner says what it shows", () => {
 
     await planner.run("what's on");
 
-    expect(speech.take()).toBe("The rest.");
+    expect(speech.take()).toEqual({ text: "The rest.", fromEarlier: false });
   });
 
-  it("clears a stale remainder when the next answer withholds nothing", async () => {
-    // Otherwise "read them out" would answer with the list from two instructions ago.
+  // RE-JUSTIFIED AT M25. This was "clears a stale remainder when the next answer withholds
+  // nothing", guarding against "read them out" answering with the list from two instructions
+  // ago. A live run showed the cost: a one-second "what's the time" threw away a summary's
+  // remainder the user was in the middle of hearing. The remainder is now KEPT and MARKED, and
+  // `elaborate` says where it came from — so the old worry (an unlabelled answer from earlier)
+  // is still answered, by a lead-in instead of by forgetting.
+  it("keeps the remainder when the next answer withholds nothing, marked as from earlier", async () => {
     const speech = new InMemorySpeechStore();
     speech.hold("yesterday's leftovers");
     const { planner } = run(probe(), [], speech);
 
     await planner.run("do the thing");
 
-    expect(speech.take()).toBeNull();
+    expect(speech.take()).toEqual({ text: "yesterday's leftovers", fromEarlier: true });
   });
 
   it("stays silent rather than speaking an empty utterance", async () => {

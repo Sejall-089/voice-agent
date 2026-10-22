@@ -53,7 +53,7 @@ describe("SpeechStore", () => {
     const store = new InMemorySpeechStore();
     store.hold("Event two. Event three.");
 
-    expect(store.take()).toBe("Event two. Event three.");
+    expect(store.take()).toEqual({ text: "Event two. Event three.", fromEarlier: false });
     // Delivered once: asking twice must mean "there's nothing more", not a repeat.
     expect(store.take()).toBeNull();
   });
@@ -63,7 +63,41 @@ describe("SpeechStore", () => {
     store.hold("the old rest");
     store.hold("the new rest");
 
-    expect(store.take()).toBe("the new rest");
+    expect(store.take()).toEqual({ text: "the new rest", fromEarlier: false });
+  });
+
+  // M25. A short answer in between no longer clears the slot; it marks it.
+  it("passOver keeps the remainder but marks it as from an earlier answer", () => {
+    const store = new InMemorySpeechStore();
+    store.hold("the summary's rest");
+    store.passOver();
+
+    expect(store.take()).toEqual({ text: "the summary's rest", fromEarlier: true });
+    expect(store.take()).toBeNull(); // still delivered once
+  });
+
+  it("a NEW remainder after a passOver is not from an earlier answer", () => {
+    const store = new InMemorySpeechStore();
+    store.hold("the old rest");
+    store.passOver();
+    store.hold("the new rest");
+
+    expect(store.take()).toEqual({ text: "the new rest", fromEarlier: false });
+  });
+
+  it("passOver with nothing held holds nothing", () => {
+    const store = new InMemorySpeechStore();
+    store.passOver();
+
+    expect(store.take()).toBeNull();
+  });
+
+  it("a marked remainder still goes stale on the same 5-minute clock", () => {
+    const store = new InMemorySpeechStore(1000);
+    store.hold("the summary's rest");
+    store.passOver();
+
+    expect(store.take(Date.now() + 1001)).toBeNull();
   });
 
   it("holds nothing when there was nothing withheld", () => {
@@ -101,6 +135,21 @@ describe("elaborate", () => {
     expect(outcome.result).toBe("Event two. Event three.");
     expect(shell.results).toEqual(["Event two. Event three."]);
     expect(log.getLast()?.tool).toBe("elaborate");
+  });
+
+  // M25. Something else was said since the remainder was held: say whose rest this is.
+  it("says it is from the earlier answer when another answer came in between", async () => {
+    const store = new InMemorySpeechStore();
+    store.hold("Event two. Event three.");
+    store.passOver();
+    const { planner: p, shell } = planner({}, store);
+
+    const outcome = await p.run("read the rest");
+
+    expect(outcome.result).toBe("From the earlier answer: Event two. Event three.");
+    expect(shell.results).toEqual(["From the earlier answer: Event two. Event three."]);
+    // Spoken verbatim, lead-in included — never re-shortened into another offer.
+    expect(shell.spoken).toEqual(["From the earlier answer: Event two. Event three."]);
   });
 
   it("refuses honestly when nothing was held back", async () => {

@@ -188,8 +188,9 @@ describe("a detached job never touches what is in front of the user (addition A)
       background: true,
       lines: ["the thing", "Step 2 of 2: Noting the thing…", "Noted."],
     });
-    // And the slot behind "read me the rest" is exactly as the user left it.
-    expect(w.speech.take()).toBe("the rest of an answer the user heard");
+    // And the slot behind "read me the rest" is exactly as the user left it — not even marked
+    // as passed over (M25): a detached job's answers are heard by nobody.
+    expect(w.speech.take()).toEqual({ text: "the rest of an answer the user heard", fromEarlier: false });
   });
 
   it("stamps its rows as detached, and they are not the 'previous turn' of the next instruction (addition C)", async () => {
