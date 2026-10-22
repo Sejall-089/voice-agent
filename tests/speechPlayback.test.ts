@@ -116,6 +116,8 @@ interface Clip {
 interface WorldOptions {
   // Seconds of audio per text, overriding CHARS_PER_SECOND.
   seconds?: Record<string, number>;
+  // Milliseconds to synthesize a text, overriding SYNTH_MS — a cold or backed-up engine.
+  synthMs?: Record<string, number>;
 }
 
 let teardown: (() => void) | null = null;
@@ -266,7 +268,7 @@ function world(options: WorldOptions = {}) {
       view.setUint32(24, 22_050, true); view.setUint32(28, BYTE_RATE, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
       ascii(36, "data"); view.setUint32(40, dataBytes, true);
       view.setUint32(44, seq, true);
-      return new Promise((resolve) => setTimeout(() => resolve(bytes), SYNTH_MS));
+      return new Promise((resolve) => setTimeout(() => resolve(bytes), options.synthMs?.[text] ?? SYNTH_MS));
     },
   };
 
@@ -358,6 +360,12 @@ function world(options: WorldOptions = {}) {
     if (found === undefined) throw new Error(`"${text}" was never synthesized`);
     return found;
   };
+  // What was heard, in the order it started, and how each one ended.
+  const heard = (): string[] =>
+    clips
+      .filter((c) => c.startedAt !== null)
+      .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+      .map((c) => `${c.text}:${c.outcome}`);
   // Every 10 ms sample at which sound was coming out while main said it was not speaking.
   const uncovered = (): number[] => samples.filter((s) => s.audible && !s.speaking).map((s) => s.t);
   const speakingAt = (t: number): boolean | undefined => samples.find((s) => s.t === t)?.speaking;
@@ -369,7 +377,7 @@ function world(options: WorldOptions = {}) {
     rejectNextPlay = message;
   };
 
-  return { shell, session, win, renderer, clips, clip, synthesized, errors, samples, now, advance, until, uncovered, speakingAt, timeouts, failNextPlay };
+  return { shell, session, win, renderer, clips, clip, heard, synthesized, errors, samples, now, advance, until, uncovered, speakingAt, timeouts, failNextPlay };
 }
 
 const LONG = "LONG";
@@ -434,24 +442,33 @@ describe("M24 — a clip longer than 15 s plays to its end", () => {
     expect(w.uncovered()).toEqual([]);
   });
 
-  // PINNED, NOT CHOSEN (M24 open question). These two are what the fix does to an utterance that
-  // waits more than 8 s behind a clip that is still legitimately playing: SpeechSession drops it
-  // as stale (its DEFAULT_STALE_AFTER_MS), where before M24 it cut the clip at 15 s and was said.
-  // Nothing is cut and nothing talks over anything — but NEXT is not heard either. If that rule
-  // changes, these are the tests to re-justify.
-  it("S2: queued 20 s before a long clip ends — the clip is not cut; NEXT is dropped as stale", async () => {
+  // S2/S3/S4 wait LONGER than SpeechSession's 8 s staleness window behind a clip that is still
+  // playing. Before M24's stale-rule change they were dropped as stale (pinned that way for one
+  // review); time behind a playing clip no longer ages an utterance, so they are said, after it.
+  it("S2: queued at 10 s behind a 30 s clip (20 s of waiting) — said after it, nothing cut", async () => {
     const w = world({ seconds: { [LONG]: 30, [NEXT]: 2 } });
     w.session.speak(LONG);
     await w.until(10_000);
     w.session.speak(NEXT);
     await w.until(34_000);
 
-    expect(w.clip(LONG).outcome).toBe("ended");
-    expect(w.synthesized).toEqual([LONG]);
+    expect(w.heard()).toEqual([`${LONG}:ended`, `${NEXT}:ended`]);
     expect(w.uncovered()).toEqual([]);
   });
 
-  it("S4: queued after the old 15 s mark — the clip is not cut; NEXT (10 s behind) is dropped as stale", async () => {
+  it("S3: queued at 2 s behind a 30 s clip (28 s of waiting) — said after it, nothing cut", async () => {
+    // In the M24 repro this one was DROPPED (13 s old when a 15 s-capped queue reached it). Now
+    // the clip plays out and EARLY is said after it.
+    const w = world({ seconds: { [LONG]: 30, EARLY: 2 } });
+    w.session.speak(LONG);
+    await w.until(2_000);
+    w.session.speak("EARLY");
+    await w.until(34_000);
+
+    expect(w.heard()).toEqual([`${LONG}:ended`, "EARLY:ended"]);
+  });
+
+  it("S4: queued at 20 s, after the old 15 s mark — the clip is not cut, and NEXT is said after it", async () => {
     const w = world({ seconds: { [LONG]: 30, [NEXT]: 2 } });
     w.session.speak(LONG);
     await w.until(20_000);
@@ -461,8 +478,22 @@ describe("M24 — a clip longer than 15 s plays to its end", () => {
     expect(w.clip(LONG).outcome).toBe("playing");
     await w.until(34_000);
 
-    expect(w.clip(LONG).outcome).toBe("ended");
-    expect(w.synthesized).toEqual([LONG]);
+    expect(w.heard()).toEqual([`${LONG}:ended`, `${NEXT}:ended`]);
+    expect(w.uncovered()).toEqual([]);
+  });
+
+  it("S2+S4: several queued behind one long clip are all said, in the order they were queued", async () => {
+    const w = world({ seconds: { [LONG]: 30, ONE: 1, TWO: 1, THREE: 1 } });
+    w.session.speak(LONG);
+    await w.until(2_000);
+    w.session.speak("ONE");
+    await w.until(10_000);
+    w.session.speak("TWO");
+    await w.until(20_000);
+    w.session.speak("THREE");
+    await w.until(36_000);
+
+    expect(w.heard()).toEqual([`${LONG}:ended`, "ONE:ended", "TWO:ended", "THREE:ended"]);
     expect(w.uncovered()).toEqual([]);
   });
 
@@ -475,6 +506,65 @@ describe("M24 — a clip longer than 15 s plays to its end", () => {
     expect(w.clip("A").outcome).toBe("ended");
     expect(w.clip("B").outcome).toBe("ended");
     expect(w.clip("B").startedAt).toBeGreaterThan(w.clip("A").stoppedAt ?? Infinity);
+  });
+});
+
+describe("M24 — the staleness rule counts waiting, not listening", () => {
+  it("a synthesis backlog still drops what waited more than 8 s with nothing playing", async () => {
+    // A cold or backed-up engine: 10 s to synthesize A. Nothing plays during that time, so B's
+    // wait is real waiting — the case the rule was written for (M14 live: a dialog cancelled
+    // 5 s before the app spoke about it).
+    const w = world({ seconds: { A: 1, B: 1, C: 1 }, synthMs: { A: 10_000 } });
+    w.session.speak("A");
+    await w.until(500);
+    w.session.speak("B"); // will have waited ~9.5 s of not-playing when its turn comes
+    await w.until(9_500);
+    w.session.speak("C"); // ~1.5 s of not-playing: fresh
+    await w.until(15_000);
+
+    expect(w.heard()).toEqual(["A:ended", "C:ended"]);
+    expect(w.synthesized).not.toContain("B");
+  });
+
+  it("time with nothing playing AFTER a long clip still counts", async () => {
+    // Y waits behind LONG (not counted), then behind X's 9 s synthesis (counted) — and X's own
+    // second of playing (not counted). ~9 s of real waiting: dropped.
+    const w = world({ seconds: { [LONG]: 30, X: 1, Y: 1 }, synthMs: { X: 9_000 } });
+    w.session.speak(LONG);
+    await w.until(10_000);
+    w.session.speak("X");
+    await w.until(11_000);
+    w.session.speak("Y");
+    await w.until(45_000);
+
+    expect(w.heard()).toEqual([`${LONG}:ended`, "X:ended"]);
+    expect(w.synthesized).not.toContain("Y");
+  });
+
+  it("back-to-back long clips, each followed by a short 'Sent.', are all said in order", async () => {
+    const w = world({ seconds: { L1: 20, L2: 20, "Sent.": 0.8 } });
+    w.session.speak("L1");
+    await w.until(1_000);
+    w.session.speak("Sent.");
+    await w.until(2_000);
+    w.session.speak("L2");
+    await w.until(3_000);
+    w.session.speak("Sent.");
+    await w.until(46_000);
+
+    expect(w.heard()).toEqual(["L1:ended", "Sent.:ended", "L2:ended", "Sent.:ended"]);
+    expect(w.uncovered()).toEqual([]);
+  });
+
+  it("the 8-item cap still drops the OLDEST of what is waiting", async () => {
+    const queued = Array.from({ length: 10 }, (_, i) => `Q${i}`);
+    const w = world({ seconds: { [LONG]: 30, ...Object.fromEntries(queued.map((q) => [q, 1])) } });
+    w.session.speak(LONG);
+    await w.until(5_000);
+    for (const q of queued) w.session.speak(q);
+    await w.until(45_000);
+
+    expect(w.heard()).toEqual([`${LONG}:ended`, ...queued.slice(2).map((q) => `${q}:ended`)]);
   });
 });
 

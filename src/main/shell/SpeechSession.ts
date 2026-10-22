@@ -46,6 +46,14 @@ const DEFAULT_MAX_QUEUED = 8;
 // at roughly five seconds), but a faster engine would only shrink the window, not close it. The
 // fix for the latency is a persistent process, and that is a separate change; the fix for
 // saying stale things is to stop saying them.
+//
+// WHAT COUNTS AS WAITING (M24). Time spent behind a clip that is PLAYING does not age an
+// utterance; time spent with nothing playing — a synthesis backlog, the gap between clips — does.
+// The rule was written when every clip was cut at 15 s, so waiting behind one was short. Once a
+// clip plays to its end, a "Sent." queued during a 30 s read-out would be dropped as stale for no
+// reason but the length of what came before it: the world did not move on, the user was
+// listening. A barge-in still clears the queue outright (`stop()`), which is what handles "the
+// user has moved on" while something is playing.
 const DEFAULT_STALE_AFTER_MS = 8_000;
 
 export interface SpeechSessionOptions {
@@ -60,10 +68,15 @@ export interface SpeechSessionOptions {
 }
 
 export class SpeechSession {
-  // Each utterance remembers WHEN it was queued, so one that has been overtaken by events
-  // can be dropped instead of spoken. See DEFAULT_STALE_AFTER_MS above.
-  private readonly queue: { text: string; at: number }[] = [];
+  // Each utterance remembers WHEN it was queued, and how much playing had happened by then, so
+  // its age can leave out the time it spent behind a clip that was still playing. One that has
+  // been overtaken by events can be dropped instead of spoken. See DEFAULT_STALE_AFTER_MS above.
+  private readonly queue: { text: string; at: number; playedAt: number }[] = [];
   private draining: Promise<void> | null = null;
+  // Total time spent inside shell.play() so far, and when the clip playing now started (null
+  // when nothing is playing). Together they say how much of any interval was spent playing.
+  private playedMs = 0;
+  private playingSince: number | null = null;
   // Bumped by every stop(). Work already in flight compares the value it started with against
   // this one; a mismatch means "you were interrupted, throw it away". A boolean flag could not
   // do this job — two barge-ins in quick succession have to invalidate two different utterances.
@@ -103,7 +116,7 @@ export class SpeechSession {
   speak(text: string): void {
     if (text.trim().length === 0) return; // the engine exits non-zero on empty input
 
-    this.queue.push({ text, at: this.now() });
+    this.queue.push({ text, at: this.now(), playedAt: this.playedSoFar() });
     while (this.queue.length > this.maxQueued) this.queue.shift();
 
     if (this.draining === null) {
@@ -135,8 +148,9 @@ export class SpeechSession {
       if (queued === undefined) break;
 
       // Overtaken by events while it waited. Saying it now would describe a world that has
-      // already moved on, which is worse than saying nothing.
-      if (this.now() - queued.at > this.staleAfterMs) continue;
+      // already moved on, which is worse than saying nothing. Time behind a playing clip is
+      // not waiting (M24).
+      if (this.ageOf(queued) > this.staleAfterMs) continue;
       const text = queued.text;
 
       let wav: Uint8Array;
@@ -156,14 +170,27 @@ export class SpeechSession {
       if (mine !== this.generation) continue;
 
       this.reportedFailure = false;
+      this.playingSince = this.now();
       try {
         await this.shell.play(wav);
       } catch (error) {
         // The contract says play() resolves rather than rejects, but a shell is real code and
         // this loop is the one thing that must not die.
         this.report(messageOf(error));
+      } finally {
+        this.playedMs += this.now() - this.playingSince;
+        this.playingSince = null;
       }
     }
+  }
+
+  private playedSoFar(): number {
+    return this.playedMs + (this.playingSince === null ? 0 : this.now() - this.playingSince);
+  }
+
+  // How long this utterance has waited, not counting time spent behind a clip that was playing.
+  private ageOf(queued: { at: number; playedAt: number }): number {
+    return this.now() - queued.at - (this.playedSoFar() - queued.playedAt);
   }
 
   private report(message: string): void {

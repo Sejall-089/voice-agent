@@ -292,4 +292,67 @@ describe("SpeechSession — an utterance that has been overtaken by events", () 
 
     expect(synth.spoken).toEqual(["First.", "Queued late, so still fresh."]);
   });
+
+  // RE-JUSTIFIED AT M24. Every tick in the three tests above lands while the ENGINE is busy and
+  // nothing is playing (playback here resolves at once) — which is still waiting under M24's
+  // rule, so they still distinguish "stale" from "fresh". What M24 changed is the other case:
+  // time behind a clip that is PLAYING, below.
+
+  // Playback is held, and the clock moves while it is.
+  function clockedPlayback(staleAfterMs: number) {
+    const shell = new MockShell({ context: NO_CONTEXT, holdPlayback: true });
+    const synth = new FakeSynthesizer();
+    let now = 0;
+    const speech = new SpeechSession(shell, synth, { staleAfterMs, now: () => now });
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    };
+    return { shell, synth, speech, settle, tick: (ms: number) => (now += ms) };
+  }
+
+  it("does not age an utterance while a clip is playing (M24)", async () => {
+    const { speech, synth, shell, settle, tick } = clockedPlayback(1000);
+
+    speech.speak("A long read-out.");
+    await settle(); // synthesized, now playing (held)
+    speech.speak("Sent.");
+    tick(30_000); // thirty seconds of listening
+    shell.finishPlayback();
+    await settle();
+    shell.finishPlayback();
+    await speech.settled();
+
+    expect(synth.spoken).toEqual(["A long read-out.", "Sent."]);
+  });
+
+  it("does age it again once the clip has ended (M24)", async () => {
+    // Waiting behind playback is forgiven; waiting after it is not. Here the second utterance's
+    // own turn comes only once a held synthesis is released, 5 s after the clip ended.
+    const shell = new MockShell({ context: NO_CONTEXT, holdPlayback: true });
+    const synth = new FakeSynthesizer({ hold: true });
+    let now = 0;
+    const speech = new SpeechSession(shell, synth, { staleAfterMs: 1000, now: () => now });
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    };
+
+    speech.speak("First.");
+    synth.release();
+    await settle(); // First is playing
+    speech.speak("Second.");
+    speech.speak("Third.");
+    now += 30_000; // behind a playing clip: not counted
+    shell.finishPlayback();
+    await settle(); // Second's synthesis starts, and is held
+    now += 5_000; // nothing playing: counted
+    synth.release();
+    await settle();
+    shell.finishPlayback();
+    await settle();
+    synth.release();
+    await speech.settled();
+
+    // Second was checked before its synthesis (fresh); Third waited 5 s with nothing playing.
+    expect(synth.spoken).toEqual(["First.", "Second."]);
+  });
 });
