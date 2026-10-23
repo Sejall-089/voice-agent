@@ -3,7 +3,7 @@
 > **NOT RUN BY A PERSON; M30 CLOSED 2026-10-23 on scripted and test evidence, with every box
 > open.** `spec.md` §9 (M30): a plan with a summarize or rewrite step before a Linear or GitHub
 > create is refused unless the instruction asks for that step (`checkUnaskedSteps`, `spec.md` §5b,
-> "A step nobody asked for, before a create"). 0 ticked, 6 open. The refusal has not been seen
+> "A step nobody asked for, before a create"). 1 ticked (1.2, heard by a person), 5 open. The refusal has not been seen
 > against a real model plan (see **Script-verified** below).
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
@@ -62,8 +62,8 @@ has one: it records whether the model put the copied text in the create as it is
 - [ ] **1.1** The refused try shows no preview and no dialog, and the bar shows exactly: *"I won't
       summarize/reword it unless you ask. Ask again to file it as it is, or say 'summarize' /
       'rewrite' if you want that."*
-- [ ] **1.2** *(Needs a person to listen. Without a refused plan:
-      `npx vite-node scripts/m30-say-refusal.ts`.)* The spoken message says the same sentence, whole. Write down how "summarize/reword"
+- [x] **1.2** *(Heard by Sejal 2026-10-23: slash audible, natural; wording kept. Through
+      `npx vite-node scripts/m30-say-refusal.ts`, without a refused plan.)* The spoken message says the same sentence, whole. Write down how "summarize/reword"
       and "'summarize' / 'rewrite'" sounded.
 - [ ] **1.3** The terminal's `[main] refused plan, as sent:` line for that try lists
       `"tool":"summarize"` before `"tool":"linear__create_issue"`.
@@ -122,7 +122,8 @@ Total: 17 real planning calls, est. ~$0.024.
   - `tests/unaskedSteps.test.ts` and `tests/planner.unaskedSteps.test.ts`.
 - **Box 2: 5 of 5 by script,** with the summarize step's own model call faked. It shows the
   description came from step 1, not what a real summary reads like. Box 2 stays open for a person.
-- **Box 1.2 needs a person to listen.** The script compared only the string handed to speech.
+- **Box 1.2 needed a person to listen** (since heard by Sejal, 2026-10-23, and ticked). The
+  script compared only the string handed to speech.
   To hear the exact sentence through the real speech engine without needing a refused plan:
   `npx vite-node scripts/m30-say-refusal.ts`. It plays audio; `--no-play` only writes the WAV.
   The text comes from the refusal constant (`UNASKED_STEP`) through the same `toSpokenResult` the
