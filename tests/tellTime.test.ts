@@ -81,12 +81,56 @@ describe("formatTimeAnswer — the date", () => {
   });
 });
 
+// M32. "What's the date and time" got the time alone: the enum had no way to ask for both.
+describe("formatTimeAnswer — both", () => {
+  it.each([
+    [at(9, 21), KOLKATA, "It's Thursday, 22 October, 2:51 PM."],
+    [at(18, 35, 21), KOLKATA, "It's Thursday, 22 October, 12:05 AM."],
+    [at(18, 35, 21), NEW_YORK, "It's Wednesday, 21 October, 2:35 PM."],
+  ])("%i in %s -> %s", (now, zone, expected) => {
+    expect(formatTimeAnswer("both", now, zone)).toBe(expected);
+  });
+
+  it("is plain ASCII, and the time and date answers are unchanged beside it", () => {
+    expect(formatTimeAnswer("both", at(9, 21), KOLKATA)).toMatch(/^[\x20-\x7E]+$/);
+    expect(formatTimeAnswer("time", at(9, 21), KOLKATA)).toBe("It's 2:51 PM.");
+    expect(formatTimeAnswer("date", at(9, 21), KOLKATA)).toBe("It's Thursday, 22 October.");
+  });
+
+  it("is assembled from the pieces, whatever separators an ICU puts between them", () => {
+    const narrowNbsp = " ";
+    const parts = (_locale: string, options: Intl.DateTimeFormatOptions) =>
+      options.weekday !== undefined
+        ? [
+            { type: "weekday" as const, value: "Thursday" },
+            { type: "literal" as const, value: " " },
+            { type: "day" as const, value: "22" },
+            { type: "literal" as const, value: narrowNbsp },
+            { type: "month" as const, value: "October" },
+          ]
+        : [
+            { type: "hour" as const, value: "7" },
+            { type: "literal" as const, value: "." },
+            { type: "minute" as const, value: "05" },
+            { type: "literal" as const, value: narrowNbsp },
+            { type: "dayPeriod" as const, value: "pm" },
+          ];
+    expect(formatTimeAnswer("both", 0, KOLKATA, parts)).toBe("It's Thursday, 22 October, 7:05 PM.");
+  });
+
+  it("the schema offers it", () => {
+    const what = (tellTimeTool.inputSchema.properties as Record<string, { enum?: string[] }>)["what"];
+    expect(what?.enum).toEqual(["time", "date", "both"]);
+  });
+});
+
 describe("how it is spoken", () => {
   it.each([
     ["It's 2:51 PM.", "It's 2 51 PM."],
     ["It's 12:00 PM.", "It's 12 PM."],
     ["It's 12:05 AM.", "It's 12 oh 5 AM."],
     ["It's Thursday, 22 October.", "It's Thursday, 22 October."],
+    ["It's Thursday, 22 October, 2:51 PM.", "It's Thursday, 22 October, 2 51 PM."],
   ])("%s is said as %s", (shown, said) => {
     expect(toSpokenResult(shown)).toEqual({ text: said, remainder: null });
   });
@@ -122,6 +166,15 @@ describe("tellTime through the planner", () => {
     const outcome = await planner.run("what's the date");
 
     expect(outcome.result).toMatch(/^It's [A-Z][a-z]+day, \d{1,2} [A-Z][a-z]+\.$/);
+  });
+
+  it("answers both in one sentence when both are asked (M32)", async () => {
+    const { planner, shell } = run("both");
+    const outcome = await planner.run("what's the date and time");
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.result).toMatch(/^It's [A-Z][a-z]+day, \d{1,2} [A-Z][a-z]+, (1[0-2]|[1-9]):[0-5]\d (AM|PM)\.$/);
+    expect(shell.results).toEqual([outcome.result]);
   });
 
   it("is on the menu with no configuration at all", () => {

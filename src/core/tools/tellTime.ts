@@ -24,20 +24,26 @@ const intlParts: DateParts = (locale, options, at) =>
   new Intl.DateTimeFormat(locale, options).formatToParts(at);
 
 export function formatTimeAnswer(
-  what: "time" | "date",
+  what: "time" | "date" | "both",
   now: number,
   zone: string,
   partsOf: DateParts = intlParts,
 ): string {
   const at = new Date(now);
-  if (what === "date") {
+  const day = (): string => {
     const parts = partsOf("en-GB", { timeZone: zone, weekday: "long", day: "numeric", month: "long" }, at);
     const get = (type: string): string => parts.find((part) => part.type === type)?.value ?? "";
-    return `It's ${get("weekday")}, ${get("day")} ${get("month")}.`;
-  }
-  const parts = partsOf("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit", hourCycle: "h12" }, at);
-  const get = (type: string): string => parts.find((part) => part.type === type)?.value ?? "";
-  return `It's ${get("hour")}:${get("minute")} ${get("dayPeriod").toUpperCase()}.`;
+    return `${get("weekday")}, ${get("day")} ${get("month")}`;
+  };
+  const clock = (): string => {
+    const parts = partsOf("en-US", { timeZone: zone, hour: "numeric", minute: "2-digit", hourCycle: "h12" }, at);
+    const get = (type: string): string => parts.find((part) => part.type === type)?.value ?? "";
+    return `${get("hour")}:${get("minute")} ${get("dayPeriod").toUpperCase()}`;
+  };
+  if (what === "date") return `It's ${day()}.`;
+  // M32. One short answer for "what's the date and time", from the same parts as the other two.
+  if (what === "both") return `It's ${day()}, ${clock()}.`;
+  return `It's ${clock()}.`;
 }
 
 // `safe`: it reads the machine's clock and says it. `statusOnly`: like jobStatus it is answered
@@ -47,16 +53,16 @@ export const tellTimeTool: Tool = {
   description:
     "Tell the user the current local time, or today's date. Use it when the user ASKS what time " +
     "it is ('what's the time?', 'what time is it?') with what='time', or what day or date it is " +
-    "('what's the date?', 'what day is it today?') with what='date'. It answers with the time " +
-    "only, or the date only. Do NOT use it to work out a time for something else (a meeting, a " +
-    "reminder): those tools take the time themselves.",
+    "('what's the date?', 'what day is it today?') with what='date'. When the user asks for both " +
+    "in one question ('what's the date and time?'), use what='both'. Do NOT use it to work out a " +
+    "time for something else (a meeting, a reminder): those tools take the time themselves.",
   inputSchema: {
     type: "object",
     properties: {
       what: {
         type: "string",
-        enum: ["time", "date"],
-        description: "'time' for the time of day, 'date' for today's date.",
+        enum: ["time", "date", "both"],
+        description: "'time' for the time of day, 'date' for today's date, 'both' for the two together.",
       },
     },
     required: ["what"],
@@ -68,5 +74,11 @@ export const tellTimeTool: Tool = {
   // Nothing to look up: the answer is the clock.
   resolvesReferences: false,
   handler: (input: ToolInput): Promise<string> =>
-    Promise.resolve(formatTimeAnswer(input["what"] === "date" ? "date" : "time", Date.now(), localZone())),
+    Promise.resolve(
+      formatTimeAnswer(
+        input["what"] === "date" ? "date" : input["what"] === "both" ? "both" : "time",
+        Date.now(),
+        localZone(),
+      ),
+    ),
 };
