@@ -1270,6 +1270,71 @@ word is part of the bug. Neither set was checked against a model.
   it `equals clipboard` (whitespace aside), `differs from clipboard`, or is `from an earlier step`
   (`createDescriptions`, `PlannerOutcome.descriptions`); it changes no behaviour.
 
+### A send the instruction asked for, missing from the answer (added 2026-10-23, M31)
+
+"create a linear issue and send to fun", with a long clipboard and no email open, sometimes came
+back as a lone create: the issue would have been filed and fun never told. M30's scripted run saw
+it 4 times in 12; M31's recon 3 in 6 with a fresh action log and 0 in 6 with a shared one, all
+three lone tool calls; live, row 559 filed a real issue that way. Nothing compared what was
+asked with what was planned.
+
+`checkDroppedSends` (`core/chain.ts`, pure) refuses a **plan or a lone call** that holds a create
+(`contentArg`) and **no step** of a tool declaring **`Tool.askedWithCreateBy`**, when the
+**instruction** says one of that tool's words **with a destination the app knows**. Refuses;
+never adds the missing step.
+
+| Tool | `askedWithCreateBy` |
+|---|---|
+| `sendMessage` | send, post, tell, let ... know, share, message, ping |
+
+- **Its own field, not `askedForBy`.** `checkUnaskedSteps` judges every tool declaring
+  `askedForBy` when its step comes before a create, and would then refuse a send step there with
+  the summarize/reword wording. Never sent to the model.
+- **A word plus a known destination (`asksFor`).** Over the instruction only, with quoted text
+  removed, one clause at a time (split at `, . ; : ! ?`):
+  - the word as a whole token ("post-merge" is not "post"), then the destination at once ("tell
+    fun", "ping the team"), or after up to three object words and `to` / `in` / `on` / `into`
+    ("send to fun", "share it in #social"). "let ... know" takes the destination between.
+  - the destination (up to four words, longest first) is **known** when it is a `#name`; or
+    `memory.resolve` (the lookup `checkReference` makes) gives a `#channel`; or, without a leading
+    "the" / "my" and a trailing "channel", it is a bare name whose `#channel` some memory fact
+    holds as its value ("fun" when a fact says "#fun"). `channelKnowledge(memory)` reads that set
+    from `memory.query("")` once per check.
+  - **A bare name is not taken as given**, as `checkReference` would take it: that would make any
+    word after "to" a destination ("an issue to tell users about downtime").
+- **Not looked at:** an answer with no create ("reply to this and send it", "summarize this and
+  send to fun"); a plan that already has the send, before the create or after it.
+- **Where.** On a plan after `checkUnaskedSteps`, before the one-step branch, `settleReferences`,
+  `admit`, the preview and any step; on a lone call after `checkUnreadContent`, before
+  `askBeforeLoneCall` and `admit`. Both paths judge the answer after the multi-call retry. A
+  detached job is refused the same way, before admission.
+- **What the user gets.** One fixed plain-ASCII sentence with no slash: "You asked me to send it
+  too, but my plan had no send step, so nothing was filed. Ask again, or file it and send it as
+  two requests." Shown and spoken whole. Logged `refused`, `tool: null`, `arguments: { plan:
+  [tool names as sent] }`, never through `logMiss`, and kept out of the next planning call's
+  previous turn (`isDroppedSendRefusal`).
+
+**Measured** (`tests/droppedSends.test.ts`), no model calls: every drop on record is refused (the
+3 recon drops, M28's "create only" trial, row 559, `tests/fixtures/sendDropped/drops.ts`); none of
+the 77 recorded answers is refused (all kept their send); of M28's 45 eval trials only the "create
+only" one is, and the 32 that asked for a send and kept it are not. M30's 30/30, 5/5 and 24
+controls are unchanged (`checkUnaskedSteps` is untouched). M30's live fixture is not replayed:
+those runs were cancelled at a dialog, and a send planned after the create was never logged.
+
+**Known gaps.**
+- **Only sends.** Row 559 also dropped "note changes in notion"; a dropped Notion step (or any
+  other tool's) is not checked.
+- **A channel memory has never been told about is not known**, even if it exists in Slack ("send
+  to general"): the drop is let through. The bot-mode channel directory is a network call and is
+  not consulted. The same for a phrase memory does not resolve ("tell the bugs channel" with no
+  "#bugs" fact).
+- **More than three object words** before the preposition ("send all of the notes to fun"), or a
+  destination longer than four words, is not read as a send.
+- **A known destination inside the content** is read as a send: "file a bug: the share button in
+  #social crashes", "file an issue to tell the team lead" (when "team" resolves).
+- **A refusal costs a try.** In M31's live run, 3 of 12 tries of "…send to fun" were refused this
+  way, and 1 of 6 of "…post in fun".
+
 ### Deliberately deferred
 
 No new tools; no conditional branching mid-chain ("if I'm free at 3, book X, otherwise Y" — a
@@ -5260,7 +5325,109 @@ Post-v0:
       linear issue and send to fun", the planner produced a lone create and dropped the send (no
       plan; the issue would have been filed and fun never told). The same shape appears in M28's
       baseline (one "create only, no description, no send" trial) and is the "lone create that
-      drops a send" §5b names as a different failure.
+      drops a send" §5b names as a different failure. *(M31 refuses it; see M31.)*
+
+- [ ] **M31 — refuse a create plan that drops a requested send.** **In progress (built
+      2026-10-23; no person has run `docs/M31-live-checklist.md`).** For M30's open finding. Code
+      and tests committed as `3f3a861`; the scripted results and checklist in a second commit.
+      Not pushed.
+
+      **Recon (live model, faked connectors, 12 calls).** The M30 harness, copied, now saving each
+      raw answer's kind and arguments; "create a linear issue and send to fun", M28's long
+      clipboard, no email open; gpt-5-mini at low effort.
+
+      | Log | Trials | Dropped the send | Kind of every drop |
+      |---|---|---|---|
+      | fresh per trial | 6 | **3** (#1, #4, #6) | lone tool call (3 of 3) |
+      | shared across trials | 6 | 0 | — |
+
+      No one-step plan dropped it. The three answers are a lone `linear__create_issue` with the
+      clipboard as copied as the description. Saved, with the clipboard replaced by a marker, in
+      `tests/fixtures/sendDropped/drops.ts` with M28's "create only" trial and row 559 (its real
+      title and description replaced). Why a fresh log drops more is not known; the previous turn
+      a shared log hands the model (the last trial's cancelled create) is one difference.
+
+      **What shipped** (§5b, "A send the instruction asked for, missing from the answer"):
+      `checkDroppedSends`, `asksFor`, `channelKnowledge`, `droppedSends`, `isDroppedSendRefusal`
+      and `DROPPED_SEND` in `core/chain.ts`; `Tool.askedWithCreateBy`, declared by `sendMessage`
+      only; the check on the plan path (before the one-step branch) and the lone-call path in
+      `planner.ts`, and kept out of the previous turn. `scripts/m30-say-refusal.ts` gains
+      `--dropped-send` for the sound check. No prompt change.
+
+      **Decisions taken in the build, against the plan as written:**
+      - **A sibling field, not `askedForBy`.** Reusing it would put `sendMessage` under M30's
+        check whenever a send step came before a create, refused with the summarize/reword
+        wording.
+      - **The destination rule is stricter than `settleReferences`,** which takes any bare literal
+        as given. A bare name counts only when memory holds its `#channel`; a `#name` or a phrase
+        `memory.resolve` turns into a `#channel` also counts. A pure function, with memory passed
+        in as `preflightReferences` takes it. The bot-mode channel directory (a network call) is not
+        consulted.
+      - **The wording** ends "Ask again, or file it and send it as two requests." rather than the
+        suggested "Ask again and I will plan both.", which promises a plan the model may not make.
+      - **M30's live fixture is not replayed:** its runs were cancelled at a dialog and never logged
+        a send planned after the create.
+
+      **Tests.** 58 new; 3350 total.
+      - `tests/droppedSends.test.ts` (new, 42), the real registry and connector definitions, memory
+        holding the app's own channel facts (`#help`, `#social`, `#fun`, "team" = `#social`):
+        the declaration (exact list, on `sendMessage` only, never in the schemas); what memory
+        knows; the phrasing set — all 7 asking phrasings ask, all 7 content phrasings do not
+        ("ping the team" resolves through "team", so it is not a gap); a `#name` with empty
+        memory, a bare name only when known, a resolved phrase and "the X channel", three object
+        words and not four, "let ... know", whole tokens and clauses, quotes but not
+        apostrophes; the rule on both shapes, a GitHub create, the `functions.` prefix, a send
+        before or after the create, no create, no send asked, `sendReply` not the send; the
+        refusal text (ASCII, no slash, under the cap, spoken whole) and its row; the replay — 5
+        drops refused, 77 recorded answers not, M28's eval: only "create only" refused, 32
+        asking-and-kept not.
+      - `tests/planner.droppedSends.test.ts` (new, 16), the real planner with made-up tools: a lone
+        create refused before the dialog with one row, no chain and no miss; judged after the
+        multi-call retry; controls (no send asked; a channel nobody taught); a one-step plan and a
+        plan with another kind of send refused; names logged as sent; create > send and send >
+        create run; no create runs; the clipboard is not judged, both directions; kept out of the
+        previous turn, with its control; a real Linear create over a fake MCP server sends
+        nothing; a detached job refused before admission.
+
+      Mutations (each made with the Edit tool and undone with it; the tree checked clean after):
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Refuse on the lone-call path | check disabled there | 5 |
+      | Refuse on the plan path | check disabled there | 4 |
+      | A word needs a known destination | any send word counts | 11 |
+      | Judge the instruction | judge the clipboard text, both call sites | 10 |
+      | `sendReply` is not the send | any step named send/reply satisfies it | 2 |
+      | Kept out of the previous turn | exclusion dropped | 1 |
+
+      All six were caught the first time.
+
+      **Scripted live verification (2026-10-23, 24 calls, the check built in).** Fresh log per trial,
+      Cancel at every dialog, every connector faked as in the recon.
+
+      | Instruction | Trials | Refused by M31 | Ran: create > send, cancelled | Other | Creates / sends at the fakes |
+      |---|---|---|---|---|---|
+      | "create a linear issue and send to fun" | 12 | 3 (lone tool calls) | 6 | **3**: summarize > create > send, refused by **M30** | 0 / 0 |
+      | "create a linear issue and post in fun" | 6 | 1 (lone tool call) | 3 | **2**: summarize > create > send, refused by **M30** | 0 / 0 |
+      | "create a linear issue" (control) | 6 | 0 | — (6 lone creates, each to its dialog, cancelled) | 0 | 0 / 0 |
+
+      **The five "other" trials** are outside the two endings the plan allowed, so by its own
+      wording they are failures. They are M30's check working: each plan put an unasked summarize
+      step before the create, and each was refused with M30's exact wording before any preview
+      or dialog, with nothing at the fakes. **This is the first time M30's refusal was seen against
+      a real model plan** (M30's own scripted run, with a shared log, saw 0 in 12). No trial ended
+      any other way. Dry run, scripted (no model): a lone create and a one-step plan for "create a
+      linear issue and send to fun" are both refused with the exact wording, no preview, no
+      dialog, nothing filed.
+
+      **Model calls:** 36 (recon 12, verification 24), est. ~$0.058.
+
+      **Build record (2026-10-23).** `npm test`: **3350 passed across 142 files, 96 skipped**. Both
+      typechecks clean.
+
+      **Known gaps:** §5b's list (only sends are checked — row 559's Notion step is not; a channel
+      memory was never told about; four object words; a known destination inside the content; a
+      refusal costs a try). M28's prose question with nothing waiting is not touched.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

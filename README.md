@@ -405,6 +405,16 @@ refused, and a word that is part of the
 bug ("the summarize button is broken") lets the step through. See spec.md §5b, "A step nobody
 asked for, before a create".
 
+**It won't file without the send you asked for.** If you ask for an issue *and* a message ("create
+a linear issue and send to fun", "…and let #bugs know") and the plan files the issue with no send
+step, it refuses before anything runs: *"You asked me to send it too, but my plan had no send step,
+so nothing was filed. Ask again, or file it and send it as two requests."* It counts a send only
+when a send word (send, post, tell, let … know, share, message, ping) comes with a channel it
+knows: a `#name`, or a channel you have taught it ("fun" once it knows `#fun`). So "file a bug: the
+send button is broken" is not a send. A channel you have never taught it isn't known, and a drop to
+it goes through as before. See spec.md §5b, "A send the instruction asked for, missing from the
+answer".
+
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
 you later.
@@ -1035,7 +1045,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3292 tests across 140 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3350 tests across 142 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1045,6 +1055,20 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M31 (refuse a create plan that drops a requested send) is built and in progress (23 Oct 2026);
+no person has run its checklist yet.** For M30's open finding: asked to "create a linear issue and
+send to fun", the planner sometimes filed the issue alone. A plan or single call that creates an
+issue with no send step, when you asked for one to a channel the app knows, is now refused.
+Scripted against the real model with every connector faked, 24 trials, nothing filed:
+- **Refused by M31:** 4 lone creates.
+- **Ran:** 9 create-then-send plans, cancelled at the Linear dialog.
+- **Refused by M30:** 5 plans with an unasked summarize step. This is the first time M30's refusal
+  was seen against a real plan.
+- **Control:** "create a linear issue" was never refused (6 of 6).
+
+**3350 tests green across 142 files, 96 skipped.** See `docs/M31-live-checklist.md` and
+`spec.md` §9 (M31).
 
 **M30 (refuse a summarize or rewrite step nobody asked for, before a create) is closed (23 Oct
 2026), on replay, test and scripted evidence; no person has run its checklist yet.** It is for
@@ -1058,7 +1082,7 @@ sentences depending on whether anything is copied. Replayed against every plan o
 model calls: all 30 unasked steps refused, all 5 asked-for ones still run. Not judged: the model
 condensing the text inside the create itself. The console's `[main]` line now says whether each
 create's description equals the clipboard, differs from it, or comes from an earlier step.
-**3292 tests green across 140 files, 96 skipped.** See `docs/M30-live-checklist.md` and `spec.md`
+**3292 tests green across 140 files, 96 skipped, at M30's close.** See `docs/M30-live-checklist.md` and `spec.md`
 §9 (M30).
 
 **M29 (rewrite leaves the clipboard alone inside a chain; fixed preview phrases) is closed (23 Oct
