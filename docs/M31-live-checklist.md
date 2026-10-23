@@ -27,8 +27,8 @@
       **Cancel** at the Linear dialog; nothing is filed and nothing is posted. **If it is refused
       instead**, write down what the bar showed and the terminal's `[main] refused …, as sent:`
       line (a lone create is this check; a summarize step first is M30's).
-      *(Seen by Sejal 2026-10-23: 'create a linear issue and send to fun' with text copied showed
-      Step 1 of 2 (create, then send); cancelled, nothing filed in Linear. Separate earlier try,
+      *(Seen by Sejal 2026-10-23: 'create a linear issue and post in fun' (per action-log row 668)
+      with text copied showed Step 1 of 2 (create, then send); cancelled, nothing filed in Linear. Separate earlier try,
       'create a linear issue and post in fun': the model replied in prose asking for a 'close-out
       prompt' text and which channel 'Claude Code' is (it read the chat page on screen as
       context); no tool ran, nothing filed. Recorded as a finding for the small-items milestone,

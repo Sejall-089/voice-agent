@@ -13,14 +13,23 @@
 //   npx vite-node scripts/m30-say-refusal.ts --no-play    # synthesize only; prints the WAV path
 //   npx vite-node scripts/m30-say-refusal.ts --no-text    # the other wording (nothing copied)
 //   npx vite-node scripts/m30-say-refusal.ts --dropped-send   # M31: a create that dropped a send
+//   npx vite-node scripts/m30-say-refusal.ts --framed-prose   # M32: a model's reply, after the lead
+//   npx vite-node scripts/m30-say-refusal.ts --date-time      # M32: "what's the date and time"
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DROPPED_SEND, UNASKED_STEP, UNASKED_STEP_NO_TEXT } from "../src/core/chain.ts";
-import { toSpokenResult } from "../src/core/speech.ts";
+import { localZone } from "../src/core/llm/prompt.ts";
+import { PROSE_LEAD } from "../src/core/planner.ts";
+import { toSpokenResult, toSpokenWithLead } from "../src/core/speech.ts";
+import type { SpokenText } from "../src/core/speech.ts";
+import { formatTimeAnswer } from "../src/core/tools/tellTime.ts";
 import { PiperSynthesizer } from "../src/core/synthesizers/PiperSynthesizer.ts";
+
+// M32's framed prose needs a model's reply to frame; this one is a stand-in of the live shape.
+const SAMPLE_MODEL_REPLY = "Which channel should I post it in, and what should the issue say?";
 
 const exePath = process.env["PIPER_EXE_PATH"];
 const modelPath = process.env["PIPER_MODEL_PATH"];
@@ -36,12 +45,13 @@ const engine = new PiperSynthesizer({
   legacyFlags: process.env["PIPER_LEGACY_FLAGS"] === "1",
 });
 
-const reason = process.argv.includes("--dropped-send")
-  ? DROPPED_SEND
-  : process.argv.includes("--no-text")
-    ? UNASKED_STEP_NO_TEXT
-    : UNASKED_STEP;
-const spoken = toSpokenResult(reason);
+const has = (flag: string): boolean => process.argv.includes(flag);
+// Each wording through the same function the app uses for it.
+const spoken: SpokenText = has("--framed-prose")
+  ? toSpokenWithLead(PROSE_LEAD, SAMPLE_MODEL_REPLY)
+  : has("--date-time")
+    ? toSpokenResult(formatTimeAnswer("both", Date.now(), localZone()))
+    : toSpokenResult(has("--dropped-send") ? DROPPED_SEND : has("--no-text") ? UNASKED_STEP_NO_TEXT : UNASKED_STEP);
 console.log(`Saying: ${spoken.text}`);
 if (spoken.remainder !== null) console.log(`(held back as "read the rest": ${spoken.remainder})`);
 

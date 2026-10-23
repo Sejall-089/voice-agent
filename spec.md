@@ -1058,10 +1058,19 @@ step results, which stay in a local inside the run so one chain's output can nev
 The flag exists only because something outside `run()` reads it: `main.ts` hands one instance to
 the planner and to **both** hotkey guards.
 
-The instruction hotkey's guard order is **dictation → confirm pending → chain running →
-barge-in**, and the ordering is load-bearing. Inside a chain, a step parked at its gate makes the
-middle two both true, and only `CONFIRM_WAITING` names something the user can act on; swapped,
-the app would tell someone to wait for a chain that is in fact waiting for them.
+The instruction hotkey's guard order is **dictation → the bar's own voice capture (M32) →
+confirm pending → question pending → chain running → barge-in**, and the ordering is
+load-bearing. Inside a chain, a step parked at its gate makes the confirm and chain checks both
+true, and only `CONFIRM_WAITING` names something the user can act on; swapped, the app would tell
+someone to wait for a chain that is in fact waiting for them.
+
+**The voice-capture guard (M32).** A press while the bar's `VoiceSession` is `recording`,
+`stopped` (held at the length cap) or `transcribing` is ignored and logged (`[main] instruction
+hotkey ignored - voice is <state>`): no detach, no `showInput`, no narration, no refocus. Until
+M32 it got through every guard. It detached the attached job; `showInput()` resolved the first
+bar's promise with "", so what had been said so far ran as the instruction; and the new bar was
+deaf, because `begin()` does nothing unless the session is idle. A bar open for typing, with the
+microphone idle, keeps its meaning: a press starts over. `VoiceLike` gains `getState()`.
 `combineInstructionBusy` gains a `"chaining"` state for the same reason on the dictation side —
 dictation would grab the shared microphone and type into whatever holds focus, which mid-chain is
 likely the reply box the chain is writing.
@@ -1334,6 +1343,46 @@ those runs were cancelled at a dialog, and a send planned after the create was n
   #social crashes", "file an issue to tell the team lead" (when "team" resolves).
 - **A refusal costs a try.** In M31's live run, 3 of 12 tries of "…send to fun" were refused this
   way, and 1 of 6 of "…post in fun".
+
+### The previous turn's age, and a reply in the model's own words (added 2026-10-23, M32)
+
+**What the model is given.** The app captures only the clipboard (`WindowsShell.getContext`:
+`selectedText` from the clipboard, `activeApp` and `activeWindowTitle` always null) plus the
+"email is open" flag. No page or screen text is ever sent. The planning request
+(`renderRequest`, `core/llm/prompt.ts`) is the current time, the previous turn, the instruction,
+the whole clipboard labelled `Selected text (clipboard):`, and the email line. The previous turn
+carries its instruction, its arguments as JSON and a 300-character preview of its result.
+
+**The live finding (rows 666 > 667).** "create a linear issue and post in fun" was answered in
+prose, asking for "the full close-out prompt" and which channel "Claude Code" is. Row 666, 152
+minutes earlier, was "rewrite this politely". As a lone call it had copied its rewording to the
+clipboard, and that rewording asked to send Claude Code a close-out prompt. It reached the model
+as the previous turn, and very likely as the clipboard too. It was not the screen. Of the seven
+prose replies to create/send instructions in the log, four followed a refusal one to three
+minutes earlier (which M21's exclusions now cover). Two had a previous turn over an hour old (rows
+647 and 667, 76 and 152 minutes).
+
+**Rule A: a stale previous turn is not sent.** In `decide()`, beside the refusal exclusions, a
+last row older than `PREVIOUS_TURN_MAX_AGE_MS` (10 minutes, by the planner's injected clock) is
+not handed to the model. At the cutoff it is still sent; one second past it, not. A timestamp
+that cannot be read is judged as before. A correction or a pronoun follow-up comes at once, so
+it keeps its turn ("no, I meant the new one"; "send it" after a draft).
+
+**Rule B: a reply the model wrote is framed.** When the model answers with text and no tool,
+`refuse()` shows and speaks it after a fixed lead: "Nothing ran. The model said: " and then the
+model's words. It is plain ASCII with no slash. The text is spoken under the cap shortened by
+the lead (`toSpokenWithLead`), so the lead is always spoken whole and the cut never lands on its
+full stop; the rest is held for "read the rest", as for any long result. The fixed refusal ("I
+can't do that yet…") is unchanged and unframed. The `[main]` line says `[reply: model prose]` or
+`[reply: fixed refusal]` (`PlannerOutcome.reply`). The log row (`logMiss`) still holds no text.
+
+**Deliberately not done** (each changes the planning prompt, and needs an eval with controls):
+- keeping a content tool's result out of the previous turn;
+- asking the model once more when it replies in prose to an action;
+- relabelling or capping the clipboard.
+
+**Known gaps.** A correction asked more than ten minutes later loses its previous turn. A stale
+clipboard is still sent whole: only the previous turn ages out.
 
 ### Deliberately deferred
 
@@ -1731,8 +1780,10 @@ otherwise silent.
 The second status-only tool. "What's the time?" used to have no tool: the model answered in
 prose from the planning prompt's clock line — long, different each time, and logged as a miss.
 `tellTime` (`safe`, `statusOnly`, ungated) reads the clock in code and says one sentence:
-*"It's 2:51 PM."* for the time, *"It's Thursday, 22 October."* for the date — time only or date
-only, never both. The sentence is assembled from `Intl` parts with every separator written in
+*"It's 2:51 PM."* for the time, *"It's Thursday, 22 October."* for the date, and since M32
+*"It's Thursday, 22 October, 2:51 PM."* for both (`what: "both"`; until M32 a combined question
+got the time alone, or a two-step plan whose first answer was never shown). The time-only and
+date-only wording is unchanged. The sentence is assembled from `Intl` parts with every separator written in
 code, because ICU versions disagree on what goes before "PM" (some use U+202F) and node and
 electron ship different ICU. Status-only, like `jobStatus`: answered at once without a job slot,
 and never listed as a job.
@@ -5477,7 +5528,136 @@ Post-v0:
          tool ran and nothing was filed. Sejal's reading is that the model took the chat page on
          screen as context. It is the same family as M28's and M29's prose-reply finding. For
          the small-items milestone: investigate what context the model was given (screen text
-         from the focused page?) before changing anything.
+         from the focused page?) before changing anything. *(M32 found the cause: row 666's
+         rewrite, through the previous turn and the clipboard, not the screen. See M32.)*
+
+- [ ] **M32 — small items: a second hotkey press during voice capture; a stale previous turn and
+      framed prose; the date and time together; Escape with the pill list open.** **In progress
+      (built 2026-10-23; no person has run `docs/M32-live-checklist.md`).** Four code commits
+      (`cee6da6`, `7f73d3e`, `ffff188`, `8c2afb6`) and a docs commit. Not pushed. Tests ran with
+      the scratch SQLite build throughout: the dev app held the real one.
+
+      **1. A second instruction-hotkey press during voice capture** (`cee6da6`; §5b, "State, and
+      the hotkeys"). Ignored and logged while the bar's `VoiceSession` is recording, stopped or
+      transcribing; idle (typing) still starts over. Tests (`tests/instructionHotkey.test.ts`,
+      +5): an async stateful fake voice in each busy state (no detach, no `showInput`, no run,
+      the first capture's text delivered once); idle as the control; the real `VoiceSession` with
+      a slow fake transcriber (a press mid-recording submits nothing; mid-transcription, the first
+      instruction runs once). One case flaked once under full-suite load: it waited a fixed 40 ms
+      for a fake's 20 ms transcription. The waits on outcomes now poll, and that fix went in with
+      commit 2.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Ignore a press during capture | guard removed | 4 (and 4 again after the polling fix) |
+      | Every busy state counts | only "recording" | 3 (and 3 again) |
+
+      **2. A stale previous turn, and the model's prose framed** (`7f73d3e`; §5b, "The previous
+      turn's age, and a reply in the model's own words").
+      - **Why the prose reply happened (finding 6 of M31).** Row 666's rewrite reached the model
+        through the previous turn and, very likely, the clipboard; no screen text is captured.
+      - **Recon, before the change** (live, 6 calls). Row 667's setup in the M30/M31 harness: a
+        "rewrite this politely" turn 152 minutes old whose result asks to send Claude Code a
+        close-out prompt (neutral wording), the same sentence on the clipboard, and "create a
+        linear issue and post in fun". **0 of 6 gave prose**: all six planned create > send and
+        reached the dialog (the old previous turn was sent every time). The prose reply did not
+        reproduce in 6 trials; the two live cases are the evidence. A and B were built as planned.
+      - **Built.**
+        - A: `PREVIOUS_TURN_MAX_AGE_MS` = 10 minutes, with an injected clock (a new last
+          `Planner` parameter, `now`).
+        - B: `PROSE_LEAD` = "Nothing ran. The model said: ", spoken through `toSpokenWithLead`
+          (`toSpokenResult` gained an optional cap).
+        - `PlannerOutcome.reply` for the `[main]` line.
+      - **Tests** (`tests/previousTurnAndProse.test.ts`, new, 18):
+        - turns timed like 642/647 and 666/667 get none; 2 minutes old is sent whole; at the
+          cutoff it is sent and one second over it is not;
+        - a correction and "send it" after a draft inside the window keep their turn; two runs
+          in a row; an unreadable timestamp; the real default clock;
+        - framed prose on the bar, in speech and on the outcome; a long reply (the lead spoken
+          whole, the first cut under the cap, never landing on the lead, the rest held);
+        - the fixed refusal and an unknown tool unframed; the `[main]` line both ways; M30's
+          and M31's refusals untouched.
+        - **Re-justified, not just re-run:** three tests pinned prose shown verbatim
+          (`planner.test.ts`, `planner.multicall.test.ts`, `voice-integration.test.ts`). They
+          now pin it after the lead, and still check that the model's words, not the canned
+          refusal, are what is shown.
+        - recorded.json's 77 answers and the M31 fixtures are judged by the pure checks, which
+          this did not touch; their suites stay green.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Drop a stale turn | no cutoff | 3 |
+      | Only stale turns are dropped | the cutoff applied to fresh turns | 5 |
+      | Prose is framed on the bar | shown unframed | 5 |
+      | The lead is spoken | dropped from speech | 2 |
+      | The lead survives the spoken cap (extra) | spoken under the full cap | 1 |
+
+      **Live, after the change** (12 calls, fresh log per trial):
+
+      | Setup | Trials | Ran to the dialog, cancelled | M30/M31 refusal | Prose | Other |
+      |---|---|---|---|---|---|
+      | Row 667's setup (previous turn 152 min old) | 6 | 5 (create > send) | 1 (M30: summarize > create > send) | 0 | 0 |
+      | Corrections 40 s after a cancelled create | 6 | 4 | 0 | 0 | **2** |
+
+      In all six of the 667 setup the previous turn was not sent, and in all six corrections it
+      was. The two "other" corrections, with their plans:
+      - "actually, post it in social instead" planned `remember` with `team` = `social` and ran it
+        (reversible, no dialog). The harness memory discards writes, but in the app this would
+        replace the fact `team` = `#social` with the bare word `social`. A finding (below), not
+        caused by M32: the previous turn was sent as before.
+      - "no, I meant the social channel" planned `sendMessage` with "the social channel" and was
+        refused by its own reference check. That is a harness artefact: its memory holds only
+        `#fun`, where the app's holds `social channel` = `#social`. Nothing ran.
+
+      **3. The date and time together** (`ffff188`; §5c, "`tellTime`"). `what: "both"`, one
+      description sentence, and *"It's Friday, 23 October, 5:41 PM."*. Tests (`tests/tellTime.test.ts`,
+      +8): literal answers for both in two zones, ASCII, the other two answers unchanged, assembly
+      from hostile ICU parts, the schema, the planner, the spoken form. Mutation: "both" handled as
+      time, caught by 5. Eval (15 calls, no email, nothing copied), before and after:
+
+      | Phrase | Before (enum time/date) | After (time/date/both) |
+      |---|---|---|
+      | "what's the time" | `time` (1/1) | `time` (1/1) |
+      | "what's the date" | `date` (1/1) | `date` (1/1) |
+      | "what's the date and time" | `time` — only the time answered (1/1) | `both` (2/2) |
+      | "what day and time is it" | a two-step plan, date then time; only the time shown (1/1) | `both` (2/2) |
+      | "remind me at 3 pm tomorrow" (control) | `createEvent` (2/2) | `createEvent` (3/3) |
+
+      No control regressed, so the prompt change stands.
+
+      **4. Escape with the pill list open** (`8c2afb6`; no behaviour change). Tests: with the bar
+      hidden by another route the app holds no Escape (`WindowsShell.capture.test.ts`, +1), and
+      `escapeAttached()` before and after a job's first step leaves an open list open
+      (`pill.collapse.test.ts`, +2). The dictation-hotkey collapse already had its test
+      (`pill.collapse.test.ts`, "the dictation hotkey collapses it too"). Not part of the plan:
+      keeping Escape registered after a hide was caught by 2. Whether the real OS hands Escape to
+      the front app is a person's check (H4).
+
+      **Model calls: 33 of the 40 allowed**, est. ~$0.032 (recon 6, after 12, time 6 + 9). One
+      more run was refused by the spend gate with no call made: its per-run counter folder,
+      keyed by process ID, had been left by an earlier run with the same reused ID. It was re-run.
+
+      **Build record (2026-10-23).** `npm test` (scratch SQLite): **3384 passed across 143 files,
+      96 skipped**. Both typechecks clean.
+
+      **Deliberately not done.**
+      - From finding 6: keeping a content tool's result out of the previous turn, re-asking once on
+        prose, and relabelling or capping the clipboard. Each changes the planning prompt and
+        needs an eval with controls.
+      - "What did that job say?" waits on decisions that are yours: which job (the newest finished,
+        one matched by its instruction's words, or ask), which states (done only, or failed and
+        cancelled-after-a-step too), a time window, whether reading it marks it seen (the pill's
+        one-minute clock), a new tool or an extension of `jobStatus`, how stored text (possibly a
+        model's, possibly your clipboard's) is spoken, and background jobs only or also ones
+        watched in the bar.
+
+      **Findings, open.**
+      1. **A correction can plan a memory write that replaces a fact.** "actually, post it in
+         social instead" planned `remember team = social`. It is `reversible` and runs with no
+         dialog; in the app it would overwrite `team` = `#social`.
+      2. **A stale clipboard is still sent whole.** Only the previous turn ages out.
+      3. **The spend gate's counter can be reused across runs** when a process ID repeats within
+         12 hours. It fails closed (no call made), and costs a re-run.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

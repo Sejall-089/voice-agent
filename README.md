@@ -415,6 +415,17 @@ send button is broken" is not a send. A channel you have never taught it isn't k
 it goes through as before. See spec.md §5b, "A send the instruction asked for, missing from the
 answer".
 
+**When the model answers in words instead of doing something, it says so.** The reply is shown
+and spoken after *"Nothing ran. The model said:"*, so a question the model asks can't be mistaken
+for one the app is waiting on (nothing is). And the previous turn, which helps with a quick "no, I
+meant…", is only passed to the model when it's under ten minutes old: an old one once had the
+model asking about someone else's request instead of filing an issue. See spec.md §5b, "The
+previous turn's age, and a reply in the model's own words".
+
+**A second press of the hotkey while the bar is still listening is ignored**: whatever you are
+saying is not cut off and run half-said. **"What's the date and time?"** gets both in one answer
+(*"It's Friday, 23 October, 5:41 PM."*).
+
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
 you later.
@@ -1045,7 +1056,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3350 tests across 142 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3384 tests across 143 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1055,6 +1066,21 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M32 (small items) is built and in progress (23 Oct 2026); no person has run its checklist
+yet.**
+- **A second instruction-hotkey press while the bar is recording or transcribing is ignored.**
+- **A previous turn over ten minutes old is no longer sent to the model, and a reply in the
+  model's own words is framed as "Nothing ran. The model said: …".** The live prose reply M31
+  saw came from an earlier rewrite, through the previous turn and the clipboard, not from the
+  screen: the app captures only the clipboard.
+- **"What's the date and time?" gets one combined answer.**
+- **Tests for Escape with the pill list open.** No behaviour change.
+
+Scripted against the real model with every connector faked (33 calls), there was no prose reply
+before or after the change in the old-previous-turn setup, both combined time phrasings now pick
+"both", and no control regressed. **3384 tests green across 143 files, 96 skipped.** See
+`docs/M32-live-checklist.md` and `spec.md` §9 (M32).
 
 **M31 (refuse a create plan that drops a requested send) is closed (23 Oct 2026), after a live
 run by a person: both boxes ticked.** The refusal sounds natural through the speech engine, and in
@@ -1070,7 +1096,7 @@ Scripted against the real model with every connector faked, 24 trials, nothing f
   was seen against a real plan.
 - **Control:** "create a linear issue" was never refused (6 of 6).
 
-**3350 tests green across 142 files, 96 skipped.** See `docs/M31-live-checklist.md` and
+**3350 tests green across 142 files, 96 skipped, at M31's close.** See `docs/M31-live-checklist.md` and
 `spec.md` §9 (M31).
 
 **M30 (refuse a summarize or rewrite step nobody asked for, before a create) is closed (23 Oct
