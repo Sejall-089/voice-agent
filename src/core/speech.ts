@@ -52,12 +52,12 @@ const SEE_DIALOG = "Check the dialog.";
 // line to mean "headline, then the bulk" — `Sent via your Slack webhook.\n\n<the whole message>`,
 // `Sent.\n\n<the whole reply>`. Speaking a message back at the person who just sent it is noise,
 // so only the headline is spoken and the body becomes the remainder.
-export function toSpokenResult(text: string): SpokenText {
+export function toSpokenResult(text: string, max: number = MAX_SPOKEN_CHARS): SpokenText {
   const [head, ...rest] = paragraphs(text);
   if (head === undefined) return { text: "", remainder: null };
 
   const tail = rest.length > 0 ? flatten(rest.join("\n")) : "";
-  const spoken = speakParagraph(head);
+  const spoken = speakParagraph(head, max);
 
   const held = [spoken.remainder, tail].filter(isPresent).join(" ");
   if (held.length === 0) return spoken;
@@ -67,6 +67,15 @@ export function toSpokenResult(text: string): SpokenText {
   const offered =
     spoken.remainder === null ? join(spoken.text, MORE_PROSE) : spoken.text;
   return { text: offered, remainder: held };
+}
+
+// A fixed lead in front of text someone else wrote (M32: "Nothing ran. The model said: ").
+// The text is spoken under a cap SHORTENED BY THE LEAD, so the lead and the first cut of the text
+// together stay within MAX_SPOKEN_CHARS — and the lead is never what the cut lands on. Spoken
+// through toSpokenResult's own rules otherwise; the lead must already be plain ASCII.
+export function toSpokenWithLead(lead: string, text: string): SpokenText {
+  const spoken = toSpokenResult(text, MAX_SPOKEN_CHARS - lead.length);
+  return { text: `${lead}${spoken.text}`, remainder: spoken.remainder };
 }
 
 // What a `caution` tool says BEFORE it acts. Capped but never offered — "I'm about to add
@@ -115,10 +124,10 @@ export function toSpokenLine(text: string): string {
 // --- Internals ---
 
 // One paragraph of a result, which may be a list or prose.
-function speakParagraph(paragraph: string): SpokenText {
+function speakParagraph(paragraph: string, max: number = MAX_SPOKEN_CHARS): SpokenText {
   const list = lines(paragraph);
   if (list.length === 0) return { text: "", remainder: null };
-  if (list.length === 1) return speakProse(list[0] ?? "");
+  if (list.length === 1) return speakProse(list[0] ?? "", max);
 
   // A list — formatSchedule's ten events are the case this exists for. Speak WHOLE items, never
   // a half-read event ("you have a meeting with" is worse than a count), stopping at whichever
@@ -128,7 +137,7 @@ function speakParagraph(paragraph: string): SpokenText {
   for (const item of list) {
     if (spoken.length >= MAX_SPOKEN_ITEMS) break;
     const next = sentence(item);
-    if (spoken.length > 0 && used + next.length + 1 > MAX_SPOKEN_CHARS) break;
+    if (spoken.length > 0 && used + next.length + 1 > max) break;
     spoken.push(next);
     used += next.length + 1;
   }
@@ -136,7 +145,7 @@ function speakParagraph(paragraph: string): SpokenText {
   // The first item is taken unconditionally above, so one enormous item (a schedule line with a
   // dozen guests on it) can still overflow. Cutting it is the lesser evil: the remainder carries
   // every word either way, and this is the only path that ever splits an item.
-  const [head, overflow] = cut(spoken.join(" "), MAX_SPOKEN_CHARS);
+  const [head, overflow] = cut(spoken.join(" "), max);
   const left = list.slice(spoken.length);
   const held = [overflow, left.map(sentence).join(" ")]
     .filter((part) => part.length > 0)
@@ -149,8 +158,8 @@ function speakParagraph(paragraph: string): SpokenText {
   };
 }
 
-function speakProse(line: string): SpokenText {
-  const [head, tail] = cut(line, MAX_SPOKEN_CHARS);
+function speakProse(line: string, max: number = MAX_SPOKEN_CHARS): SpokenText {
+  const [head, tail] = cut(line, max);
   if (tail.length === 0) return { text: sentence(head), remainder: null };
   return {
     text: join(sentence(head), MORE_PROSE),

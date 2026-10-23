@@ -168,7 +168,8 @@ describe("multi-call, then a plan: the plan runs", () => {
     const outcome = await h.planner.run(INSTRUCTION);
     expect(h.llm.asked.length).toBe(2);
     expect(h.ran).toEqual([]);
-    expect(outcome).toMatchObject({ status: "no_tool", result: "Ask me for one thing at a time." });
+    // The model's words, after the fixed lead (M32).
+    expect(outcome).toMatchObject({ status: "no_tool", result: "Nothing ran. The model said: Ask me for one thing at a time." });
   });
 });
 

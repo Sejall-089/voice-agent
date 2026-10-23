@@ -15,7 +15,7 @@ import { MULTIPLE_TOOL_CALLS, parallelWrapperCalls, withPlanRetry } from "./llm/
 import { OPEN_GATE } from "./jobs/gate.ts";
 import type { GateAnswer, JobGate } from "./jobs/gate.ts";
 import { CANCELLED_BEFORE_START, CANCELLED_BY_YOU, EXPIRED } from "./jobs/messages.ts";
-import { toSpokenConfirm, toSpokenNarration, toSpokenResult } from "./speech.ts";
+import { toSpokenConfirm, toSpokenNarration, toSpokenResult, toSpokenWithLead } from "./speech.ts";
 import { emailOpenHint } from "./contextHints.ts";
 import {
   MAX_QUESTIONS_PER_CHAIN,
@@ -81,6 +81,17 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 const REFUSAL = "I can't do that yet — I don't have a tool for that.";
+
+// M32. What goes in front of a reply the MODEL wrote instead of choosing a tool. Fixed, from
+// code, and said first, so a model's question can never pass for one the app is holding open
+// (M21: nothing waits for an answer to it). Plain ASCII, no slash, for the speech engine.
+export const PROSE_LEAD = "Nothing ran. The model said: ";
+
+// M32. A previous turn older than this is not handed to the model. The previous turn exists to
+// resolve a correction or a pronoun ("no, I meant…", "send it"), which follow at once; one from
+// hours ago is only somebody else's words. Rows 647 and 667, both answered in prose about their
+// previous turn, had turns 76 and 152 minutes old.
+export const PREVIOUS_TURN_MAX_AGE_MS = 10 * 60 * 1000;
 const TRUNCATED =
   "I couldn't work out what to do — the model ran out of room before it answered. " +
   "Try a shorter, more direct instruction.";
@@ -209,6 +220,8 @@ export class Planner {
     private readonly gate: JobGate = OPEN_GATE,
     // M23. The app's job records, read-only, handed to tools as `jobs` — and only when present.
     private readonly jobs?: JobsReader,
+    // M32. The clock the previous turn's age is judged by. Tests pass a fixed one.
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
   // `captured` is what was on the clipboard, and whether an email was open, WHEN THE
@@ -282,10 +295,15 @@ export class Planner {
     //    fills (`isUnfilledBlankRefusal`, M28), whose "copy the text you mean" is the same kind,
     //    and for a step nobody asked for before a create (`isUnaskedStepRefusal`, M30), and for a
     //    create that dropped a requested send (`isDroppedSendRefusal`, M31).
+    //
+    //    And a turn older than PREVIOUS_TURN_MAX_AGE_MS (M32), whatever it was. At the cutoff it
+    //    is still sent; a moment past it, not. A timestamp that cannot be read is judged as before.
     const last = this.log.getLast();
+    const stale = last !== null && this.now() - Date.parse(last.ts) > PREVIOUS_TURN_MAX_AGE_MS;
     const previousTurn =
       last !== null &&
-      (isUnknownReferenceRefusal(last) ||
+      (stale ||
+        isUnknownReferenceRefusal(last) ||
         isUnreadContentRefusal(last) ||
         isUnfilledBlankRefusal(last) ||
         isUnaskedStepRefusal(last) ||
@@ -1180,12 +1198,15 @@ export class Planner {
     instruction: string,
     modelText?: string | null,
   ): Promise<PlannerOutcome> {
-    const shown =
-      modelText && modelText.trim().length > 0 ? modelText.trim() : REFUSAL;
+    // M32. The model's own words are shown and spoken after a fixed lead; the fixed refusal is
+    // unchanged. Which of the two it was goes on the outcome, for the `[main]` line only: the log
+    // row (`logMiss`) holds no text either way.
+    const prose = modelText && modelText.trim().length > 0 ? modelText.trim() : null;
+    const shown = prose === null ? REFUSAL : `${PROSE_LEAD}${prose}`;
     this.log.logMiss(instruction);
     this.shell.showResult(shown);
-    await this.say(toSpokenResult(shown));
-    return { status: "no_tool", tool: null, result: shown };
+    await this.say(prose === null ? toSpokenResult(REFUSAL) : toSpokenWithLead(PROSE_LEAD, prose));
+    return { status: "no_tool", tool: null, result: shown, reply: prose === null ? "fixed refusal" : "model prose" };
   }
 
   // The model answered with several tool calls at once, twice. Nothing was decided that this

@@ -619,6 +619,16 @@ describe("the instruction hotkey wired to a genuinely running chain", () => {
 // and it moves through the same states VoiceSession does.
 describe("a second press while the bar's voice capture is under way (M32)", () => {
   const later = (ms = 5): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  // Waits for something to HAPPEN by polling, never a fixed delay: under the full suite's load a
+  // fixed wait sized to a fake's 20 ms was not always enough. A fixed wait is kept only where the
+  // test checks that nothing happened, which a slow machine cannot make fail.
+  const until = async (condition: () => boolean, ms = 3000): Promise<void> => {
+    const deadline = Date.now() + ms;
+    while (!condition()) {
+      if (Date.now() > deadline) throw new Error("condition not reached in time");
+      await later(2);
+    }
+  };
 
   function captureHarness() {
     const events: string[] = [];
@@ -678,7 +688,7 @@ describe("a second press while the bar's voice capture is under way (M32)", () =
   it("CONTROL: with the microphone idle a press opens the bar, detaches and listens", async () => {
     const h = captureHarness();
     h.onHotkey();
-    await later(10);
+    await until(() => h.events.includes("mic"));
     expect(h.events).toEqual(["detach", "stop", "clearPointer", "showInput", "mic"]);
     expect(h.state()).toBe("recording");
   });
@@ -688,14 +698,13 @@ describe("a second press while the bar's voice capture is under way (M32)", () =
     async (busy) => {
       const h = captureHarness();
       h.onHotkey();
-      await later(10);
+      await until(() => h.events.includes("mic"));
       expect(h.state()).toBe("recording");
       const before = [...h.events];
 
       if (busy === "transcribing") {
         h.enter(); // Enter: the first capture moves to transcribing
-        await later(2);
-        expect(h.state()).toBe("transcribing");
+        await until(() => h.state() === "transcribing");
       } else {
         h.setState(busy);
       }
@@ -708,7 +717,8 @@ describe("a second press while the bar's voice capture is under way (M32)", () =
         if (busy === "stopped") h.setState("recording");
         h.enter();
       }
-      await later(40);
+      await until(() => h.events.some((event) => event.startsWith("run:")));
+      await later(5);
       expect(h.events.filter((event) => event === "detach")).toHaveLength(1);
       expect(h.events.filter((event) => event === "showInput")).toHaveLength(1);
       expect(h.events.filter((event) => event.startsWith("run:"))).toEqual([
@@ -759,19 +769,18 @@ describe("a second press while the bar's voice capture is under way (M32)", () =
     });
 
     onHotkey();
-    await later(10);
-    expect(session.getState()).toBe("recording");
+    await until(() => session.getState() === "recording" && bar.enter !== null);
 
     onHotkey(); // mid-recording: before M32 this cut the capture off and ran it
-    await later(50);
+    await later(50); // nothing must happen
     expect(transcribed).toEqual([]);
     expect(events.filter((event) => event.startsWith("run:"))).toEqual([]);
 
     bar.enter?.(""); // the person's own Enter
-    await later(5);
-    expect(session.getState()).toBe("transcribing");
+    await until(() => session.getState() === "transcribing");
     onHotkey(); // mid-transcription
-    await later(60);
+    await until(() => events.some((event) => event.startsWith("run:")));
+    await later(5);
 
     expect(transcribed).toHaveLength(1);
     expect(events).toEqual(["detach", "showInput", "run:create a linear issue and send to fun"]);

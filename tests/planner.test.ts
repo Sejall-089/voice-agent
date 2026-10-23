@@ -31,9 +31,10 @@ describe("Planner (M1: general path with summarize on the menu)", () => {
     expect(llm.lastToolsOffered.map((t) => t.name)).toContain("summarize");
   });
 
-  it("shows the model's own declined text when it has something to say", async () => {
-    // refuse() passes choice.text through verbatim rather than a canned "no tool" message,
-    // so a genuine clarifying question from the model reaches the user as-is.
+  it("shows the model's own declined text when it has something to say, after the fixed lead", async () => {
+    // refuse() passes choice.text through rather than a canned "no tool" message, so a genuine
+    // clarifying question from the model still reaches the user — since M32 after "Nothing ran.
+    // The model said: ", so it cannot pass for a question the app is holding open.
     const shell = new MockShell({ context: contextWith("some text") });
     const llm = new FakeLLM({ kind: "none", text: "I don't think I can help with that." });
     const log = new InMemoryActionLog();
@@ -42,7 +43,7 @@ describe("Planner (M1: general path with summarize on the menu)", () => {
     const outcome = await planner.run("book me a flight to Tokyo");
 
     expect(outcome.status).toBe("no_tool");
-    expect(shell.results[0]).toBe("I don't think I can help with that.");
+    expect(shell.results[0]).toBe("Nothing ran. The model said: I don't think I can help with that.");
     expect(log.misses).toContain("book me a flight to Tokyo");
     expect(shell.actions).toHaveLength(0);
   });

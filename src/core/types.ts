@@ -1042,6 +1042,9 @@ export interface PlannerOutcome {
   // core/chain.ts `createDescriptions`): the clipboard as it is, something else, or an earlier
   // step. Absent when there was no such create. For the `[main]` line only; no text in it.
   descriptions?: readonly ("equals clipboard" | "differs from clipboard" | "from an earlier step")[];
+  // M32. For a `no_tool` answer: whether what was shown was the model's own prose (after the
+  // fixed lead) or the app's fixed refusal. For the `[main]` line only — the log row holds no text.
+  reply?: "model prose" | "fixed refusal";
   // What the model actually sent, when what it sent was REFUSED before anything ran (M19) — a
   // plan that failed validation, or a single call naming a tool that is not on the menu.
   //

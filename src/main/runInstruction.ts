@@ -80,7 +80,9 @@ export function createRunInstruction(
         ? ` [email hint: ${outcome.planning.emailHint ? "sent" : "not sent"}, ` +
           `check ${outcome.planning.emailCheckMs}ms; clipboard: ${outcome.planning.clipboardChars} chars]`
         : "";
-      console.log(`[main] ${outcome.status}${chain}${plan}${description}${told}: ${outcome.result ?? ""}`);
+      // M32. A `no_tool` answer says which it was: the model's prose, or the fixed refusal.
+      const reply = outcome.reply ? ` [reply: ${outcome.reply}]` : "";
+      console.log(`[main] ${outcome.status}${chain}${plan}${description}${reply}${told}: ${outcome.result ?? ""}`);
       // M19. When the model's answer was refused before anything ran, print what it actually
       // sent. The message on screen quotes one tool name; diagnosing the "functions." prefix
       // took the action log and a guess, because the plan itself had been thrown away. Console
