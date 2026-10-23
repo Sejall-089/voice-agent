@@ -9,6 +9,7 @@ import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { InMemoryChainState } from "../src/core/chainState.ts";
 import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
+import { VoiceSession } from "../src/main/shell/VoiceSession.ts";
 import { FakeLLM } from "./FakeLLM.ts";
 import type { CapturedContext, Tool, ToolInput } from "../src/core/types.ts";
 
@@ -76,6 +77,8 @@ function harness(
       return Promise.resolve();
     },
     finish: () => Promise.resolve("what's in my calendar today?"),
+    // Idle: these tests are about the guards after the voice one (M32).
+    getState: () => "idle",
   };
   const speech = {
     speak: (text: string) => events.push(`speak:${text}`),
@@ -604,5 +607,174 @@ describe("the instruction hotkey wired to a genuinely running chain", () => {
 
     expect(outcome.status).toBe("ok");
     expect(chain.isRunning()).toBe(false);
+  });
+});
+
+// M32. A SECOND PRESS WHILE THE BAR'S OWN VOICE CAPTURE IS UNDER WAY. Before M32 nothing stopped
+// it: the press detached the attached job, showInput() resolved the first bar's promise with "",
+// the first capture was cut off and what had been said so far ran as the instruction, and the new
+// bar was deaf (begin() is a no-op unless the session is idle). Now it is ignored and logged.
+//
+// The fake voice is ASYNC with a real delay (CLAUDE.md: a synchronous fake cannot test ordering),
+// and it moves through the same states VoiceSession does.
+describe("a second press while the bar's voice capture is under way (M32)", () => {
+  const later = (ms = 5): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function captureHarness() {
+    const events: string[] = [];
+    let state = "idle";
+    let pressEnter: ((text: string) => void) | null = null;
+    const shell = {
+      isConfirmPending: () => false,
+      isAskPending: () => false,
+      focusAsk: () => events.push("focusAsk"),
+      narrate: (text: string) => events.push(`narrate:${text}`),
+      showInput: () => {
+        events.push("showInput");
+        // As WindowsShell does: a capture that never resolved does not outlive a new one.
+        pressEnter?.("");
+        return new Promise<string>((resolve) => (pressEnter = resolve));
+      },
+      clearPointer: () => events.push("clearPointer"),
+      snapshotPointTarget: () => later(1),
+    };
+    const voice = {
+      getState: () => state,
+      begin: async () => {
+        if (state !== "idle") return;
+        state = "recording";
+        events.push("mic");
+        await later();
+      },
+      finish: async () => {
+        if (state === "idle" || state === "transcribing") return "";
+        state = "transcribing";
+        await later(20);
+        state = "idle";
+        return "create a linear issue and send to fun";
+      },
+    };
+    const onHotkey = createOnInstructionHotkey({
+      shell,
+      dictation: null,
+      voice,
+      speech: { speak: () => undefined, stop: () => events.push("stop") },
+      chain: { isRunning: () => false },
+      detach: () => events.push("detach"),
+      runInstruction: (instruction: string) => {
+        events.push(`run:${instruction}`);
+        return Promise.resolve();
+      },
+    });
+    return {
+      onHotkey,
+      events,
+      enter: () => pressEnter?.(""),
+      setState: (next: string) => (state = next),
+      state: () => state,
+    };
+  }
+
+  it("CONTROL: with the microphone idle a press opens the bar, detaches and listens", async () => {
+    const h = captureHarness();
+    h.onHotkey();
+    await later(10);
+    expect(h.events).toEqual(["detach", "stop", "clearPointer", "showInput", "mic"]);
+    expect(h.state()).toBe("recording");
+  });
+
+  it.each(["recording", "stopped", "transcribing"])(
+    "while %s: no detach, no showInput, no run, and the first capture's text is delivered",
+    async (busy) => {
+      const h = captureHarness();
+      h.onHotkey();
+      await later(10);
+      expect(h.state()).toBe("recording");
+      const before = [...h.events];
+
+      if (busy === "transcribing") {
+        h.enter(); // Enter: the first capture moves to transcribing
+        await later(2);
+        expect(h.state()).toBe("transcribing");
+      } else {
+        h.setState(busy);
+      }
+      h.onHotkey();
+      await later(2);
+      // The second press changed nothing.
+      expect(h.events.slice(before.length)).toEqual([]);
+
+      if (busy !== "transcribing") {
+        if (busy === "stopped") h.setState("recording");
+        h.enter();
+      }
+      await later(40);
+      expect(h.events.filter((event) => event === "detach")).toHaveLength(1);
+      expect(h.events.filter((event) => event === "showInput")).toHaveLength(1);
+      expect(h.events.filter((event) => event.startsWith("run:"))).toEqual([
+        "run:create a linear issue and send to fun",
+      ]);
+    },
+  );
+
+  it("with the real VoiceSession and a slow transcriber, a second press submits nothing partial", async () => {
+    const events: string[] = [];
+    const clip = { wav: new Uint8Array(3200), durationMs: 2000 };
+    const voiceShell = new MockShell({
+      context: { selectedText: null, activeApp: null, activeWindowTitle: null },
+      clips: [clip],
+    });
+    const transcribed: number[] = [];
+    const session = new VoiceSession(voiceShell, {
+      transcribe: async () => {
+        transcribed.push(Date.now());
+        await later(30);
+        return "create a linear issue and send to fun";
+      },
+    });
+    const bar: { enter: ((text: string) => void) | null } = { enter: null };
+    const onHotkey = createOnInstructionHotkey({
+      shell: {
+        isConfirmPending: () => false,
+        isAskPending: () => false,
+        focusAsk: () => undefined,
+        narrate: () => undefined,
+        showInput: () => {
+          events.push("showInput");
+          bar.enter?.("");
+          return new Promise<string>((resolve) => (bar.enter = resolve));
+        },
+        clearPointer: () => undefined,
+        snapshotPointTarget: () => later(1),
+      },
+      dictation: null,
+      voice: session,
+      speech: null,
+      chain: { isRunning: () => false },
+      detach: () => events.push("detach"),
+      runInstruction: (instruction: string) => {
+        events.push(`run:${instruction}`);
+        return Promise.resolve();
+      },
+    });
+
+    onHotkey();
+    await later(10);
+    expect(session.getState()).toBe("recording");
+
+    onHotkey(); // mid-recording: before M32 this cut the capture off and ran it
+    await later(50);
+    expect(transcribed).toEqual([]);
+    expect(events.filter((event) => event.startsWith("run:"))).toEqual([]);
+
+    bar.enter?.(""); // the person's own Enter
+    await later(5);
+    expect(session.getState()).toBe("transcribing");
+    onHotkey(); // mid-transcription
+    await later(60);
+
+    expect(transcribed).toHaveLength(1);
+    expect(events).toEqual(["detach", "showInput", "run:create a linear issue and send to fun"]);
+    expect(session.getState()).toBe("idle");
   });
 });

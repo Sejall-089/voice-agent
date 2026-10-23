@@ -59,6 +59,9 @@ export interface InstructionHotkeyShell {
 export interface VoiceLike {
   begin(): Promise<void>;
   finish(): Promise<string>;
+  // M32. "idle" unless the bar's own capture is under way: "recording", "stopped" (held at the
+  // length cap) or "transcribing". `VoiceSession.getState()`.
+  getState(): string;
 }
 
 export interface SpeakerLike {
@@ -105,6 +108,19 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
     //    would defeat the entire point. See dictate.ts for the reverse guard.
     if (dictationIsBusy(dictation)) {
       console.log("[main] instruction hotkey ignored - dictation is in progress");
+      return;
+    }
+
+    // 1a. (M32) The bar's OWN voice capture is under way — recording, held at the cap, or
+    //     transcribing. Without this a second press got through every guard below: it detached
+    //     the attached job, and showInput() resolved the first bar's promise with "", so the first
+    //     capture was cut off and whatever had been said so far ran as the instruction; the new
+    //     bar's begin() then did nothing (the session was not idle), so it was deaf. Ignored and
+    //     logged, nothing else: no refocus, no narration, no detach. A bar open for typing, with
+    //     the microphone idle, keeps its old meaning — a press starts over.
+    const capturing = voice?.getState() ?? "idle";
+    if (capturing !== "idle") {
+      console.log(`[main] instruction hotkey ignored - voice is ${capturing}`);
       return;
     }
 
