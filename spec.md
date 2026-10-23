@@ -5327,10 +5327,11 @@ Post-v0:
       baseline (one "create only, no description, no send" trial) and is the "lone create that
       drops a send" §5b names as a different failure. *(M31 refuses it; see M31.)*
 
-- [ ] **M31 — refuse a create plan that drops a requested send.** **In progress (built
-      2026-10-23; no person has run `docs/M31-live-checklist.md`).** For M30's open finding. Code
-      and tests committed as `3f3a861`; the scripted results and checklist in a second commit.
-      Not pushed.
+- [x] **M31 — refuse a create plan that drops a requested send.** **Closed 2026-10-23, after a
+      live run by a person (2 of 2 boxes ticked — `docs/M31-live-checklist.md`), with named gaps
+      and six open findings (the close-out record is at the end of this entry).** For M30's open
+      finding. Code and tests committed as `3f3a861`; the scripted results and checklist as
+      `da35b0e`; the human results as `bcb60a2`.
 
       **Recon (live model, faked connectors, 12 calls).** The M30 harness, copied, now saving each
       raw answer's kind and arguments; "create a linear issue and send to fun", M28's long
@@ -5428,6 +5429,55 @@ Post-v0:
       **Known gaps:** §5b's list (only sends are checked — row 559's Notion step is not; a channel
       memory was never told about; four object words; a known destination inside the content; a
       refusal costs a try). M28's prose question with nothing waiting is not touched.
+
+      **Live, by a person (2 of 2 ticked, 2026-10-23).**
+      - **H1.** The refusal heard through real Piper (`scripts/m30-say-refusal.ts
+        --dropped-send`): natural, no slash.
+      - **H2.** In the real app with text copied, "create a linear issue and send to fun" showed
+        Step 1 of 2 (create, then send). Cancelled at the Linear dialog; nothing filed.
+
+      **Close-out record (2026-10-23).**
+      - **Tests: 3350 passed across 142 files, 96 skipped; both typechecks clean.** Plain `npm
+        test` could not run: the dev app from H2 held the SQLite binary that its pre-step
+        rebuilds (EBUSY/EPERM). The suite ran with `better-sqlite3` aliased to a scratch node
+        build of the same version (12.11.1).
+      - **Recon:** fresh-log trials dropped the send 3 of 6, shared-log 0 of 6, every drop a lone
+        tool call.
+      - **Mutations:** six, all caught (table above).
+      - **Scripted live:** 36 real planning calls, est. ~$0.058 (tables above).
+      - **Eval skipped** (not run against the real model).
+
+      **Proven vs. live-only.**
+      - **Proven by tests against `MockShell`:** the rule on every drop on record and every kept
+        send; both paths, the multi-call retry and a detached job; the row, the miss and the
+        previous turn; the clipboard never judged.
+      - **Scripted, with the real model and faked connectors:** 4 drops refused, 9 create > send
+        plans reached the dialog, the control never refused, nothing at the fakes.
+      - **Seen only live:** the real app's create > send preview and dialog (H2); the real speech
+        engine saying the refusal (H1).
+
+      **Open findings, not fixed in M31:**
+      1. **Refusal rate.** 9 of 18 scripted send requests were refused (4 by M31, 5 by M30), so a
+         person re-asks about half the time. Candidate, M32 or later: on either refusal, ask the
+         model once more with the missing or unasked step named, and refuse only if the second
+         answer fails too. It needs an eval with controls and a model-call budget. Replay can test
+         the trigger and the wiring with a scripted second answer.
+      2. **A Slack channel never taught to memory is not a destination,** so a drop there goes
+         unrefused. Candidate: consult the bot-mode channel list. That is a network call, so it
+         needs a design decision first.
+      3. **Only sends are checked.** Row 559 also dropped a Notion step.
+      4. **Why a fresh action log drops (and adds unasked steps) more than a shared one is
+         unknown.** Recon: 3 of 6 against 0 of 6. M30's shared-log run saw 0 unasked steps in 12;
+         M31's fresh-log run, 5 in 18.
+      5. **Known gaps already in §5b:** more than three words between "send" and "to"; a known
+         channel inside the bug text ("the share button in #social crashes"); M30's "file a
+         one-line issue from this" and "sum the whole thing up".
+      6. **A prose reply live (H2's earlier try).** "create a linear issue and post in fun" got a
+         prose answer asking for a "close-out prompt" text and which channel "Claude Code" is. No
+         tool ran and nothing was filed. Sejal's reading is that the model took the chat page on
+         screen as context. It is the same family as M28's and M29's prose-reply finding. For
+         the small-items milestone: investigate what context the model was given (screen text
+         from the focused page?) before changing anything.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

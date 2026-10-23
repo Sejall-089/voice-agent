@@ -1056,8 +1056,11 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M31 (refuse a create plan that drops a requested send) is built and in progress (23 Oct 2026);
-no person has run its checklist yet.** For M30's open finding: asked to "create a linear issue and
+**M31 (refuse a create plan that drops a requested send) is closed (23 Oct 2026), after a live
+run by a person: both boxes ticked.** The refusal sounds natural through the speech engine, and in
+the real app "create a linear issue and send to fun" planned create then send. Six findings stay
+open, the largest being that about half of send requests are refused and need asking again. For
+M30's open finding: asked to "create a linear issue and
 send to fun", the planner sometimes filed the issue alone. A plan or single call that creates an
 issue with no send step, when you asked for one to a channel the app knows, is now refused.
 Scripted against the real model with every connector faked, 24 trials, nothing filed:

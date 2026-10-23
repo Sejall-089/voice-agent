@@ -5,11 +5,10 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-23): M0-M30 shipped; M30 closed 2026-10-23, its refusal not yet
-seen against a real model plan, with M28's prose-question finding still open and an M31 candidate
-recorded (a lone create that drops the send).**
+**Current status (as of 2026-10-23): M0-M31 shipped; M31 closed 2026-10-23 after a live run by a
+person, with six open findings (see M31 below).**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M30 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M31 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -99,6 +98,31 @@ only**. For M20 to M30 the status lives in `spec.md` (§9's entry for each, and 
 
   `npm test`: 3292 across 140 files, 96 skipped (3291 plus the guard test for the new script).
 
+- **M31 - refuse a create plan that drops a requested send.** Closed 2026-10-23 after a live run
+  by a person. `docs/M31-live-checklist.md`: 2 ticked, 0 open (H1: the refusal heard through
+  Piper, natural, no slash; H2: "create a linear issue and send to fun" in the real app planned
+  create then send, cancelled, nothing filed). For M30's open finding:
+  - **The check.** `checkDroppedSends` (`core/chain.ts`) refuses a plan or lone call holding a
+    create and no step of a tool declaring the new `Tool.askedWithCreateBy` (only `sendMessage`),
+    when the instruction says one of its words with a destination memory knows (a `#name`, a
+    phrase memory resolves to a `#channel`, or a bare name whose `#channel` memory holds). On the
+    lone-call path and the plan path; kept out of the next previous turn.
+  - **New files.** `tests/droppedSends.test.ts`, `tests/planner.droppedSends.test.ts`,
+    `tests/fixtures/sendDropped/drops.ts` (the 5 drops on record). `scripts/m30-say-refusal.ts`
+    gained `--dropped-send`.
+  - **Evidence.** Recon: fresh-log trials dropped 3 of 6, shared-log 0 of 6, all lone tool calls.
+    Scripted live with faked connectors (36 calls): 4 drops refused, 9 create > send plans ran to
+    the dialog, the control never refused, and M30's refusal fired against a real plan 5 times.
+  - **Known gaps.** Only sends; a channel never taught to memory; more than three words between
+    "send" and "to"; a known channel inside the bug text.
+  - **Candidates.** Re-ask the model once on either refusal (9 of 18 send requests refused); the
+    bot-mode channel list (a network call, needs a design decision); other dropped steps (row
+    559's Notion step); the fresh-log effect; a live prose reply that read the chat page on
+    screen as context.
+
+  `npm test`: 3350 across 142 files, 96 skipped (run with a scratch SQLite build; the dev app
+  held the real one).
+
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
 
@@ -115,7 +139,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30) and the eleven checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30, M31) and the twelve checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`

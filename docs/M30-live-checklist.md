@@ -129,6 +129,12 @@ Total: 17 real planning calls, est. ~$0.024.
   The text comes from the refusal constant (`UNASKED_STEP`) through the same `toSpokenResult` the
   planner uses, and Piper is built from `.env` as `main.ts` builds it.
 
+**Note, 2026-10-23 (from M31's scripted run, `docs/M31-live-checklist.md`):** with a fresh action
+log per trial, M31's run saw M30's refusal fire against a real model plan **5 times in 24
+trials**: summarize > create > send, refused with M30's exact wording before any preview or dialog,
+with nothing filed. Faked connectors and a script, not a person: the M30 boxes keep their current
+state.
+
 ## Machine-verified, not watched
 
 - The rule against every plan on record, no model calls: all 30 unasked steps refused (16 of the
