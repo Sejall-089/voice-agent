@@ -12,12 +12,13 @@
 //   npx vite-node scripts/m30-say-refusal.ts              # synthesize and play
 //   npx vite-node scripts/m30-say-refusal.ts --no-play    # synthesize only; prints the WAV path
 //   npx vite-node scripts/m30-say-refusal.ts --no-text    # the other wording (nothing copied)
+//   npx vite-node scripts/m30-say-refusal.ts --dropped-send   # M31: a create that dropped a send
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UNASKED_STEP, UNASKED_STEP_NO_TEXT } from "../src/core/chain.ts";
+import { DROPPED_SEND, UNASKED_STEP, UNASKED_STEP_NO_TEXT } from "../src/core/chain.ts";
 import { toSpokenResult } from "../src/core/speech.ts";
 import { PiperSynthesizer } from "../src/core/synthesizers/PiperSynthesizer.ts";
 
@@ -35,7 +36,11 @@ const engine = new PiperSynthesizer({
   legacyFlags: process.env["PIPER_LEGACY_FLAGS"] === "1",
 });
 
-const reason = process.argv.includes("--no-text") ? UNASKED_STEP_NO_TEXT : UNASKED_STEP;
+const reason = process.argv.includes("--dropped-send")
+  ? DROPPED_SEND
+  : process.argv.includes("--no-text")
+    ? UNASKED_STEP_NO_TEXT
+    : UNASKED_STEP;
 const spoken = toSpokenResult(reason);
 console.log(`Saying: ${spoken.text}`);
 if (spoken.remainder !== null) console.log(`(held back as "read the rest": ${spoken.remainder})`);

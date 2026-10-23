@@ -612,6 +612,164 @@ export function createDescriptions(
   return found;
 }
 
+// --- A send the instruction asked for, missing from the answer (M31) --------------------------
+//
+// THE FAILURE. "create a linear issue and send to fun", with a long clipboard and no email open,
+// sometimes came back as a lone create: the issue would have been filed and fun never told. M30's
+// scripted run: 4 of 12. M31's recon: 3 of 6 with a fresh action log, 0 of 6 with a shared one,
+// all three lone tool calls. Live, row 559 filed a real issue that way ("…send update to fun and
+// note changes in notion"). Nothing checked that a requested send made it into the answer.
+//
+// THE RULE. Refuse a plan or a lone call that holds a create (`contentArg`) and no step of a tool
+// declaring `askedWithCreateBy` (`sendMessage`), when the INSTRUCTION says one of that tool's
+// words with a destination the app knows. Refuses; never adds the missing step. A send anywhere
+// in the plan, before the create or after it, is the send; an answer with no create is never
+// looked at.
+//
+// "ASKS FOR A SEND" = A WORD PLUS A KNOWN DESTINATION (`asksFor`). Over the instruction only, with
+// quoted text removed, one clause at a time (split at , . ; : ! ?):
+//   - the word, as a whole token ("post-merge" is not "post"), then either the destination at
+//     once ("tell fun", "ping the team") or up to three object words and to / in / on / into
+//     before it ("send to fun", "share it in #social"). An entry with "..." takes the destination
+//     in that place ("let #bugs know").
+//   - the destination, up to four words, longest first, is KNOWN when it is a #name; or memory
+//     resolves it (the lookup `checkReference` makes) to a #channel; or, without a leading
+//     "the" / "my" and a trailing "channel", it is a bare name whose #channel memory holds as some
+//     fact's value ("fun" when a fact says "#fun").
+// A bare name is NOT taken as given, as `checkReference` would take it: that would make any word
+// after "to" a destination ("an issue to tell users about downtime"). A real Slack channel memory
+// has never been told about is therefore not known, and a drop to it is let through.
+//
+// Like the checks above: before anything is narrated, asked, admitted or run; declarations, never
+// tool names; and the instruction, never the clipboard.
+export const DROPPED_SEND =
+  "You asked me to send it too, but my plan had no send step, so nothing was filed. Ask again, " +
+  "or file it and send it as two requests.";
+
+// What the app knows about channels, from memory, for one check.
+export interface ChannelKnowledge {
+  // A phrase's remembered value (`memory.resolve`), or null.
+  resolve(phrase: string): string | null;
+  // Every channel some fact's value names, lowercase with its "#".
+  known: ReadonlySet<string>;
+}
+
+const CHANNEL_NAME = /^#[a-z0-9][a-z0-9_-]*$/;
+const PREPOSITION = new Set(["to", "in", "on", "into"]);
+const MAX_OBJECT_WORDS = 3;
+const MAX_DESTINATION_WORDS = 4;
+
+export function channelKnowledge(memory: Pick<Memory, "resolve" | "query">): ChannelKnowledge {
+  const known = new Set(
+    memory
+      .query("")
+      .map((fact) => fact.value.trim().toLowerCase())
+      .filter((value) => CHANNEL_NAME.test(value)),
+  );
+  return { resolve: (phrase) => memory.resolve(phrase)?.value ?? null, known };
+}
+
+// The instruction as clauses of lowercase tokens, quoted text removed. Edge punctuation is
+// trimmed from each token; a leading "#" and inner hyphens stay.
+function clausesOf(instruction: string): string[][] {
+  const unquoted = instruction
+    .replace(/"[^"]*"|“[^”]*”/g, " ")
+    .replace(/(^|\s)'[^']*'(?=\s|$|[.,;:!?])/g, " ");
+  return unquoted
+    .split(/[,.;:!?]/)
+    .map((clause) =>
+      clause
+        .toLowerCase()
+        .split(/\s+/)
+        .map((token) => token.replace(/^[^a-z0-9#]+|[^a-z0-9]+$/g, ""))
+        .filter((token) => token.length > 0),
+    );
+}
+
+function isKnownDestination(words: readonly string[], channels: ChannelKnowledge): boolean {
+  if (words.length === 1 && CHANNEL_NAME.test(words[0] ?? "")) return true;
+  const value = channels.resolve(words.join(" "))?.trim().toLowerCase() ?? "";
+  if (CHANNEL_NAME.test(value)) return true;
+  let bare = [...words];
+  if (bare[0] === "the" || bare[0] === "my") bare = bare.slice(1);
+  if (bare.length > 1 && bare[bare.length - 1] === "channel") bare = bare.slice(0, -1);
+  return bare.length === 1 && channels.known.has(`#${bare[0]}`);
+}
+
+// A known destination starting at `from`, up to `MAX_DESTINATION_WORDS` words and not past `to`.
+function destinationAt(tokens: readonly string[], from: number, to: number, channels: ChannelKnowledge): boolean {
+  for (let length = Math.min(MAX_DESTINATION_WORDS, to - from); length >= 1; length--) {
+    if (isKnownDestination(tokens.slice(from, from + length), channels)) return true;
+  }
+  return false;
+}
+
+// Whether `instruction` asks for this action, by the rules above.
+export function asksFor(instruction: string, words: readonly string[], channels: ChannelKnowledge): boolean {
+  for (const tokens of clausesOf(instruction)) {
+    for (const entry of words) {
+      const [head = "", tail] = entry.toLowerCase().split("...").map((part) => part.trim());
+      if (head.length === 0) continue;
+      for (let at = 0; at < tokens.length; at++) {
+        if (tokens[at] !== head) continue;
+        if (tail !== undefined) {
+          // "let ... know": the destination is exactly what stands between.
+          const end = tokens.indexOf(tail, at + 1);
+          if (end > at + 1 && end - at - 1 <= MAX_DESTINATION_WORDS && isKnownDestination(tokens.slice(at + 1, end), channels)) {
+            return true;
+          }
+          continue;
+        }
+        // The destination at once: "tell fun", "ping the team".
+        if (destinationAt(tokens, at + 1, tokens.length, channels)) return true;
+        // Or after up to three object words and a preposition: "send it to fun".
+        for (let gap = 0; gap <= MAX_OBJECT_WORDS; gap++) {
+          const preposition = at + 1 + gap;
+          if (preposition >= tokens.length) break;
+          if (PREPOSITION.has(tokens[preposition] ?? "") && destinationAt(tokens, preposition + 1, tokens.length, channels)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+type SendDeclaration = Pick<Tool, "name" | "contentArg" | "askedWithCreateBy">;
+
+// The tools the instruction asked for that the answer has no step of — when the answer holds a
+// create. `steps` must carry canonical tool names.
+export function droppedSends(
+  instruction: string,
+  steps: readonly PlannedStep[],
+  tools: readonly SendDeclaration[],
+  channels: ChannelKnowledge,
+): string[] {
+  if (!steps.some((step) => declared(tools, step.tool)?.contentArg !== undefined)) return [];
+  return tools
+    .filter((tool) => tool.askedWithCreateBy !== undefined)
+    .filter((tool) => !steps.some((step) => step.tool === tool.name))
+    .filter((tool) => asksFor(instruction, tool.askedWithCreateBy ?? [], channels))
+    .map((tool) => tool.name);
+}
+
+export function checkDroppedSends(
+  instruction: string,
+  steps: readonly PlannedStep[],
+  tools: readonly SendDeclaration[],
+  channels: ChannelKnowledge,
+): PlanCheck {
+  return droppedSends(instruction, steps, tools, channels).length === 0
+    ? { ok: true }
+    : { ok: false, reason: DROPPED_SEND };
+}
+
+// Kept out of the next planning call's previous turn, like the refusals above.
+export function isDroppedSendRefusal(entry: Pick<ActionLogEntry, "status" | "tool" | "result">): boolean {
+  return entry.status === "refused" && entry.tool === null && entry.result === DROPPED_SEND;
+}
+
 // Substitute the results of steps that have ALREADY RUN into this step's arguments.
 //
 // Called by the planner at the moment execution reaches this step and before its gate fires —

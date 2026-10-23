@@ -22,10 +22,13 @@ import {
   OVER_STEP_CAP,
   SAVED_HOLD_MS,
   canonicalToolName,
+  channelKnowledge,
+  checkDroppedSends,
   checkUnaskedSteps,
   checkUnfilledBlanks,
   checkUnreadContent,
   createDescriptions,
+  isDroppedSendRefusal,
   isUnaskedStepRefusal,
   isUnfilledBlankRefusal,
   isUnknownReferenceRefusal,
@@ -277,14 +280,16 @@ export class Planner {
     //    instruction to the user, and shown to the model it is the same kind of text that M21
     //    found turning the next answer into prose. And for a plan refused for a blank nothing
     //    fills (`isUnfilledBlankRefusal`, M28), whose "copy the text you mean" is the same kind,
-    //    and for a step nobody asked for before a create (`isUnaskedStepRefusal`, M30).
+    //    and for a step nobody asked for before a create (`isUnaskedStepRefusal`, M30), and for a
+    //    create that dropped a requested send (`isDroppedSendRefusal`, M31).
     const last = this.log.getLast();
     const previousTurn =
       last !== null &&
       (isUnknownReferenceRefusal(last) ||
         isUnreadContentRefusal(last) ||
         isUnfilledBlankRefusal(last) ||
-        isUnaskedStepRefusal(last))
+        isUnaskedStepRefusal(last) ||
+        isDroppedSendRefusal(last))
         ? null
         : last;
     let choice = await this.llm.chooseTool(
@@ -393,6 +398,10 @@ export class Planner {
     if (!blanks.ok) return await this.refuseLone(instruction, choice.name, blanks.reason);
     const unread = checkUnreadContent(instruction, context, lone, this.registry);
     if (!unread.ok) return await this.refuseLone(instruction, choice.name, unread.reason);
+    // A lone create when the instruction also asked for a send (core/chain.ts, `checkDroppedSends`,
+    // M31). Every drop on record came this way.
+    const dropped = checkDroppedSends(instruction, lone, this.registry, channelKnowledge(this.memory));
+    if (!dropped.ok) return await this.refuseLone(instruction, choice.name, dropped.reason);
 
     const asked = await this.askBeforeLoneCall(instruction, tool, choice.input);
     if (asked !== null) return asked;
@@ -774,6 +783,13 @@ export class Planner {
     const unasked = checkUnaskedSteps(instruction, context, steps, this.registry);
     if (!unasked.ok) {
       return await this.refusePlan(instruction, proposed, unasked.reason);
+    }
+
+    // A create with no send step when the instruction asked for one (core/chain.ts,
+    // `checkDroppedSends`, M31). Here, before the one-step branch, so a one-step plan is judged too.
+    const dropped = checkDroppedSends(instruction, steps, this.registry, channelKnowledge(this.memory));
+    if (!dropped.ok) {
+      return await this.refusePlan(instruction, proposed, dropped.reason);
     }
 
     // A one-step "plan". The prompt tells the model not to do this twice over, but if it does,

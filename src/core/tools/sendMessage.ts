@@ -483,6 +483,10 @@ export const sendMessageTool: Tool = {
   // that pairs it with a create has used what "these notes" pointed at (core/chain.ts,
   // `checkUnreadContent`). With `notes`, the message is the instruction's words, not the clipboard.
   readsContext: (args) => typeof args["notes"] !== "string" || args["notes"].trim() === "",
+  // With a create, a plan must hold a step of this tool when the instruction says one of these
+  // words with a channel the app knows (core/chain.ts, `checkDroppedSends`, M31). Never sent to
+  // the model.
+  askedWithCreateBy: ["send", "post", "tell", "let ... know", "share", "message", "ping"],
   confirmLabel: "Send",
   // Only `channel` is a reference. `notes` is the user's message, to be sent as written — left
   // undeclared, a body that read "the team" was swapped for the fact it named.

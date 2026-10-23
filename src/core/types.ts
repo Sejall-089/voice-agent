@@ -934,6 +934,16 @@ export interface Tool extends ToolSchema {
   // tool lists its own and the lists are never pooled: "polish this and file it" asks for a
   // rewrite, not a summary. Absent means the check never looks at this tool.
   askedForBy?: readonly string[];
+  // The words that mean the user asked for THIS tool's action as well as a create (M31): "send",
+  // "tell", "let ... know" for `sendMessage`. Read by `checkDroppedSends` (core/chain.ts), which
+  // refuses a plan or lone call that holds a create (`contentArg`) and no step of this tool, when
+  // the instruction says one of these words with a destination the app knows. "..." in an entry
+  // marks where the destination stands ("let ... know"). Never sent to the model.
+  //
+  // Its own field, not `askedForBy`: `checkUnaskedSteps` judges every tool declaring that one when
+  // its step comes before a create, and would then refuse a send step there with the
+  // summarize/reword wording.
+  askedWithCreateBy?: readonly string[];
   // How to describe this action to the user at the confirm gate. The planner calls this with the
   // RESOLVED args, so the user always approves the concrete action ("Send to #design-team?"),
   // never the vague one they typed ("send to the team"). `dangerous` tools should define it.
