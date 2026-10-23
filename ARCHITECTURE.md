@@ -223,6 +223,13 @@ runs, and the app says how much of the plan did and did not happen. This is prom
 an agent loop — the model deciding its next move *after seeing each result* is a different,
 riskier shape and a separate milestone. See spec.md §5b.
 
+**The preview is the app's words, not the model's (M29).** The plan is shown and spoken before
+step 1. Each line is the tool's own `planPhrase`, written in code or in a connector's pinned
+definition, so a step cannot be previewed as something it does not do. Until M29 each line was
+the model's `describe`, and M28's live run showed "Capture the selected text unchanged" over a
+`rewrite`. The model still writes `describe`, so the planning prompt is unchanged, but nothing
+shows it, speaks it or logs it.
+
 **The four tiers (M10, `core/risk.ts`).** A boolean `irreversible` was enough while every
 action was either an undoable local transform or one Slack POST. Acting inside another app's
 GUI broke that — most GUI actions have no undo — so the question split in two: *is it
@@ -231,9 +238,13 @@ recoverable* and *how much does it cost when it is wrong*.
 | Tier | Example | What happens |
 |------|---------|--------------|
 | `safe` | read the open email | run |
-| `reversible` | copy to clipboard, open a tab, version a fact | run |
+| `reversible` | a clipboard write the user asked for, open a tab, version a fact | run |
 | `caution` | open the reply box, insert a draft | run, **after saying so** |
 | `dangerous` | Slack post, Gmail Send | **confirm first**, always |
+
+The clipboard is not recoverable in itself: the app keeps no copy of what a write replaces. A
+write sits at `reversible` only because the user asked for it. So inside a chain, where a step
+may be one nobody asked for, `rewrite` writes nothing (M29).
 
 Narration is what stands in for the undo that does not exist: by the time the reply box is
 open there is nothing to roll back, so being told while it happens is the protection.

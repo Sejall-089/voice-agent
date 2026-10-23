@@ -4674,7 +4674,8 @@ Post-v0:
       investigation." No M27 change touches planning; the cause is not known, and the next step
       is to reproduce it — with the clipboard state recorded, as M19's plan-choice lesson says —
       before anything is edited. *(M28 reproduced and measured it: it comes with a long
-      clipboard. Two wordings were tried and reverted; still open. See M28.)*
+      clipboard. Two wordings were tried and reverted; still open. See M28. M29's live run saw
+      it again, now named in the preview as "Summarize the text you copied"; see M29.)*
 
       **Known gaps / open limits:** another program polling the mouse buttons can take the
       "pressed since" bit, so a very short tap may then be missed; taps under ~15 ms rely on that
@@ -4824,10 +4825,13 @@ Post-v0:
          detached rows, and the last attached one was row 642, a cancelled post naming SEJ-21.
          No state waited for an answer: M21's lesson, live.
 
-- [ ] **M29 — `rewrite` leaves the clipboard alone inside a chain; code-written plan preview
-      lines.** **In progress.** Both fixes come from M28's live finding 1. Both are built, and
-      both are waiting for their live pass (`docs/M29-live-checklist.md`). Fix 1 was committed
-      as `bd3abc9`. Fix 2 is option A of the M28 investigation: code-written preview lines.
+- [x] **M29 — `rewrite` leaves the clipboard alone inside a chain; code-written plan preview
+      lines.** **Closed 2026-10-23, after a live run by a person (9 of 9 boxes ticked —
+      `docs/M29-live-checklist.md`), with two carried-over findings still open (M27's
+      plan-choice finding and M28's prose question; the live record is at the end of this
+      entry).** Both fixes come from M28's live finding 1. Fix 1 was committed as `bd3abc9`.
+      Fix 2, option A of the M28 investigation (code-written preview lines), was committed as
+      `41ed34d`.
 
       **Fix 1: `rewrite` never touches the clipboard inside a chain.**
 
@@ -4969,6 +4973,61 @@ Post-v0:
 
       **Build record (2026-10-23, before the live pass).** `npm test`: **3195 passed across 138
       files, 96 skipped**. Both typechecks clean. No model calls.
+
+      **Live, by a person (9 of 9 ticked, 2026-10-23).**
+      - **Fix 1.** In a chain with a rewrite step, the Linear dialog's description had no
+        "Rewritten (…) and copied to clipboard." line. After cancelling, a paste into Notepad
+        gave the original text ("Tried the migration again…"); the next try's description was
+        not a rewording of a rewording. A plain "rewrite this politely" still replaced the
+        clipboard and kept its header line.
+      - **Fix 2.** The on-screen and spoken previews both gave the three fixed phrases: "reword
+        the text you copied", "create a Linear issue", "post a message to Slack". The terminal's
+        `[main]` line showed `rewrite "reword the text you copied"`. Tries without a rewrite
+        step showed only the phrases for the tools in their plans.
+      - **The phrase that reached the rewrite step** was the checklist's fallback, "rewrite this
+        and file it in Linear, then tell fun". On "create a linear issue and send to fun" the
+        model planned no rewrite step in this run. So the M28 case itself (a rewrite nobody
+        asked for) was not seen live. The same code path was, since the handler reads only
+        `deps.chained`, never the instruction. The replay tests in `tests/planner.mcp.test.ts`
+        cover the M28 plan itself.
+      - **Close-out test run.** 3195 passed across 138 files, 96 skipped; both typechecks
+        clean. The first run used `better-sqlite3` aliased to a scratch node build of the same
+        version (12.11.1), because the dev app from the live pass held the SQLite binary that
+        `npm test`'s pre-step rebuilds. After the app was closed, plain `npm test` gave the same
+        count. Eval skipped (not run against the real model).
+
+      **Proven vs. live-only.**
+      - **Proven by tests against `MockShell`:** the M28 plan itself (rewrite > create > send
+        with the logged arguments) leaves the clipboard intact; every phrase and every rule on
+        it; that the model never receives a phrase; the fallback on screen, in speech and on
+        the console.
+      - **Seen only live:** the real clipboard, the real speech engine reading the phrases, and
+        the real terminal line.
+
+      **Live findings, carried over; neither fixed in M29, no code changed for them:**
+      1. **Steps the instruction did not ask for, before a create (M27's plan-choice finding,
+         still open).**
+         - **Seen live:** with the long clipboard, "create a linear issue and send to fun"
+           sometimes planned a summarize step before the create. The preview now names it:
+           "Summarize the text you copied".
+         - **Also seen:** with a long clipboard, the model sometimes condenses the text itself
+           inside the create call's description, with no separate step. No preview line can
+           show that; the Linear dialog shows the description in full before anything is
+           filed.
+         - **What M29 changed:** a rewrite step is now visible as what it is and no longer
+           touches the clipboard. Whether the model adds such a step at all is unchanged; see
+           M28's measurements (two wordings, both reverted).
+      2. **With nothing copied, the request for the text is the model's prose (M28's finding 2,
+         still open).** Nothing in the app waits for an answer (M21). Not touched.
+
+      **Known gaps / open limits.**
+      - **The planning prompt is unchanged, by decision.** Rewrite's description still says it
+        copies to the clipboard, and the plan schema still says `describe` "is read out".
+        Changing either needs an eval with controls.
+      - **The preview is accurate but generic.** Two steps of one tool read alike.
+      - **Inside a chain, a rewrite the user did ask for** ("polish this and post it") no
+        longer leaves the polished text on the clipboard. That was decided, and is not a
+        finding.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

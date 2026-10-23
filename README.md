@@ -1034,8 +1034,9 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M29 is in progress.** Both fixes for M28's first live finding are built and waiting for their
-live run by a person.
+**M29 (rewrite leaves the clipboard alone inside a chain; fixed preview phrases) is closed (23 Oct
+2026), after a live run by a person: all 9 live boxes ticked.** Both fixes are for M28's first
+live finding.
 
 - **Inside a multi-step plan, `rewrite` no longer touches the clipboard.** It hands only the
   rewritten text to the next step, with no "Rewritten (…) and copied to clipboard." line in
@@ -1048,6 +1049,14 @@ live run by a person.
   text unchanged" over a step that reworded the text. The preview is shown and spoken the same
   way. The console's `[main]` line lists each step's tool beside its phrase. The model is asked
   exactly what it was asked before.
+
+**Two findings carried over from earlier milestones are still open, not fixed in M29:**
+- **Steps you didn't ask for.** With a long clipboard, the model sometimes plans a step you
+  didn't ask for before a create. The preview now names it ("Summarize the text you copied").
+  It also sometimes condenses the text inside the create itself, which shows in full at the
+  Linear dialog.
+- **A question nothing is waiting on.** With nothing copied, the reply asking for the text is
+  the model's prose, and nothing in the app is waiting for an answer.
 
 **3195 tests green across 138 files, 96 skipped.** See `docs/M29-live-checklist.md` and `spec.md`
 §9 (M29).
@@ -1065,7 +1074,8 @@ one-line clipboard, 4 of 6 with a long one). Two prompt wordings removed the ext
 broke something that works today (an explicit "summarize", and filing an open email when text
 is also copied), so both were reverted and the app plans as it did at M27. What shipped: the
 planner now refuses a plan whose arguments hold a placeholder nothing fills, like
-`{selected_text}`, before anything runs. **3039 tests green across 137 files, 96 skipped.** See
+`{selected_text}`, before anything runs. **3039 tests green across 137 files, 96 skipped** (at
+M28's close). See
 `docs/M28-live-checklist.md` and `spec.md` §9 (M28).
 
 **M27 (three pill fixes from M26's live findings) is closed (23 Oct 2026), after a live run by a

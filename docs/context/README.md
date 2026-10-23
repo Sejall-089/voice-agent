@@ -5,10 +5,10 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-23): M0-M28 shipped; M28 closed 2026-10-23, with M27's
-plan-choice finding still open and two live findings not fixed.**
+**Current status (as of 2026-10-23): M0-M29 shipped; M29 closed 2026-10-23, with M27's
+plan-choice finding and M28's prose-question finding still open.**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M28 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M29 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -59,8 +59,22 @@ only**. For M20 to M28 the status lives in `spec.md` (§9's entry for each, and 
   (gpt-5-mini, 3 trials a case): the extra summarize step comes with a long clipboard. Two
   wordings fixed it and each broke a control, so both were reverted; the baseline and the two
   runs are in `spec.md` §9 (M28). Shipped: the planner refuses a plan whose arguments hold a
-  placeholder nothing fills (`{selected_text}`). `npm test` now passes 3039 across 137 files, 96
-  skipped (the opt-in real-model evals and real-Piper check).
+  placeholder nothing fills (`{selected_text}`). `npm test` passed 3039 across 137 files, 96
+  skipped, at M28's close (the opt-in real-model evals and real-Piper check).
+- **M29 - `rewrite` leaves the clipboard alone inside a chain; fixed preview phrases.** Closed
+  2026-10-23 after a live run by a person. `docs/M29-live-checklist.md`: 9 ticked, 0 open. Both
+  fixes are for M28's first finding:
+  - **Fix 1.** Inside a chain, `rewrite` returns only the rewritten text, with no clipboard
+    write and no header line. `MockShell` now holds a clipboard that the next capture reads,
+    as Windows does.
+  - **Fix 2.** Each preview line, shown and spoken, is the tool's own `planPhrase`, never the
+    model's `describe`; the `[main]` line names each step's tool beside it. The planning prompt
+    is unchanged.
+
+  The live rewrite step was reached with the fallback phrase "rewrite this and file it in
+  Linear, then tell fun". Two carried-over findings were seen again and are not fixed: M27's
+  plan-choice finding (an unrequested summarize step, or the text condensed inside the create)
+  and M28's prose question with nothing waiting. `npm test`: 3195 across 138 files, 96 skipped.
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -78,7 +92,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28) and the nine checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29) and the ten checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`
