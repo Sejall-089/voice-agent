@@ -7,8 +7,10 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M29, which closed on 2026-10-23 with M27's plan-choice finding and M28's prose-question finding
-  still open. The next one is whatever is agreed and added to that list). Do not jump ahead. Each
+  M30, which closed on 2026-10-23 with its refusal of an unasked summarize/rewrite step not yet
+  seen against a real model plan, M28's prose-question finding still open, and an M31 candidate
+  recorded: a lone create that drops the send. The next one is whatever is agreed and added to
+  that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
   If a task seems to need anything still OUT of scope (auto-clicking or any vision-driven

@@ -5100,9 +5100,12 @@ Post-v0:
         longer leaves the polished text on the clipboard. That was decided, and is not a
         finding.
 
-- [ ] **M30 — refuse a summarize or rewrite step nobody asked for, before a create.** **In
-      progress (built 2026-10-23; the live pass has not run — `docs/M30-live-checklist.md`).**
-      For M27's plan-choice finding. One commit. No model calls.
+- [x] **M30 — refuse a summarize or rewrite step nobody asked for, before a create.** **Closed
+      2026-10-23, on replay, test and scripted evidence; no box ticked by a person (0 of 6 —
+      `docs/M30-live-checklist.md`). The refusal has not been seen against a real model plan: 0
+      of 12 scripted live trials produced an unasked step (the close-out record is at the end of
+      this entry).** For M27's plan-choice finding. Committed as `5e40d4d` (the build and the
+      review pass) and `d8b1bac` (the scripted live results). No model calls in the build.
 
       **The investigation** (read-only, before any code). Every plan on record with a summarize
       or rewrite step before a create: **30 the person did not ask for** (16 of the 77 recorded
@@ -5217,6 +5220,47 @@ Post-v0:
       verb-in-the-bug phrasings let through, the email-open wording, a refusal costs a try, and
       condensing inside the create is measured on the console, not judged). M28's prose question
       with nothing waiting is not touched.
+
+      **Scripted live run (2026-10-23, `d8b1bac`).** The real planner through the real call site,
+      real planning calls (gpt-5-mini, low), the long clipboard, every connector faked (Linear
+      over `FakeMcpServer`, GitHub unavailable, Slack `FakeSender`, an in-memory log, `fetch`
+      limited to `api.openai.com`), Cancel at every dialog. 17 real planning calls, est. ~$0.024.
+      - **Box 1, "create a linear issue and send to fun": 0 of 12 refused.** No trial planned a
+        summarize or rewrite step, so the refusal was never exercised against a real model plan.
+        Every trial reached the Linear dialog with `[description: equals clipboard]`, and the
+        fakes saw 0 creates and 0 sends.
+      - **Box 2, "summarize this and file it in Linear": 5 of 5.** Not refused, the preview
+        "Summarize the text you copied / Create a Linear issue", `[description: from an earlier
+        step]`, the dialog's body step 1's output. The summarize step's own model call was faked
+        to stay within budget. 4 of 5 plans used the `functions.` prefix; canonicalised correctly.
+      - **No UI driver** (Playwright or similar) is in the repo, so the bar's DOM was not read.
+
+      **Close-out record (2026-10-23).** `npm test`: **3292 passed across 140 files, 96
+      skipped**; both typechecks clean. One more than the review pass's 3291:
+      `tests/realModelGuard.test.ts` checks every file under `scripts/` for a model call outside
+      the spend gate, and the new `scripts/m30-say-refusal.ts` (no model call) is one more file.
+      - **Verified:** the refusal logic, by the replay (30 of 30 unasked steps refused, 5 of 5
+        asked-for steps run, 24 control trials untouched), by the harness's dry run with M27's
+        plan scripted in (the exact wording on the bar and to speech, no preview or dialog, the
+        refused plan logged with summarize before the create, nothing filed), and by the tests.
+      - **Not reproduced live.** In 12 scripted trials the model never planned the step M27, M28
+        and M29 saw (M28's baseline: 1 of 3 on this phrase with this clipboard; M29's live run:
+        sometimes). Why is unknown: chance at a low rate, a difference between this run and the
+        app's (one shared in-memory log, a menu without the jobs tools), or a change in the model
+        behind the same name are all possible, and none was tested.
+      - **Box 1.2's sound** needs a person: `npx vite-node scripts/m30-say-refusal.ts` speaks the
+        exact sentence through the real Piper engine, built as `main.ts` builds it, from the
+        refusal constant through the planner's own `toSpokenResult`.
+      - **Known gaps** carried: "file a one-line issue from this" is wrongly refused (no listed
+        word); "sum the whole thing up" is wrongly refused (more than one word between a two-word
+        entry); inflected forms; 4 of 4 verb-in-the-bug phrasings let through; the rest of §5b's
+        list.
+
+      **Open finding, for M31 (not fixed in M30):** in 4 of the 12 scripted trials of "create a
+      linear issue and send to fun", the planner produced a lone create and dropped the send (no
+      plan; the issue would have been filed and fun never told). The same shape appears in M28's
+      baseline (one "create only, no description, no send" trial) and is the "lone create that
+      drops a send" §5b names as a different failure.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

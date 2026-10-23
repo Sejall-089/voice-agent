@@ -1,8 +1,10 @@
 # M30 — live verification checklist (by hand)
 
-> **NOT YET RUN.** `spec.md` §9 (M30): a plan with a summarize or rewrite step before a Linear or
-> GitHub create is refused unless the instruction asks for that step (`checkUnaskedSteps`,
-> `spec.md` §5b, "A step nobody asked for, before a create").
+> **NOT RUN BY A PERSON; M30 CLOSED 2026-10-23 on scripted and test evidence, with every box
+> open.** `spec.md` §9 (M30): a plan with a summarize or rewrite step before a Linear or GitHub
+> create is refused unless the instruction asks for that step (`checkUnaskedSteps`, `spec.md` §5b,
+> "A step nobody asked for, before a create"). 0 ticked, 6 open. The refusal has not been seen
+> against a real model plan (see **Script-verified** below).
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
 >
@@ -60,7 +62,8 @@ has one: it records whether the model put the copied text in the create as it is
 - [ ] **1.1** The refused try shows no preview and no dialog, and the bar shows exactly: *"I won't
       summarize/reword it unless you ask. Ask again to file it as it is, or say 'summarize' /
       'rewrite' if you want that."*
-- [ ] **1.2** The spoken message says the same sentence, whole. Write down how "summarize/reword"
+- [ ] **1.2** *(Needs a person to listen. Without a refused plan:
+      `npx vite-node scripts/m30-say-refusal.ts`.)* The spoken message says the same sentence, whole. Write down how "summarize/reword"
       and "'summarize' / 'rewrite'" sounded.
 - [ ] **1.3** The terminal's `[main] refused plan, as sent:` line for that try lists
       `"tool":"summarize"` before `"tool":"linear__create_issue"`.
@@ -106,12 +109,24 @@ what a real summary reads like. The harness was a scratch script, not committed.
 | 2 — "summarize this and file it in Linear" | 5 | **Pass, 5 of 5.** None refused; the preview was "1. Summarize the text you copied / 2. Create a Linear issue"; `[description: from an earlier step]`; the dialog body was step 1's output (the fake summary), not the clipboard; the fakes saw 0 creates. | 4 of 5 plans named the tools with the provider's `functions.` prefix; canonicalised and judged correctly. | 5 planning |
 | UI (optional) | — | Not run: no Playwright, Spectron, Puppeteer or WebDriver in the repo. | — | 0 |
 
-Total: 17 real planning calls, est. ~$0.024. What this does not show:
-- **Box 1's refusal with a real model.** The refusal path itself is covered by the replay and
-  planner tests, and by the harness's dry run with M27's plan scripted (refused, bar and speech
-  text exactly the wording, no preview or dialog, the `refused plan, as sent` line listing
-  summarize before the create, 0 creates and 0 sends).
-- **1.2's sound.** It still needs a person: only the string handed to speech was compared.
+Total: 17 real planning calls, est. ~$0.024.
+
+**What this run does and does not establish:**
+- **The refusal has NOT been observed against a real model plan.** 0 of 12 real trials of "create
+  a linear issue and send to fun" produced an unasked step, so there was nothing to refuse. Boxes
+  1.1, 1.3 and 1.4 stay open for that reason. What covers the refusal instead:
+  - the replay: 30 of 30 recorded unasked steps refused, 5 of 5 asked-for steps run;
+  - the harness's dry run with M27's plan scripted in: refused, the bar and spoken text exactly
+    the wording, no preview or dialog, the `refused plan, as sent` line listing summarize before
+    the create, 0 creates and 0 sends;
+  - `tests/unaskedSteps.test.ts` and `tests/planner.unaskedSteps.test.ts`.
+- **Box 2: 5 of 5 by script,** with the summarize step's own model call faked. It shows the
+  description came from step 1, not what a real summary reads like. Box 2 stays open for a person.
+- **Box 1.2 needs a person to listen.** The script compared only the string handed to speech.
+  To hear the exact sentence through the real speech engine without needing a refused plan:
+  `npx vite-node scripts/m30-say-refusal.ts`. It plays audio; `--no-play` only writes the WAV.
+  The text comes from the refusal constant (`UNASKED_STEP`) through the same `toSpokenResult` the
+  planner uses, and Piper is built from `.env` as `main.ts` builds it.
 
 ## Machine-verified, not watched
 

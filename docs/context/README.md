@@ -5,10 +5,11 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-23): M0-M29 shipped; M29 closed 2026-10-23, with M27's
-plan-choice finding and M28's prose-question finding still open.**
+**Current status (as of 2026-10-23): M0-M30 shipped; M30 closed 2026-10-23, its refusal not yet
+seen against a real model plan, with M28's prose-question finding still open and an M31 candidate
+recorded (a lone create that drops the send).**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M29 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M30 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -74,7 +75,29 @@ only**. For M20 to M29 the status lives in `spec.md` (§9's entry for each, and 
   The live rewrite step was reached with the fallback phrase "rewrite this and file it in
   Linear, then tell fun". Two carried-over findings were seen again and are not fixed: M27's
   plan-choice finding (an unrequested summarize step, or the text condensed inside the create)
-  and M28's prose question with nothing waiting. `npm test`: 3195 across 138 files, 96 skipped.
+  and M28's prose question with nothing waiting. `npm test`: 3195 across 138 files, 96 skipped,
+  at M29's close.
+- **M30 - refuse a summarize or rewrite step nobody asked for, before a create.** Closed
+  2026-10-23 on replay, test and scripted evidence. `docs/M30-live-checklist.md`: 0 ticked, 6
+  open. For M27's plan-choice finding:
+  - **The check.** `checkUnaskedSteps` (`core/chain.ts`) refuses a plan with a step of a tool
+    declaring the new `Tool.askedForBy` (only `summarize` and `rewrite`, each with its own word
+    list) before a create, unless the instruction says one of that tool's words. Two fixed
+    wordings, by whether anything was copied. Kept out of the next previous turn. No lone-call
+    call site. The `[main]` line also says where each create's description came from.
+  - **New files.** `tests/unaskedSteps.test.ts`, `tests/planner.unaskedSteps.test.ts`,
+    `tests/fixtures/unaskedSteps/replay.ts` (M28's eval table and 8 live runs),
+    `tests/fixtures/planChoice/clipboards.ts` (the M28 eval's clipboards, moved),
+    `scripts/m30-say-refusal.ts` (speaks the refusal through real Piper, for box 1.2).
+  - **Evidence.** The replay refuses 30 of 30 unasked steps and runs 5 of 5 asked-for ones. In 12
+    scripted live trials with faked connectors the model planned no unasked step, so the refusal
+    was **not** seen against a real plan; "summarize this and file it" passed 5 of 5.
+  - **Known gaps.** "file a one-line issue from this" and "sum the whole thing up" are wrongly
+    refused; inflected forms; a listed word inside the bug lets the step through.
+  - **M31 candidate.** In 4 of those 12 trials the planner made a lone create and dropped the
+    send. Not fixed.
+
+  `npm test`: 3292 across 140 files, 96 skipped (3291 plus the guard test for the new script).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -92,7 +115,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29) and the ten checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30) and the eleven checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`
