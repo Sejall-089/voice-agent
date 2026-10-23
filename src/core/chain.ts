@@ -337,10 +337,8 @@ const squash = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 type ContentDeclaration = Pick<Tool, "name" | "contentArg" | "readsContext">;
 
-const declared = (
-  tools: readonly ContentDeclaration[],
-  name: string,
-): ContentDeclaration | undefined => tools.find((tool) => tool.name === name);
+const declared = <T extends Pick<Tool, "name">>(tools: readonly T[], name: string): T | undefined =>
+  tools.find((tool) => tool.name === name);
 
 // Clause 2 — true when the plan DID use what the user pointed at: a step that reads it, or an
 // argument containing the clipboard's text (whitespace-normalised).
@@ -492,6 +490,126 @@ export function isUnfilledBlankRefusal(
   entry: Pick<ActionLogEntry, "status" | "tool" | "result">,
 ): boolean {
   return entry.status === "refused" && entry.tool === null && entry.result === UNFILLED_BLANK;
+}
+
+// --- A step nobody asked for, before a create (M30) -------------------------------------------
+//
+// THE FAILURE. M27's live finding, measured in M28 and seen again in M29: with text copied,
+// "create a linear issue and send to fun" was sometimes planned summarize > create > send, and
+// once rewrite > create. Nobody asked for a summary or a rewording, and the issue would have
+// carried the model's version of the text, not the user's. With nothing copied, "log this as an
+// issue and let #bugs know" was planned summarize > create > send in 14 of 25 recorded answers,
+// and stops at "Nothing to summarize". Two prompt wordings fixed it in M28's eval and each broke
+// a control, so it is judged here, in code, instead.
+//
+// THE RULE. Refuse a plan in which a step of a tool that declares `askedForBy` (summarize,
+// rewrite) comes BEFORE a create (`contentArg`), unless the instruction says one of THAT tool's
+// own words. Refuses; never rewrites the plan. A step that is not before a create — a plan that
+// only summarizes, or one that summarizes after filing — is not looked at.
+//
+// HOW A WORD IS MATCHED (`saysAny`): whole words, case-insensitive, over the user's instruction
+// only — never the clipboard, which is the text being filed and can say anything. A two-word entry
+// also matches with one object word between ("sum this up", "boil it down", "clean that up").
+// Inflected forms are not listed and do not match ("summarized"), nor do words the lists lack
+// ("one-line"); and a listed word that is part of the bug itself ("the summarize button is
+// broken") lets the step through. Measured in tests/unaskedSteps.test.ts; the gaps are in spec §5b.
+//
+// Not on the lone-call path: one call has no step before it. Like the two checks above, it runs
+// before anything is narrated, asked, admitted or run, and reads declarations, never tool names.
+//
+// Two fixed wordings, chosen by whether anything was copied. With nothing, the step had nothing to
+// work from and asking again the same way would not help; with text, filing it as it is or asking
+// for the step by name are the two ways forward.
+export const UNASKED_STEP_NO_TEXT = "I'd need text to work from. Copy it, then ask again.";
+export const UNASKED_STEP =
+  "I won't summarize/reword it unless you ask. Ask again to file it as it is, or say " +
+  "'summarize' / 'rewrite' if you want that.";
+
+// The object words a two-word entry may take between its words.
+const OBJECT_WORD = "(?:it|this|that|these|those|them)";
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function wordPattern(word: string): RegExp {
+  const parts = word.trim().toLowerCase().split(/\s+/).map(escapeRegExp);
+  const between = parts.length === 2 ? `\\s+(?:${OBJECT_WORD}\\s+)?` : "\\s+";
+  return new RegExp(`(?<![a-z0-9])${parts.join(between)}(?![a-z0-9])`, "i");
+}
+
+// Whether `instruction` says any of `words`, by the rules above.
+export function saysAny(instruction: string, words: readonly string[]): boolean {
+  return words.some((word) => wordPattern(word).test(instruction));
+}
+
+type AskDeclaration = Pick<Tool, "name" | "contentArg" | "askedForBy">;
+
+// The index of every step whose tool declares `askedForBy`, that comes before a create, and whose
+// tool's words the instruction does not say.
+export function unaskedSteps(
+  instruction: string,
+  steps: readonly PlannedStep[],
+  tools: readonly AskDeclaration[],
+): number[] {
+  let lastCreate = -1;
+  steps.forEach((step, index) => {
+    if (declared(tools, step.tool)?.contentArg !== undefined) lastCreate = index;
+  });
+  const found: number[] = [];
+  for (let index = 0; index < lastCreate; index++) {
+    const step = steps[index];
+    const words = step === undefined ? undefined : declared(tools, step.tool)?.askedForBy;
+    if (words !== undefined && !saysAny(instruction, words)) found.push(index);
+  }
+  return found;
+}
+
+// `steps` must already carry canonical tool names, as for `checkUnreadContent`.
+export function checkUnaskedSteps(
+  instruction: string,
+  context: Pick<CapturedContext, "selectedText">,
+  steps: readonly PlannedStep[],
+  tools: readonly AskDeclaration[],
+): PlanCheck {
+  if (unaskedSteps(instruction, steps, tools).length === 0) return { ok: true };
+  const copied = context.selectedText !== null && context.selectedText.trim().length > 0;
+  return { ok: false, reason: copied ? UNASKED_STEP : UNASKED_STEP_NO_TEXT };
+}
+
+// Kept out of the next planning call's previous turn, like the two refusals above: "ask again" is
+// advice to the person, not context for the model.
+export function isUnaskedStepRefusal(
+  entry: Pick<ActionLogEntry, "status" | "tool" | "result">,
+): boolean {
+  return (
+    entry.status === "refused" &&
+    entry.tool === null &&
+    (entry.result === UNASKED_STEP || entry.result === UNASKED_STEP_NO_TEXT)
+  );
+}
+
+// --- Where a create's description came from (M30, the console only) ---------------------------
+//
+// M29's live run saw a long clipboard condensed INSIDE the create call, with no step to show it,
+// and M30's investigation could not confirm a single case. So nothing judges it; this only
+// measures it, for the `[main]` line: for each create with a description, whether that description
+// is the clipboard (whitespace aside), something else, or an earlier step's result.
+export type DescriptionSource = "equals clipboard" | "differs from clipboard" | "from an earlier step";
+
+export function createDescriptions(
+  steps: readonly PlannedStep[],
+  tools: readonly Pick<Tool, "name" | "contentArg">[],
+  clipboard: string | null,
+): DescriptionSource[] {
+  const found: DescriptionSource[] = [];
+  for (const step of steps) {
+    const content = declared(tools, step.tool)?.contentArg;
+    if (content === undefined) continue;
+    const body = step.arguments[content.body];
+    if (typeof body !== "string" || body.trim() === "") continue;
+    if (hasPlaceholder(body)) found.push("from an earlier step");
+    else if (clipboard !== null && squash(body) === squash(clipboard)) found.push("equals clipboard");
+    else found.push("differs from clipboard");
+  }
+  return found;
 }
 
 // Substitute the results of steps that have ALREADY RUN into this step's arguments.

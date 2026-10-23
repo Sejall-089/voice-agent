@@ -928,6 +928,12 @@ export interface Tool extends ToolSchema {
   // Deliberately absent on tools that read something ELSE: a tracker search or memory lookup is
   // not "this email", and must not excuse a create that invented its content.
   readsContext?: boolean | ((args: ToolInput) => boolean);
+  // The words that mean the user ASKED for this tool's step (M30): "summarize", "boil down" for
+  // `summarize`. Read by `checkUnaskedSteps` (core/chain.ts), which refuses a plan with a step of
+  // this tool BEFORE a create (`contentArg`) unless the instruction says one of THESE words. Each
+  // tool lists its own and the lists are never pooled: "polish this and file it" asks for a
+  // rewrite, not a summary. Absent means the check never looks at this tool.
+  askedForBy?: readonly string[];
   // How to describe this action to the user at the confirm gate. The planner calls this with the
   // RESOLVED args, so the user always approves the concrete action ("Send to #design-team?"),
   // never the vague one they typed ("send to the team"). `dangerous` tools should define it.
@@ -1022,6 +1028,10 @@ export interface PlannerOutcome {
   // `[main]` line, so which tool stood behind which preview line can be read off the console
   // rather than out of the action log (M28's lesson).
   plan?: readonly { tool: string; phrase: string }[];
+  // For each create the answer held with a description, where that description came from (M30,
+  // core/chain.ts `createDescriptions`): the clipboard as it is, something else, or an earlier
+  // step. Absent when there was no such create. For the `[main]` line only; no text in it.
+  descriptions?: readonly ("equals clipboard" | "differs from clipboard" | "from an earlier step")[];
   // What the model actually sent, when what it sent was REFUSED before anything ran (M19) — a
   // plan that failed validation, or a single call naming a tool that is not on the menu.
   //

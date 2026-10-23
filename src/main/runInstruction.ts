@@ -67,6 +67,12 @@ export function createRunInstruction(
       const plan = outcome.plan
         ? ` [plan: ${outcome.plan.map((step) => `${step.tool} "${step.phrase}"`).join(" > ")}]`
         : "";
+      // M30. For each create with a description: whether it is the clipboard as copied, differs
+      // from it, or comes from an earlier step. A long clipboard condensed inside the create call
+      // has no step for the preview to show; this says when a description is not what was copied.
+      const description = outcome.descriptions
+        ? ` [description: ${outcome.descriptions.join(", ")}]`
+        : "";
       // M19. What the model was told, on the same ground-truth line as what it then did:
       // whether the email hint was in the prompt, how long the Gmail check took, and how many
       // characters of clipboard went with it. Numbers and a flag — never the clipboard itself.
@@ -74,7 +80,7 @@ export function createRunInstruction(
         ? ` [email hint: ${outcome.planning.emailHint ? "sent" : "not sent"}, ` +
           `check ${outcome.planning.emailCheckMs}ms; clipboard: ${outcome.planning.clipboardChars} chars]`
         : "";
-      console.log(`[main] ${outcome.status}${chain}${plan}${told}: ${outcome.result ?? ""}`);
+      console.log(`[main] ${outcome.status}${chain}${plan}${description}${told}: ${outcome.result ?? ""}`);
       // M19. When the model's answer was refused before anything ran, print what it actually
       // sent. The message on screen quotes one tool name; diagnosing the "functions." prefix
       // took the action log and a guess, because the plan itself had been thrown away. Console

@@ -22,8 +22,11 @@ import {
   OVER_STEP_CAP,
   SAVED_HOLD_MS,
   canonicalToolName,
+  checkUnaskedSteps,
   checkUnfilledBlanks,
   checkUnreadContent,
+  createDescriptions,
+  isUnaskedStepRefusal,
   isUnfilledBlankRefusal,
   isUnknownReferenceRefusal,
   isUnreadContentRefusal,
@@ -65,6 +68,7 @@ import type {
   ElementSurface,
   ElementChooser,
   Tool,
+  ToolChoice,
   ToolDeps,
   ToolInput,
 } from "./types.ts";
@@ -272,11 +276,15 @@ export class Planner {
     //    (`isUnreadContentRefusal`): its "open the email or copy the text, then ask again" is an
     //    instruction to the user, and shown to the model it is the same kind of text that M21
     //    found turning the next answer into prose. And for a plan refused for a blank nothing
-    //    fills (`isUnfilledBlankRefusal`, M28), whose "copy the text you mean" is the same kind.
+    //    fills (`isUnfilledBlankRefusal`, M28), whose "copy the text you mean" is the same kind,
+    //    and for a step nobody asked for before a create (`isUnaskedStepRefusal`, M30).
     const last = this.log.getLast();
     const previousTurn =
       last !== null &&
-      (isUnknownReferenceRefusal(last) || isUnreadContentRefusal(last) || isUnfilledBlankRefusal(last))
+      (isUnknownReferenceRefusal(last) ||
+        isUnreadContentRefusal(last) ||
+        isUnfilledBlankRefusal(last) ||
+        isUnaskedStepRefusal(last))
         ? null
         : last;
     let choice = await this.llm.chooseTool(
@@ -321,6 +329,32 @@ export class Planner {
       }
     }
 
+    const outcome = await this.dispose(instruction, choice, context, wrapped !== null);
+    // M30, for the `[main]` line only: where each create's description came from — the clipboard
+    // as it is, something else, or an earlier step (core/chain.ts, `createDescriptions`). Judged on
+    // the answer as sent, whatever then became of it, so a refused plan is described too.
+    const sent: readonly PlannedStep[] =
+      choice.kind === "plan"
+        ? choice.steps
+        : choice.kind === "tool"
+          ? [{ tool: choice.name, arguments: choice.input, describe: "" }]
+          : [];
+    const menu = this.menuNames();
+    const descriptions = createDescriptions(
+      sent.map((step) => ({ ...step, tool: canonicalToolName(step.tool, menu) })),
+      this.registry,
+      context.selectedText,
+    );
+    return descriptions.length === 0 ? outcome : { ...outcome, descriptions };
+  }
+
+  // Step 3 onward: dispose of the one answer that came back — a decline, a plan or a lone call.
+  private async dispose(
+    instruction: string,
+    choice: Exclude<ToolChoice, { kind: "multiple" }>,
+    context: CapturedContext,
+    afterWrapperRetry: boolean,
+  ): Promise<PlannerOutcome> {
     // 3. Registry check — declined or hallucinated tool → graceful refusal + log a miss.
     //    A TRUNCATED response is handled separately: the model never decided anything, so
     //    calling it "no tool for that" would be a lie about what happened.
@@ -338,7 +372,7 @@ export class Planner {
     if (choice.kind === "plan") {
       // After a wrapper retry the model had packed several actions into one "step", and its new
       // plan may have quietly left one out to fit — so the preview says how many it planned.
-      return await this.runChain(instruction, choice.steps, context, wrapped !== null);
+      return await this.runChain(instruction, choice.steps, context, afterWrapperRetry);
     }
     // The name is canonicalised first (M19, core/chain.ts): a model that wrote the provider's
     // own "functions." prefix in front of a real menu name meant that tool. The result is still
@@ -732,6 +766,14 @@ export class Planner {
     const unread = checkUnreadContent(instruction, context, steps, this.registry);
     if (!unread.ok) {
       return await this.refusePlan(instruction, proposed, unread.reason);
+    }
+
+    // A summarize or rewrite step before a create that the instruction did not ask for (core/
+    // chain.ts, `checkUnaskedSteps`, M30). The same place and the same refusal as the two above.
+    // Only here: a lone call has no step before it.
+    const unasked = checkUnaskedSteps(instruction, context, steps, this.registry);
+    if (!unasked.ok) {
+      return await this.refusePlan(instruction, proposed, unasked.reason);
     }
 
     // A one-step "plan". The prompt tells the model not to do this twice over, but if it does,

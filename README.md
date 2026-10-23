@@ -393,6 +393,18 @@ ask again."* `{step1}` and the like are real references and are fine, and so is 
 that happens to contain braces (JSON, a template's `{name}`). See spec.md §5b, "A blank nothing
 fills".
 
+**It won't summarize or reword before filing unless you ask.** If a plan puts a summarize or
+rewrite step in front of a Linear or GitHub create and your words didn't ask for one, it refuses
+before anything runs. With text copied: *"I won't summarize/reword it unless you ask. Ask again
+to file it as it is, or say 'summarize' / 'rewrite' if you want that."* With nothing copied: *"I'd
+need text to work from. Copy it, then ask again."* "Summarize this and file it", "boil this down
+and log it", "polish this and file it" and the like run as before; each step has its own words,
+so "polish" doesn't excuse a summary. "tl;dr", "tldr" and "tl dr" all count. It reads only what
+you said, never the copied text. A few phrasings it doesn't know ("a one-line issue") are
+refused, and a word that is part of the
+bug ("the summarize button is broken") lets the step through. See spec.md §5b, "A step nobody
+asked for, before a create".
+
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
 you later.
@@ -1023,7 +1035,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3195 tests across 138 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3291 tests across 140 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1033,6 +1045,17 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M30 (refuse a summarize or rewrite step nobody asked for, before a create) is built and in
+progress (23 Oct 2026); its live pass has not run.** It is for M27's plan-choice finding, the
+first of the two carried over below. A plan with a summarize or rewrite step before a Linear or
+GitHub create is refused unless your instruction asks for that step, with one of two fixed
+sentences depending on whether anything is copied. Replayed against every plan on record, with no
+model calls: all 30 unasked steps refused, all 5 asked-for ones still run. Not judged: the model
+condensing the text inside the create itself. The console's `[main]` line now says whether each
+create's description equals the clipboard, differs from it, or comes from an earlier step.
+**3291 tests green across 140 files, 96 skipped.** See `docs/M30-live-checklist.md` and `spec.md`
+§9 (M30).
 
 **M29 (rewrite leaves the clipboard alone inside a chain; fixed preview phrases) is closed (23 Oct
 2026), after a live run by a person: all 9 live boxes ticked.** Both fixes are for M28's first
@@ -1058,8 +1081,8 @@ live finding.
 - **A question nothing is waiting on.** With nothing copied, the reply asking for the text is
   the model's prose, and nothing in the app is waiting for an answer.
 
-**3195 tests green across 138 files, 96 skipped.** See `docs/M29-live-checklist.md` and `spec.md`
-§9 (M29).
+**3195 tests green across 138 files, 96 skipped, at M29's close.** See `docs/M29-live-checklist.md`
+and `spec.md` §9 (M29).
 
 **M28 (refuse unfilled placeholders; the plan-choice eval set) is closed (23 Oct 2026), after a
 live run by a person: both live boxes ticked. M27's plan-choice finding stays open, and the live

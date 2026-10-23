@@ -1170,7 +1170,8 @@ is left out of the next planning call's previous turn (`isUnreadContentRefusal`)
 `tests/fixtures/unreadContent/recorded.json`) and eight legitimate synthetic cases: it refuses the
 four recorded misses (six entries) and nothing else. It does not catch the LOUD misses (a
 "summarize the clipboard, then create" plan is fed by `{step1}`, and its preview names the
-clipboard) or a lone create that drops a send (a different failure).
+clipboard; M30's `checkUnaskedSteps`, below, refuses those) or a lone create that drops a send
+(a different failure).
 
 ### A blank nothing fills (added 2026-10-23, M28)
 
@@ -1199,6 +1200,75 @@ My plan had a blank in curly braces that nothing would fill in, so it would have
 those characters. Copy the text you mean, or say it, then ask again." Logged `refused`,
 `tool: null`, never through `logMiss`, and kept out of the next planning call's previous turn
 (`isUnfilledBlankRefusal`), like the unread-content refusal.
+
+### A step nobody asked for, before a create (added 2026-10-23, M30)
+
+M27's live finding, measured in M28 and seen again in M29: the model sometimes puts a summarize
+or rewrite step in front of a create that nobody asked for. With a long clipboard the issue would
+carry the model's version of the text instead of the person's; with nothing copied, "log this as
+an issue and let #bugs know" planned summarize > create > send in 14 of 25 recorded answers and
+stops at "Nothing to summarize". M28's two prompt wordings fixed it and each broke a control, so
+it is judged in code.
+
+`checkUnaskedSteps` (`core/chain.ts`, pure) refuses a plan in which a step of a tool that declares
+**`Tool.askedForBy`** comes **before** a create (`contentArg`), unless the **instruction** says
+one of **that tool's own** words. Refuses; never rewrites the plan.
+
+| Tool | `askedForBy` |
+|---|---|
+| `summarize` | summarize, summarise, summary, condense, shorten, tl;dr, tldr, tl dr, sum up, shorter, brief, gist, key points, short version, boil down |
+| `rewrite` | rewrite, reword, polish, rephrase, clean up, formal, wording, tidy, make it sound |
+
+- **Per tool, never pooled.** "polish this and file it" with a summarize step is refused; with a
+  rewrite step it runs. No other tool declares the field, and it is never sent to the model.
+- **How a word matches (`saysAny`).** Whole words, case-insensitive, over the instruction only;
+  never the clipboard, which is the text being filed and can say anything. A two-word entry also
+  matches with one object word between: it, this, that, these, those or them ("sum this up",
+  "boil it down", "clean that up").
+- **"tl;dr" in three forms** (added in M30's review pass): "tl;dr", "tldr" and "tl dr", all on
+  `summarize`'s list, since speech-to-text rarely writes the semicolon. Word-bounded like every
+  entry, so "tldrs" or "tl drive" do not match. "tl dr", as a two-word entry, would also take
+  an object word between ("tl it dr"), which nobody says.
+- **Not looked at:** a step that is not before a create (a plan that only summarizes,
+  summarize > send, create > summarize), a lone call (one call has no step before it, so the
+  check has no lone-call call site), and tools that declare no words (`readEmail`).
+- **Where.** On a plan, after `validatePlan`, `checkUnfilledBlanks` and `checkUnreadContent`,
+  before the one-step branch, `settleReferences`, `admit`, the preview and any step. It judges the
+  answer after the multi-call retry; a refusal is never retried. A detached job is refused the same
+  way, before admission.
+- **What the user gets.** One of two fixed ASCII sentences from code, chosen by whether anything
+  was copied: with nothing (or only whitespace), "I'd need text to work from. Copy it, then ask
+  again."; with text, "I won't summarize/reword it unless you ask. Ask again to file it as it is,
+  or say 'summarize' / 'rewrite' if you want that." Shown and spoken whole. Logged `refused`,
+  `tool: null`, `arguments: { plan: [tool names as sent] }`, never through `logMiss`, and kept out
+  of the next planning call's previous turn (`isUnaskedStepRefusal`).
+
+**Measured** (`tests/unaskedSteps.test.ts`), with no model calls: against every plan on record
+with such a step (the 77 recorded answers, M28's baseline table rebuilt trial by trial, and 8 live
+runs from the action log, `tests/fixtures/unaskedSteps/replay.ts`), it refuses all **30**
+unasked steps (16 recorded, 8 eval, 6 live) and lets all **5** asked-for steps run (3 eval, 2
+live). Every other recorded plan is untouched, including M28's email-open and nothing-on-screen
+controls that the reverted wordings broke.
+
+**Known gaps.** Measured on 22 phrasings written by hand that ask for the step, and 4 where the
+word is part of the bug. Neither set was checked against a model.
+- **Wrongly refused, 1 of 22:** "file a one-line issue from this" (no listed word). "tldr this
+  and file it" was the second until the review pass added "tldr" and "tl dr"; it now runs.
+- **Wrongly refused by rule, not in the 22:** inflected forms ("summarized", "reworded",
+  "shortened", "briefly"); "make this sound…" (only "make it sound"); a two-word entry with more
+  than one word between ("sum the whole thing up").
+- **Let through, 4 of 4:** "file an issue: the summarize button is broken", "log a bug that the
+  rewrite tool drops the header", "file this: polish translations are missing", "create an issue
+  to shorten the login timeout". The word is in the bug, so the step runs, as it did before M30.
+- **With an email open and nothing copied,** a summarize step before a create gets "Copy it",
+  which is accurate (`summarize` reads only the clipboard) but does not mention the email. Not
+  seen in any recorded plan.
+- **A refusal costs a try.** On a long clipboard, about half the next tries plan cleanly (7 of 15
+  long-clipboard create runs had the step).
+- **The model condensing the text inside the create call** is not judged. M30's investigation
+  found no confirmed case. The `[main]` line now says, for each create with a description, whether
+  it `equals clipboard` (whitespace aside), `differs from clipboard`, or is `from an earlier step`
+  (`createDescriptions`, `PlannerOutcome.descriptions`); it changes no behaviour.
 
 ### Deliberately deferred
 
@@ -4675,7 +4745,8 @@ Post-v0:
       is to reproduce it — with the clipboard state recorded, as M19's plan-choice lesson says —
       before anything is edited. *(M28 reproduced and measured it: it comes with a long
       clipboard. Two wordings were tried and reverted; still open. See M28. M29's live run saw
-      it again, now named in the preview as "Summarize the text you copied"; see M29.)*
+      it again, now named in the preview as "Summarize the text you copied"; see M29. M30
+      refuses such a step in code unless the instruction asks for it; see M30.)*
 
       **Known gaps / open limits:** another program polling the mouse buttons can take the
       "pressed since" bit, so a very short tap may then be missed; taps under ~15 ms rely on that
@@ -5028,6 +5099,124 @@ Post-v0:
       - **Inside a chain, a rewrite the user did ask for** ("polish this and post it") no
         longer leaves the polished text on the clipboard. That was decided, and is not a
         finding.
+
+- [ ] **M30 — refuse a summarize or rewrite step nobody asked for, before a create.** **In
+      progress (built 2026-10-23; the live pass has not run — `docs/M30-live-checklist.md`).**
+      For M27's plan-choice finding. One commit. No model calls.
+
+      **The investigation** (read-only, before any code). Every plan on record with a summarize
+      or rewrite step before a create: **30 the person did not ask for** (16 of the 77 recorded
+      answers, 8 in M28's baseline eval table, 6 live runs in the action log) and **5 they did**
+      (3 eval, 2 live). All 30 were summarize except one live rewrite (M28's row 648). By what
+      was copied: nothing, 19 (all "log this as an issue…" or "file this bug in Linear…"); short,
+      0 of 25; long, 7 of 15 create runs; email open, none. Options compared: refuse (A), ask
+      "summarize first or as is?" (B), re-ask the model once (C). **A was approved**, with two
+      wordings and extended word lists; B would have the planner edit a plan on the user's say-so,
+      a new exception to "refuses; never rewrites", and C needs an eval. No condense check was
+      built: none of the corpora has a confirmed case of a description condensed inside the create
+      call (rows 659–660, the suspected ones, are byte-for-byte a summary from row 654 four minutes
+      earlier, most likely copied by hand), so a console item measures it instead.
+
+      **What shipped** (§5b, "A step nobody asked for, before a create"):
+      - **`checkUnaskedSteps`** in `core/chain.ts`, on the plan path in `runChain` after
+        `checkUnreadContent`. No lone-call call site: one call has no step before it.
+      - **`Tool.askedForBy`**, declared by `summarize` and `rewrite` only; the lists are in §5b.
+        The planner reads declarations, never tool names, like `contentArg` and `readsContext`.
+        Not in `toToolSchemas`, so the planning prompt is unchanged.
+      - **Two fixed refusals** (`UNASKED_STEP_NO_TEXT`, `UNASKED_STEP`), kept out of the next
+        planning call's previous turn (`isUnaskedStepRefusal`), one `refused` row, no miss.
+      - **The `[main]` line** gains `[description: equals clipboard | differs from clipboard |
+        from an earlier step]`, one entry per create with a description, after `[plan: …]`
+        (`createDescriptions`, `PlannerOutcome.descriptions`). Judged on the answer as sent, so a
+        refused plan is described too. No behaviour change.
+      - **`decide` split** in two (`decide` asks, `dispose` acts on the answer), so the
+        description item is added to every outcome in one place.
+      - **The M28 eval's three clipboards** moved, unchanged, to
+        `tests/fixtures/planChoice/clipboards.ts`, so the replay uses the same text. The eval's
+        cases and wording are otherwise untouched.
+
+      **Tests.** 96 new; 3291 total (84 at the build, 12 from the review pass's tldr forms).
+      - `tests/unaskedSteps.test.ts` (new, 74), against the real registry and connector
+        definitions:
+        - the declarations are exactly the approved lists, on those two tools only, sharing no
+          word; the creates are the two connector creates;
+        - matching: every listed word, case, whole words ("summarized", "briefcase", "informal"
+          do not match), one object word between a two-word entry and not two;
+        - "tl;dr", "tldr", "tl dr", "TLDR" and "Tl Dr" ask for a summary through `summarize`'s
+          real declaration, and not for a rewrite; "tldrs", "atldr", "tl drive" and "xtl;dr" do not;
+        - the rule: before a create only, a `functions.` prefix, every unasked step named,
+          the instruction judged and never the clipboard (both directions);
+        - per-tool lists: "polish this and file it" with a summarize step refused; "summarize
+          this and file it" with a summarize step runs and with a rewrite step is refused;
+        - both wordings word for word, plain ASCII, under the 240-character spoken cap and spoken
+          whole; the refusal row recognised and nothing else;
+        - **the replay:** recorded.json refuses exactly the 16 and none of the other 61 (all 16
+          had nothing copied, so all get the copy-the-text wording, and none is also refused by
+          the two older checks); M28's table (8 refused, 37 run) and the live log (6 refused,
+          2 run) as hand-labelled in the fixture; 30 refused and the 5 asked-for steps run; the
+          24 email-open and nothing-on-screen control trials untouched;
+        - **the phrasing set:** of 22 that ask, exactly "file a one-line issue from this" is
+          refused, and "tldr this and file it" runs; all 4 verb-in-the-bug phrasings let the step
+          through. Both pinned as known gaps;
+        - `createDescriptions`: equals (whitespace aside), differs (a condensed clipboard, no
+          clipboard), from a step, nothing without a description or a create, one per create.
+      - `tests/planner.unaskedSteps.test.ts` (new, 19), the real planner with made-up tools that
+        declare their own words: refused before the preview, any dialog, narration or step, with
+        one row and no miss, in both wordings; tool names logged as sent; judged after the
+        multi-call retry; the plan kept whole for the console; an asked-for plan runs to every
+        dialog; the other tool's word is refused; a step not before or after the create, and a
+        lone step, run; kept out of the next previous turn in both wordings, with the control that
+        an ordinary refusal is not; `outcome.descriptions` for a plan, a lone call and a cancelled
+        plan; a real Linear create over a fake MCP server sends nothing; a detached job is refused
+        before admission.
+      - `tests/contextHints.test.ts` (+2): the `[main]` line's exact format, one create and two.
+      - **Re-justified, not just re-run:** `tests/planner.mcp.test.ts`'s M29 replay ran M28's live
+        plan (an unasked rewrite) under "create a linear issue and send to fun", which M30 now
+        refuses: the five tests failed. M29's rule still governs a rewrite the person asks for, so
+        they now run the same plan and arguments under "rewrite this and file it in Linear, then
+        tell fun" (M29's live phrase, rows 662–663), and a new first test (+1) pins that the live
+        phrase is refused with no model call, no dialog and the clipboard untouched.
+
+      Mutations (each made with the Edit tool and undone with it; the tree checked clean after):
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Refuse on the plan path | check disabled in `runChain` | 11 |
+      | Refuse on the lone-call path | not run: there is no lone-call call site (one call has no step before it) | — |
+      | Per-tool lists | one shared list (every tool's words pooled) | 4 |
+      | Judge the instruction | judge the clipboard text instead | 14 |
+      | The no-clipboard wording | always the text-copied wording | 4 |
+      | Kept out of the previous turn | exclusion dropped | 2 |
+      | Only a step BEFORE a create | steps after the create judged too | **survived first**; fixed, then 2 |
+      | One object word in a two-word entry | slot removed | 2 |
+      | The console item | dropped from the outcome | 3 |
+      | "tldr" and "tl dr" ask for a summary (review pass) | both removed from `summarize`'s list | 7 (the pinned list, the 4 variants without the semicolon, the 1-of-22 count, "tldr this and file it" runs) |
+      | M29's rule, still held under an asked-for rewrite (review pass) | `rewrite` writes the clipboard in a chain again | 3 of the 5 re-justified M29 replay tests (below) |
+
+      **The M29 check.** With `if (deps.chained) return rewritten;` disabled, three of the five
+      re-justified tests in `tests/planner.mcp.test.ts` failed: "cancelled at the Linear dialog,
+      as live: the clipboard still holds what was copied", "the dialog's description is the
+      rewritten text alone — no header line" and "approved: Linear receives only the rewritten
+      text, and the clipboard is untouched". The other two, "the preview names each step by its
+      tool's phrase, never the model's describe" and "the [main] line names each step's tool
+      beside its phrase", test M29's preview fix, never read the clipboard, and stay green under
+      this mutation by design. Restored; the file passed again.
+
+      The position mutation survived because the "summarizes after filing" case's instruction
+      said "post a summary", and "summary" is on the list: it passed for the wrong reason. It now
+      uses an instruction with no listed word (asserted), and a planner test runs create >
+      shrink; both failed under the mutation.
+
+      **Build record (2026-10-23, before the live pass).** `npm test`: **3279 passed across 140
+      files, 96 skipped** at the build; **3291 passed across 140 files, 96 skipped** after the
+      review pass. Both typechecks clean. No model calls; eval skipped (not run against the real
+      model). The review pass also scanned the new fixtures for emails, phone numbers, URLs, keys,
+      user paths and real names: nothing personal (the one hit was a date).
+
+      **Known gaps:** §5b's list (1 of 22 phrasings wrongly refused, inflections, 4 of 4
+      verb-in-the-bug phrasings let through, the email-open wording, a refusal costs a try, and
+      condensing inside the create is measured on the console, not judged). M28's prose question
+      with nothing waiting is not touched.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

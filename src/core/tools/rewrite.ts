@@ -38,6 +38,12 @@ export const rewriteTool: Tool = {
   planPhrase: "reword the text you copied",
   // Reads the clipboard the user copied (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
+  // Before a create, only when the instruction says one of these (core/chain.ts,
+  // `checkUnaskedSteps`, M30). Never sent to the model.
+  askedForBy: [
+    "rewrite", "reword", "polish", "rephrase", "clean up", "formal", "wording", "tidy",
+    "make it sound",
+  ],
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const text = deps.context.selectedText;
     if (!text || text.trim().length === 0) {

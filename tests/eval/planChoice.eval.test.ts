@@ -7,6 +7,7 @@ import { UnavailableConnection } from "../../src/core/mcp/SdkConnection.ts";
 import type { CapturedContext, PlannedStep, ToolInput } from "../../src/core/types.ts";
 import { canonicalToolName, checkUnfilledBlanks, checkUnreadContent } from "../../src/core/chain.ts";
 import { linearConnector } from "../../src/core/mcp/connectors/linear.ts";
+import { LONG_TRACE, SHORT_BUG, UNRELATED_TEXT } from "../fixtures/planChoice/clipboards.ts";
 
 // DOES THE REAL MODEL REACH FOR `plan` WHEN IT SHOULD? (M19)
 //
@@ -148,10 +149,7 @@ const OVERTEACH: readonly Case[] = [
 const UNRELATED_CLIPBOARD: Seen = {
   label: "unrelated clipboard",
   context: {
-    selectedText:
-      "Quarterly planning notes: the offsite moved to the 14th, catering is confirmed for " +
-      "forty people, and the venue still needs a deposit by Friday. Parking is limited, so " +
-      "encourage carpooling. Agenda draft is in the shared folder under Offsite/2026.",
+    selectedText: UNRELATED_TEXT,
     activeApp: null,
     activeWindowTitle: null,
   },
@@ -212,23 +210,8 @@ const LONG_REPORT =
   "The checklist now stands at 7 ticked and 49 open: the five proof-chain items and the two " +
   "dialog-visibility items are the ticked ones.";
 
-const LONG_TRACE =
-  "Tried the migration again on staging this morning and it still falls over about two thirds " +
-  "of the way through. It gets past the users table fine, then dies on orders. I restarted the " +
-  "worker twice and cleared the queue, same result both times.\n\n" +
-  "I think it's the batch size — the job loads every row for a customer into memory before it " +
-  "writes anything, and a couple of the bigger accounts have six-figure order counts. Dropping " +
-  "the batch to 500 got further but then hit a timeout instead.\n\n" +
-  "Error: Connection terminated unexpectedly\n" +
-  "    at Connection.<anonymous> (/srv/app/node_modules/pg/lib/client.js:132:73)\n" +
-  "    at Object.onceWrapper (node:events:632:28)\n" +
-  "    at Connection.emit (node:events:518:28)\n" +
-  "    at Socket.<anonymous> (/srv/app/node_modules/pg/lib/connection.js:63:12)\n" +
-  "    at migrateOrders (/srv/app/dist/jobs/migrate.js:214:19)\n" +
-  "    at async runBatch (/srv/app/dist/jobs/migrate.js:88:5)\n" +
-  "    at async Worker.process (/srv/app/dist/worker.js:41:9)\n\n" +
-  "Going to leave it for now and pick it up after lunch. If anyone has seen pg drop the " +
-  "connection mid-transaction like this before, shout — I'd rather not bisect the whole job.";
+// LONG_TRACE (prose and a stack trace, pasted out of a terminal) is in
+// tests/fixtures/planChoice/clipboards.ts, shared with M30's replay.
 
 const hintedWith = (label: string, selectedText: string): Seen => ({
   label: `email open (hint) + ${label}`,
@@ -261,9 +244,6 @@ const CLIPBOARD: readonly Case[] = [
 // conditional on the verb rule, it fixed one of those two. The set is the baseline the next
 // attempt is measured against, before and after.
 const CREATE_AND_SEND = ["linear__create_issue", "sendMessage"];
-const SHORT_BUG =
-  "Login button does nothing on mobile Safari after the 2.3 update: tapping it shows no " +
-  "spinner and no error.";
 const selected = (label: string, selectedText: string): Seen => ({
   label,
   context: { selectedText, activeApp: null, activeWindowTitle: null },

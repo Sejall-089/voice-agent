@@ -30,6 +30,13 @@ export const summarizeTool: Tool = {
   planPhrase: "summarize the text you copied",
   // Reads the clipboard the user copied (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
+  // Before a create, only when the instruction says one of these (core/chain.ts,
+  // `checkUnaskedSteps`, M30). Never sent to the model. "tl;dr" in its three written forms:
+  // speech-to-text rarely writes the semicolon.
+  askedForBy: [
+    "summarize", "summarise", "summary", "condense", "shorten", "tl;dr", "tldr", "tl dr",
+    "sum up", "shorter", "brief", "gist", "key points", "short version", "boil down",
+  ],
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
     const text = deps.context.selectedText;
     if (!text || text.trim().length === 0) {

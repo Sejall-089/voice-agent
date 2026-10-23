@@ -6,6 +6,7 @@ import { buildRegistry } from "../src/core/registry.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { InMemoryChainState } from "../src/core/chainState.ts";
 import { PLAN_TOOL, planToolFor } from "../src/core/llm/plan.ts";
+import { UNASKED_STEP } from "../src/core/chain.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { NoopMemoryResolver } from "../src/core/memory/NoopMemoryResolver.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
@@ -1284,6 +1285,11 @@ describe("the outcome records what the model was told", () => {
 // with its rewrite, and its whole result — header line included — became the description. The
 // arguments below are the logged ones. The send step's were never logged (the person cancelled
 // at the Linear dialog), so its notes are a stand-in in the shape every send step here has.
+//
+// RE-JUSTIFIED IN M30. Under the live phrase this plan is now refused before anything runs
+// (`checkUnaskedSteps`): nobody asked for a rewrite. The first test pins that. M29's rule still
+// governs a rewrite the person DID ask for, so the rest run the same plan under the phrase M29's
+// live pass reached it with (action log rows 662-663).
 describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
   // What the person copied, exactly as docs/M28-live-checklist.md §2 gives it.
   const COPIED =
@@ -1310,10 +1316,22 @@ describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
     step("sendMessage", { channel: "#fun", notes: "New issue filed: {step2}" }, "send it to fun"),
   ];
   const copied: CapturedContext = { ...NO_CONTEXT, selectedText: COPIED };
+  const ASKED = "rewrite this and file it in Linear, then tell fun";
+
+  it("M30: under the live phrase, nobody asked for the rewrite — refused before anything runs", async () => {
+    const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [] });
+    const outcome = await h.planner.run("create a linear issue and send to fun");
+
+    expect(outcome).toMatchObject({ status: "refused", result: UNASKED_STEP });
+    expect(h.llm.completeCalls).toBe(0);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(h.server.calls.filter((call) => call.name === "save_issue")).toEqual([]);
+    expect(h.shell.clipboard).toBe(COPIED);
+  });
 
   it("cancelled at the Linear dialog, as live: the clipboard still holds what was copied", async () => {
     const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [false] });
-    const outcome = await h.planner.run("create a linear issue and send to fun");
+    const outcome = await h.planner.run(ASKED);
 
     expect(outcome.status).toBe("cancelled");
     // The precondition: the rewrite step really ran, through a model.
@@ -1329,7 +1347,7 @@ describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
   // same list for the `[main]` line.
   it("the preview names each step by its tool's phrase, never the model's describe", async () => {
     const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [false] });
-    const outcome = await h.planner.run("create a linear issue and send to fun");
+    const outcome = await h.planner.run(ASKED);
 
     const notifies = h.shell.actions.filter((action) => action.kind === "notify");
     expect(notifies[0]?.payload).toBe(
@@ -1361,7 +1379,7 @@ describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
       await createRunInstruction(
         { run: (text: string) => h.planner.run(text) },
         { showThinking: () => undefined, showResult: () => undefined },
-      )("create a linear issue and send to fun");
+      )(ASKED);
     } finally {
       spy.mockRestore();
     }
@@ -1375,7 +1393,7 @@ describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
 
   it("the dialog's description is the rewritten text alone — no header line", async () => {
     const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [false] });
-    await h.planner.run("create a linear issue and send to fun");
+    await h.planner.run(ASKED);
 
     expect(h.shell.confirmMessages[0]).toBe(
       "Step 2 of 3: Create this Linear issue in Engineering?\n\n" +
@@ -1386,7 +1404,7 @@ describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
 
   it("approved: Linear receives only the rewritten text, and the clipboard is untouched", async () => {
     const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [true, true] });
-    const outcome = await h.planner.run("create a linear issue and send to fun");
+    const outcome = await h.planner.run(ASKED);
 
     expect(outcome.status).toBe("ok");
     expect(h.server.calls.filter((call) => call.name === "save_issue")).toEqual([

@@ -468,6 +468,38 @@ describe("runInstruction prints what the model sent when it was refused", () => 
     ]);
   });
 
+  // M30. Where each create's description came from, between the plan and what the model was told.
+  it("puts where a create's description came from on the [main] line", async () => {
+    const lines = await run({
+      status: "cancelled",
+      tool: "linear__create_issue",
+      result: null,
+      chain: { completed: 0, total: 2 },
+      plan: [
+        { tool: "linear__create_issue", phrase: "create a Linear issue" },
+        { tool: "sendMessage", phrase: "post a message to Slack" },
+      ],
+      descriptions: ["differs from clipboard"],
+      planning: { emailHint: false, emailCheckMs: 0, clipboardChars: 1188 },
+    });
+    expect(lines).toEqual([
+      "[main] cancelled (chain 0/2) " +
+        '[plan: linear__create_issue "create a Linear issue" > sendMessage "post a message to Slack"] ' +
+        "[description: differs from clipboard] " +
+        "[email hint: not sent, check 0ms; clipboard: 1188 chars]: ",
+    ]);
+  });
+
+  it("lists every create's description source, in order", async () => {
+    const lines = await run({
+      status: "ok",
+      tool: "github__create_issue",
+      result: "Created",
+      descriptions: ["equals clipboard", "from an earlier step"],
+    });
+    expect(lines).toEqual(["[main] ok [description: equals clipboard, from an earlier step]: Created"]);
+  });
+
   it("prints neither for an ordinary outcome", async () => {
     const lines = await run({ status: "ok", tool: "summarize", result: "SUMMARY" });
     expect(lines).toHaveLength(1);
