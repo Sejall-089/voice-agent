@@ -80,6 +80,39 @@ Same clipboard. Type **"summarize this and file it in Linear"**.
 - [ ] **2.2** The Linear dialog's description is a summary of the text above, not the text
       itself. Press **Cancel**. The `[main]` line has `[description: from an earlier step]`.
 
+## Script-verified (live model, faked connectors)
+
+**2026-10-23.** Not a tick: no box above is ticked by this. The real planner through the real
+call site (`createRunInstruction`), with real planning calls (gpt-5-mini, low effort, through
+`tests/eval/realModel.ts`'s spend gate), on the long clipboard above (`LONG_TRACE`,
+`tests/fixtures/planChoice/clipboards.ts`), no email open. Everything that could reach a real
+service was faked:
+- **Linear:** `SdkMcpConnection` over `FakeMcpServer`'s in-memory transport, with a dummy key.
+- **GitHub:** `UnavailableConnection`, which rejects every call.
+- **Slack:** `FakeSender`.
+- **Action log:** `InMemoryActionLog`; the real `memory.db` was only read, read-only, for the
+  "third channel" = "#fun" fact.
+- **Network:** `fetch` wrapped to allow only `api.openai.com`. Nothing was blocked: every request
+  went to OpenAI.
+
+`MockShell` answered Cancel at every dialog. One log was shared across a box's trials, as one app
+session shares it. The summarize step's own text (`llm.complete`) was a fixed fake, so the budget
+counts planning calls only; box 2 therefore shows that the description came from step 1, not
+what a real summary reads like. The harness was a scratch script, not committed.
+
+| Box | Trials | Result | Deviations | Model calls |
+|---|---|---|---|---|
+| 1 — "create a linear issue and send to fun" | 12 (cap reached, no early stop) | **Not reached: 0 of 12 refused.** The model planned no summarize or rewrite step in any trial, so 1.1–1.4 were never exercised against a real refusal. Every trial that ran had no step before the create (12 of 12). | 8 trials were create > send and 4 were a lone create with no send (a separate, older finding). All 12 reached the Linear dialog, cancelled, with `[description: equals clipboard]`. The fakes saw 0 creates and 0 sends. | 12 planning |
+| 2 — "summarize this and file it in Linear" | 5 | **Pass, 5 of 5.** None refused; the preview was "1. Summarize the text you copied / 2. Create a Linear issue"; `[description: from an earlier step]`; the dialog body was step 1's output (the fake summary), not the clipboard; the fakes saw 0 creates. | 4 of 5 plans named the tools with the provider's `functions.` prefix; canonicalised and judged correctly. | 5 planning |
+| UI (optional) | — | Not run: no Playwright, Spectron, Puppeteer or WebDriver in the repo. | — | 0 |
+
+Total: 17 real planning calls, est. ~$0.024. What this does not show:
+- **Box 1's refusal with a real model.** The refusal path itself is covered by the replay and
+  planner tests, and by the harness's dry run with M27's plan scripted (refused, bar and speech
+  text exactly the wording, no preview or dialog, the `refused plan, as sent` line listing
+  summarize before the create, 0 creates and 0 sends).
+- **1.2's sound.** It still needs a person: only the string handed to speech was compared.
+
 ## Machine-verified, not watched
 
 - The rule against every plan on record, no model calls: all 30 unasked steps refused (16 of the
