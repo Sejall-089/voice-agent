@@ -49,6 +49,16 @@ export const rewriteTool: Tool = {
 
     const rewritten = await deps.llm.complete(rewriteSystem(tone), text, "rewrite");
 
+    // IN A CHAIN (M29) it touches nothing and returns only the text. There the rewrite goes on to
+    // a later step through `{stepN}`, so the clipboard write served no one — and the user had not
+    // necessarily asked for a rewrite at all: M28's live run planned this step under the model's
+    // label "Capture the selected text unchanged", it replaced what the person had copied, and
+    // their next tries read the rewrite back as "the clipboard". The app keeps no copy, so that
+    // was not recoverable. The header is dropped for the same reason: it went into the Linear
+    // description as the first line ("Rewritten (…) and copied to clipboard."), and in a chain it
+    // would also be untrue.
+    if (deps.chained) return rewritten;
+
     const result = await deps.shell.executeAction({
       kind: "copyToClipboard",
       payload: rewritten,

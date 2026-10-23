@@ -1608,7 +1608,7 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | Tool          | Task(s) it serves                    | Reads memory? | Irreversible | Handler does |
 |---------------|--------------------------------------|---------------|--------------|--------------|
 | `summarize`   | 1. Summarize selection               | no            | safe         | LLM summarizes `context.selectedText`; showResult |
-| `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard |
+| `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard. **In a chain (M29): returns only the rewritten text; no clipboard write, no header line** |
 | `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` |
 | `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible   | `memory.write()` (versions old fact on conflict) |
 | `sendMessage` | 5. Format notes and send             | yes (channel only — `referenceArgs`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST |
@@ -1956,9 +1956,18 @@ Four tiers (`core/risk.ts`, adapted from clacky's `permission.py`) replace it:
 | Tier | Means | Planner does |
 |------|-------|--------------|
 | `safe` | read-only | run |
-| `reversible` | mutates, but recoverable (clipboard, a tab, a versioned fact) | run |
+| `reversible` | mutates, but recoverable (a tab, a versioned fact), or a clipboard write the user asked for | run |
 | `caution` | irreversible but routine and low-stakes | run, but **narrate first** |
 | `dangerous` | irreversible **and** high-stakes | **confirm first**, no exceptions |
+
+**The clipboard is not recoverable in itself (corrected in M29).** Until M29 this table listed
+"clipboard" as a recoverable thing. It isn't: the app keeps no copy of what a clipboard write
+replaces. A write is acceptable at `reversible` only because the user asked for it: "rewrite
+this" puts the rewrite there on purpose. M28's live run found `rewrite` planned as a chain step
+nobody asked for. Its preview line was the model's "Capture the selected text unchanged", and it
+replaced the copied text for good. So inside a chain `rewrite` now writes nothing (§6, the
+`rewrite` row). A tool that writes the clipboard without being asked to does not belong in this
+tier.
 
 Two things make this more than a rename:
 
@@ -4785,6 +4794,85 @@ Post-v0:
          row 647). It offered to re-log SEJ-21, taken from the previous turn: `getLast()` skips
          detached rows, and the last attached one was row 642, a cancelled post naming SEJ-21.
          No state waited for an answer: M21's lesson, live.
+
+- [ ] **M29 — `rewrite` leaves the clipboard alone inside a chain; code-written plan preview
+      lines.** **In progress.** Fix 1 of 2, from M28's live finding 1, is built and waiting for
+      its live pass (`docs/M29-live-checklist.md`). Fix 2, code-written preview lines (option A
+      of the M28 investigation), is at the design stage; no code yet.
+
+      **Fix 1: `rewrite` never touches the clipboard inside a chain.**
+
+      - **The change.** When `deps.chained` is true, `rewrite` returns only the rewritten text.
+        It makes no `copyToClipboard` call and adds no "Rewritten (tone) and copied to
+        clipboard." line (`tools/rewrite.ts`).
+      - **Outside a chain, unchanged.** A lone call, or a one-step plan (which the planner runs
+        as a lone call), still replaces the clipboard and keeps the header line: there, the user
+        asked for the rewrite.
+      - **Why chained.** Inside a chain the result goes to a later step through `{stepN}`, so the
+        clipboard write served no one. In M28's run it also replaced text the person had not
+        asked to have reworded, and the app keeps no copy. The header line went into the Linear
+        description as its first line. `deps.chained` is set by the planner from where the call
+        sits (M19), never by the model.
+      - **Its tier stays `reversible`.** In a chain it now mutates nothing.
+      - **The wording that called the clipboard recoverable is corrected.** `risk.ts` and the
+        §6 tier table now limit `reversible` to a clipboard write the user asked for.
+      - **Not changed.** The tool's description, which the model reads, still says it copies to
+        the clipboard. Editing it would change the planning prompt, which cannot be measured
+        without model calls. `Tool.background` stays `foreground-only`.
+
+      **`MockShell` now holds a clipboard.** `getContext()` returns its current `clipboard` as
+      `selectedText`, and `copyToClipboard` sets it ("" reads back as null). That is how
+      `WindowsShell` behaves, since its `getContext()` reads `clipboard.readText() || null`.
+      Until now the mock returned the same context forever, which is more lenient than Windows
+      (CLAUDE.md): a rewrite read back on a later try, which is how M28's bug spread, could not
+      be seen. `LiveClipboardShell` (`tests/jobWorld.ts`, M23) had modelled this already; it
+      now shares the base class's field.
+
+      **Other tools whose result reaches a later step with a status line in front.** Surveyed,
+      not changed:
+
+      | Tool | Result | Would a later step use it? |
+      |---|---|---|
+      | `draftReply` | "Draft is in the Gmail reply box — read it before sending.\n\n<draft>" | Plausibly, e.g. "draft a reply and post it to #team". The line would be sent, but the send's dialog shows the whole text first. |
+      | `reviseDraft` | "Updated the draft in the Gmail reply box.\n\n<draft>" | The same. |
+      | `addToPage` | "Added to <page>.\n\n<note>" | Rarely. M17 chose `{step1}` over `{step2}` for the summary because this result is not content. |
+      | `sendMessage` | "Sent to #x.\n\n<text>" or "Sent via your Slack webhook.\n\n<text>" | Rarely; it is usually the last step. |
+      | `sendReply` | "Sent.\n\n<text>" | Rarely; it is the last step of its chain. |
+      | `remember`, `openTarget`, `openApp`, `searchSpotify`, `createEvent`, `moveEvent`, `pointAt` | one status line, no content | Nothing to strip. The whole result is the status. |
+      | `summarize`, `readEmail`, `readSchedule`, `recall`, `tellTime`, Linear and GitHub create/search/get | content only, or a line that is the content ("Created ENG-5: title" + link) | No header. |
+
+      `rewrite` was the only one whose line was false in a chain ("copied to clipboard") as well
+      as unwanted. Every other line is still true, and every send or create shows the whole text
+      at its confirm before anything goes.
+
+      **Tests (MockShell):**
+      - `tests/tools.test.ts`, 2 new: outside a chain, the clipboard holds the rewrite, the
+        result keeps its header, and the next capture reads the rewrite; a one-step plan does
+        the same.
+      - `tests/planner.mcp.test.ts`, 3 new, replaying M28's live plan. The rewrite and create
+        arguments come from action log rows 648–649 and the copied text from
+        `docs/M28-live-checklist.md` §2. The send step's arguments were never logged, so its
+        notes are a stand-in. The tests check:
+        - cancelled at the Linear dialog, as live: no clipboard write, and the clipboard and the
+          next capture still hold the original;
+        - the dialog's description is exactly the rewritten text;
+        - approved: Linear's `save_issue` receives exactly the rewritten text, and the clipboard
+          is untouched.
+
+      Mutations (each made with the Edit tool and reverted):
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | No clipboard write in a chain | write it, then return the bare text | 2 |
+      | No header in a chain | return the header line in a chain | 2 |
+      | Only a chain skips the write | treat every call as chained | 3 |
+      | The mock's clipboard moves | `getContext()` back to a fixed context | 1 |
+
+      After `MockShell`'s clipboard became a field rather than a getter, the first and fourth
+      mutations were run again together and caught by 3.
+
+      **Build record (2026-10-23, before the live pass).** `npm test`: **3044 passed across 137
+      files, 96 skipped**. Both typechecks clean. No model calls.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

@@ -7,8 +7,9 @@
 // so "reversible?" stops being the useful question. Two different ones replace it:
 //
 //   SAFE       read-only (read the open email, read the compose box)     → run
-//   REVERSIBLE mutates, but recoverable (clipboard, a browser tab, a     → run
-//              versioned fact whose old row is kept)
+//   REVERSIBLE mutates, but recoverable (a browser tab, a versioned      → run
+//              fact whose old row is kept), or a clipboard write the
+//              user asked for
 //   CAUTION    irreversible but routine (open the reply box, insert a    → run, but SAY SO first
 //              draft) — no undo, low stakes
 //   DANGEROUS  irreversible AND high-stakes (send a message, click       → PAUSE for confirmation
@@ -17,6 +18,13 @@
 // The last clause is the load-bearing one, and it lives in the Gmail layer rather than here:
 // a control we cannot resolve by role + accessible name is never clicked at all. If we can't
 // reason about what an action does, we don't do it — see `gmailScript.ts`.
+//
+// The clipboard is NOT recoverable in itself: the app keeps no copy of what a write replaces. A
+// clipboard write is only acceptable at REVERSIBLE because the user asked for it ("rewrite this"
+// puts the rewrite there on purpose). M28's live run found `rewrite` planned as a step nobody
+// asked for, replacing the copied text for good, so inside a chain it writes nothing (M29,
+// `tools/rewrite.ts`). A new tool that writes the clipboard without being asked to is not
+// `reversible`.
 export type Risk = "safe" | "reversible" | "caution" | "dangerous";
 
 // True only for actions that must pause for an explicit user confirmation. Voice cannot route

@@ -37,6 +37,39 @@ describe("rewrite (M2)", () => {
     expect(log.entries[0]).toMatchObject({ status: "ok", tool: "rewrite" });
   });
 
+  // M29. Outside a chain the user asked for this rewrite, so it does exactly what it did before:
+  // the clipboard holds the rewrite, and the result keeps the line saying so.
+  it("outside a chain, replaces the clipboard and keeps the header line (M29)", async () => {
+    const { shell, planner } = harness(
+      { kind: "tool", name: "rewrite", input: { tone: "politely" } },
+      "REWRITTEN",
+      "send me the file",
+    );
+
+    const outcome = await planner.run("rewrite this politely");
+
+    expect(outcome.result).toBe("Rewritten (politely) and copied to clipboard.\n\nREWRITTEN");
+    expect(shell.clipboard).toBe("REWRITTEN");
+    // And the next capture reads the rewrite, as Windows' clipboard would.
+    expect((await shell.getContext()).selectedText).toBe("REWRITTEN");
+  });
+
+  // A one-step plan runs as a lone call (core/planner.ts), so it is not "chained" either.
+  it("as a one-step plan, still replaces the clipboard and keeps the header line (M29)", async () => {
+    const { shell, planner } = harness(
+      { kind: "plan", steps: [{ tool: "rewrite", arguments: { tone: "" }, describe: "reword it" }] },
+      "REWRITTEN",
+      "send me the file",
+    );
+
+    const outcome = await planner.run("rewrite this");
+
+    expect(outcome.result).toBe(
+      "Rewritten (clear, natural, and concise) and copied to clipboard.\n\nREWRITTEN",
+    );
+    expect(shell.clipboard).toBe("REWRITTEN");
+  });
+
   it("refuses when there is no selected text to rewrite", async () => {
     const { shell, planner } = harness(
       { kind: "tool", name: "rewrite", input: {} },

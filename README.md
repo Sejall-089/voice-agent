@@ -1018,7 +1018,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3039 tests across 137 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3044 tests across 137 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1028,6 +1028,16 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M29 is in progress.** Fix 1 of 2, for M28's first live finding, is built and waiting for its live
+run by a person. Inside a multi-step plan, `rewrite` no longer touches the clipboard. It hands only
+the rewritten text to the next step, with no "Rewritten (…) and copied to clipboard." line in
+front. A plain "rewrite this politely" still replaces the clipboard, because there you asked for
+it. The app keeps no copy of what a clipboard write replaces, so the `reversible` tier's wording
+no longer calls the clipboard recoverable unless you asked for the write. Fix 2, a preview line
+written by the app for each step instead of the model's own description, is at the design stage.
+**3044 tests green across 137 files, 96 skipped.** See `docs/M29-live-checklist.md` and `spec.md`
+§9 (M29).
 
 **M28 (refuse unfilled placeholders; the plan-choice eval set) is closed (23 Oct 2026), after a
 live run by a person: both live boxes ticked. M27's plan-choice finding stays open, and the live

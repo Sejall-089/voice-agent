@@ -98,6 +98,10 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
   public armStopKeyCalls = 0;
   public disarmStopKeyCalls = 0;
 
+  // What is on the clipboard now (M29): the context's `selectedText` until something is copied
+  // over it. Writable, so a test can stand in for the user copying something else.
+  public clipboard: string | null;
+
   private readonly context: CapturedContext;
   private readonly inputs: string[];
   private readonly confirms: boolean[];
@@ -149,6 +153,7 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
 
   constructor(options: MockShellOptions) {
     this.context = options.context;
+    this.clipboard = options.context.selectedText;
     this.inputs = [...(options.inputs ?? [])];
     this.confirms = [...(options.confirms ?? [])];
     this.clips = [...(options.clips ?? [])];
@@ -186,8 +191,13 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
     return true;
   }
 
+  // The clipboard IS the selected text, as it is in WindowsShell (`getContext` reads
+  // `clipboard.readText() || null`), so a `copyToClipboard` changes what the NEXT capture sees.
+  // Until M29 this fake returned the same context forever, which made it more lenient than
+  // Windows (CLAUDE.md): M28's live bug was a rewrite that replaced the clipboard and was then
+  // read back as "what the user copied" on every later try, and no test here could see that.
   getContext(): Promise<CapturedContext> {
-    return Promise.resolve(this.context);
+    return Promise.resolve({ ...this.context, selectedText: this.clipboard });
   }
 
   showInput(): Promise<string> {
@@ -307,6 +317,11 @@ export class MockShell implements OSShell, VoiceShell, SpeechShell {
       return Promise.resolve({ ok: true });
     }
     this.actions.push(action);
+    // Written as WindowsShell writes it, and read back as it reads it: "" comes back as null.
+    if (action.kind === "copyToClipboard") {
+      this.clipboard = action.payload.length > 0 ? action.payload : null;
+      return Promise.resolve({ ok: true });
+    }
     // M18. Recorded like any other side effect, and then actually RESOLVED — so an unknown
     // name comes back `{ ok: false }` here just as it would on Windows. See the `apps` field.
     if (action.kind === "openApp") return this.apps.launch(action.payload);

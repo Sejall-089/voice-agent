@@ -1276,3 +1276,75 @@ describe("the outcome records what the model was told", () => {
     expect(JSON.stringify(outcome.planning)).not.toContain("CLIPBOARD-MARKER");
   });
 });
+
+// M29. M28's live run, box 2.1 try 1 (action log rows 648-649): with a long text copied and no
+// email open, "create a linear issue and send to fun" was planned as rewrite > create > send. The
+// rewrite step was labelled "Capture the selected text unchanged…"; it replaced the clipboard
+// with its rewrite, and its whole result — header line included — became the description. The
+// arguments below are the logged ones. The send step's were never logged (the person cancelled
+// at the Linear dialog), so its notes are a stand-in in the shape every send step here has.
+describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
+  // What the person copied, exactly as docs/M28-live-checklist.md §2 gives it.
+  const COPIED =
+    "Tried the migration again on staging this morning and it still falls over about two thirds " +
+    "of the way through. It gets past the users table fine, then dies on orders. I restarted the " +
+    "worker twice and cleared the queue, same result both times.\n\n" +
+    "I think it's the batch size — the job loads every row for a customer into memory before it " +
+    "writes anything, and a couple of the bigger accounts have six-figure order counts. Dropping " +
+    "the batch to 500 got further but then hit a timeout instead.\n\n" +
+    "Error: Connection terminated unexpectedly\n" +
+    "    at Connection.<anonymous> (/srv/app/node_modules/pg/lib/client.js:132:73)\n" +
+    "    at Object.onceWrapper (node:events:632:28)\n" +
+    "    at Connection.emit (node:events:518:28)\n" +
+    "    at Socket.<anonymous> (/srv/app/node_modules/pg/lib/connection.js:63:12)\n" +
+    "    at migrateOrders (/srv/app/dist/jobs/migrate.js:214:19)\n" +
+    "    at async runBatch (/srv/app/dist/jobs/migrate.js:88:5)\n" +
+    "    at async Worker.process (/srv/app/dist/worker.js:41:9)\n\n" +
+    "Going to leave it for now and pick it up after lunch. If anyone has seen pg drop the " +
+    "connection mid-transaction like this before, shout — I'd rather not bisect the whole job.";
+  const LIVE_TITLE = "Staging migration fails on orders — connection terminated mid-migration";
+  const LIVE_PLAN: PlannedStep[] = [
+    step("rewrite", { tone: "" }, "Capture the selected text unchanged to use as the issue description"),
+    step("linear__create_issue", { title: LIVE_TITLE, description: "{step1}" }, "create the Linear issue"),
+    step("sendMessage", { channel: "#fun", notes: "New issue filed: {step2}" }, "send it to fun"),
+  ];
+  const copied: CapturedContext = { ...NO_CONTEXT, selectedText: COPIED };
+
+  it("cancelled at the Linear dialog, as live: the clipboard still holds what was copied", async () => {
+    const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [false] });
+    const outcome = await h.planner.run("create a linear issue and send to fun");
+
+    expect(outcome.status).toBe("cancelled");
+    // The precondition: the rewrite step really ran, through a model.
+    expect(h.llm.completeCalls).toBe(1);
+    expect(h.shell.actions.filter((action) => action.kind === "copyToClipboard")).toEqual([]);
+    expect(h.shell.clipboard).toBe(COPIED);
+    // What the NEXT try would read as "the clipboard" — the original, not the rewrite.
+    expect((await h.shell.getContext()).selectedText).toBe(COPIED);
+  });
+
+  it("the dialog's description is the rewritten text alone — no header line", async () => {
+    const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [false] });
+    await h.planner.run("create a linear issue and send to fun");
+
+    expect(h.shell.confirmMessages[0]).toBe(
+      "Step 2 of 3: Create this Linear issue in Engineering?\n\n" +
+        `Title: ${LIVE_TITLE}\n\n` +
+        "REWRITTEN BY A MODEL",
+    );
+  });
+
+  it("approved: Linear receives only the rewritten text, and the clipboard is untouched", async () => {
+    const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [true, true] });
+    const outcome = await h.planner.run("create a linear issue and send to fun");
+
+    expect(outcome.status).toBe("ok");
+    expect(h.server.calls.filter((call) => call.name === "save_issue")).toEqual([
+      {
+        name: "save_issue",
+        arguments: { title: LIVE_TITLE, description: "REWRITTEN BY A MODEL", team: "Engineering" },
+      },
+    ]);
+    expect(h.shell.clipboard).toBe(COPIED);
+  });
+});

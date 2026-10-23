@@ -712,11 +712,14 @@ export interface ToolDeps {
   // instruction. Set by the PLANNER from where the call sits — never by the model, and not
   // something an argument can claim.
   //
-  // One tool reads it, for one reason: `sendMessage` rewrites the notes it is given through a
-  // model before sending them, which is right for rough notes someone selected and wrong for
-  // text a previous step produced. Inside a chain the text is sent VERBATIM and shown in full
-  // at the confirm gate, so what was approved is what goes — and a ticket link is not something
-  // a rewrite gets to drop.
+  // Two tools read it:
+  //   - `sendMessage` rewrites the notes it is given through a model before sending them, which
+  //     is right for rough notes someone selected and wrong for text a previous step produced.
+  //     Inside a chain the text is sent VERBATIM and shown in full at the confirm gate, so what
+  //     was approved is what goes — and a ticket link is not something a rewrite gets to drop.
+  //   - `rewrite` (M29) leaves the clipboard alone and returns only the rewritten text: in a
+  //     chain its result goes to a later step through `{stepN}`, and a clipboard write there
+  //     replaced what the user had copied, with no copy kept.
   chained: boolean;
   // M22. Which Slack channels exist, asked of Slack itself — present ONLY in bot mode (main.ts
   // passes it when SLACK_BOT_TOKEN is set). Read-only: it can look a name up and nothing else.
