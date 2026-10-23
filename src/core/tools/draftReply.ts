@@ -40,6 +40,7 @@ export const draftReplyTool: Tool = {
   },
   risk: "caution",
   background: "foreground-only",
+  planPhrase: "draft a reply in Gmail",
   // Reads the open email it replies to (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
   narrate: (): string => "Reading the open email and drafting a reply…",

@@ -48,6 +48,7 @@ const readThing: Tool = {
   description: "Read a thing.",
   inputSchema: { type: "object", properties: {}, required: [] },
   background: "ok",
+  planPhrase: "fetch a thing",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("THING ONE"),
 };
@@ -57,6 +58,7 @@ const readOther: Tool = {
   description: "Read another thing.",
   inputSchema: { type: "object", properties: {}, required: [] },
   background: "ok",
+  planPhrase: "fetch another thing",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("THING TWO"),
 };
@@ -70,6 +72,7 @@ const noteThing: Tool = {
     required: ["text"],
   },
   background: "ok",
+  planPhrase: "write a note",
   risk: "caution",
   narrate: (input: ToolInput): string => `Noting "${text(input)}"…`,
   handler: (input: ToolInput): Promise<string> => Promise.resolve(`Noted: ${text(input)}`),
@@ -84,6 +87,7 @@ const sendThing: Tool = {
     required: ["text"],
   },
   background: "ok",
+  planPhrase: "send a thing",
   risk: "dangerous",
   confirmSummary: (input: ToolInput): string => `Send "${text(input)}"?`,
   handler: (input: ToolInput): Promise<string> => Promise.resolve(`Sent: ${text(input)}`),
@@ -94,6 +98,7 @@ const brokenThing: Tool = {
   description: "A thing that can't run right now.",
   inputSchema: { type: "object", properties: {}, required: [] },
   background: "ok",
+  planPhrase: "try the broken thing",
   risk: "safe",
   handler: (): Promise<string> => Promise.reject(new UserFixableError(NOT_CONNECTED)),
 };
@@ -103,6 +108,7 @@ const emptyThing: Tool = {
   description: "A thing that produces nothing.",
   inputSchema: { type: "object", properties: {}, required: [] },
   background: "ok",
+  planPhrase: "make an empty result",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("   "),
 };
@@ -209,8 +215,10 @@ describe("a chain runs its steps in order", () => {
     await planner.run("read it and note it");
 
     const notifies = shell.actions.filter((a) => a.kind === "notify").map((a) => a.payload);
-    expect(notifies[0]).toBe("Two steps:\n1. Read the thing\n2. Note it");
-    expect(shell.spoken[0]).toBe("Two steps. First, read the thing. Then, note it.");
+    // Each line is the tool's own phrase (M29), not the step's describe ("read the thing",
+    // "note it"), on screen and aloud alike.
+    expect(notifies[0]).toBe("Two steps:\n1. Fetch a thing\n2. Write a note");
+    expect(shell.spoken[0]).toBe("Two steps. First, fetch a thing. Then, write a note.");
   });
 
   it("prefixes each step's narration with where it sits in the plan", async () => {
@@ -510,7 +518,7 @@ describe("what a chain says out loud", () => {
     await planner.run("read both");
 
     expect(shell.spoken).toEqual([
-      "Two steps. First, read the thing. Then, read the other.",
+      "Two steps. First, fetch a thing. Then, fetch another thing.",
       "THING TWO.",
     ]);
   });
@@ -773,12 +781,10 @@ describe("a chain of M18's local tools", () => {
     // ran silently would be the thing that preview exists to prevent.
     const notifications = shell.actions.filter((a) => a.kind === "notify");
     expect(notifications.length).toBeGreaterThan(0);
-    // The literal preview, including the runner's own capitalisation of each step's describe
-    // text - pinned as the whole string because this is what the user reads before anything
-    // runs, and a preview that silently stopped listing step 2 is exactly the failure the
-    // M17 live-testing fix was about.
-    expect(String(notifications[0]?.payload)).toBe(
-      "Two steps:\n1. Open Spotify\n2. Search for Bohemian Rhapsody",
-    );
+    // The literal preview, including the runner's own capitalisation of each tool's phrase
+    // (M29; until then, the step's describe) - pinned as the whole string because this is what
+    // the user reads before anything runs, and a preview that silently stopped listing step 2
+    // is exactly the failure the M17 live-testing fix was about.
+    expect(String(notifications[0]?.payload)).toBe("Two steps:\n1. Open an app\n2. Search Spotify");
   });
 });

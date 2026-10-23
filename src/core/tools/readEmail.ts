@@ -37,6 +37,7 @@ export const readEmailTool: Tool = {
   inputSchema: { type: "object", properties: {} },
   risk: "safe",
   background: "foreground-only",
+  planPhrase: "read the open email",
   // Reads the email the user is looking at (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
   handler: async (_input: ToolInput, deps: ToolDeps): Promise<string> => {

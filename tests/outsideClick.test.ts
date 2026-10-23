@@ -62,9 +62,9 @@ function world() {
   const ran: string[] = [];
   const tools: Tool[] = [
     { name: "summarize", description: "Summarize.", inputSchema: { type: "object", properties: {}, required: [] },
-      risk: "safe", background: "ok", handler: () => (ran.push("summarize"), Promise.resolve("Three points.")) },
+      risk: "safe", background: "ok", planPhrase: "run a test step", handler: () => (ran.push("summarize"), Promise.resolve("Three points.")) },
     { name: "createIssue", description: "Create an issue.", inputSchema: { type: "object", properties: {}, required: [] },
-      risk: "dangerous", background: "ok", confirmLabel: "Create issue",
+      risk: "dangerous", background: "ok", planPhrase: "run a test step", confirmLabel: "Create issue",
       confirmSummary: () => 'Create issue "Crash on resume"?',
       handler: () => (ran.push("createIssue"), Promise.resolve("Created LIN-42.")) },
   ];

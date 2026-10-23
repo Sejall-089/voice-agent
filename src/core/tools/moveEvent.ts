@@ -59,6 +59,7 @@ export const moveEventTool: Tool = {
     },
   },
   background: "ok",
+  planPhrase: "move a calendar event",
   // Shown only when the call resolves to `dangerous` (the event has guests, who are notified).
   confirmLabel: "Move event",
   narrate: async (input: ToolInput, deps: ToolDeps): Promise<string> => {

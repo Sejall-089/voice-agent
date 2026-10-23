@@ -4,6 +4,7 @@ import {
   MIN_PREVIEW_HOLD_MS,
   isUnknownReferenceRefusal,
   preflightReferences,
+  planPhrases,
   previewHoldRemaining,
   previewPlan,
   resolveStepArgs,
@@ -240,40 +241,66 @@ describe("resolveStepArgs", () => {
   });
 });
 
+// M29: each line is the TOOL's phrase (`Tool.planPhrase`), never the model's `describe`. Every plan
+// below carries a describe that differs from its tool's phrase, so each assertion tells the two
+// apart — before M29 these tests asserted the describe, and a phrase equal to it would have let
+// them pass under either rule.
 describe("the plan preview", () => {
+  const REGISTRY = buildRegistry({
+    gmail: true, notion: true, calendar: true, speech: true, pointing: true,
+  });
   const plan = [
     step("readSchedule", {}, "read tomorrow's schedule"),
     step("addToPage", {}, "add it to your Notion page"),
   ];
 
-  it("numbers the steps on screen", () => {
-    expect(previewPlan(plan)).toBe(
-      "Two steps:\n1. Read tomorrow's schedule\n2. Add it to your Notion page",
+  it("numbers the steps on screen, each by its tool's phrase", () => {
+    expect(previewPlan(plan, REGISTRY)).toBe(
+      "Two steps:\n1. Read your calendar\n2. Add a note to the Notion page",
     );
   });
 
-  it("falls back to the tool name when the model omitted a description", () => {
-    // Verbatim, NOT capitalized: this one is an identifier, and "ReadSchedule" is a different
-    // string from the one in the registry — the sort of small lie that sends someone looking
-    // for a tool that doesn't exist.
-    expect(previewPlan([step("readSchedule")])).toBe("One step:\n1. readSchedule");
-  });
-
-  it("says the plan as one line, in order", () => {
-    expect(spokenPlan(plan)).toBe(
-      "Two steps. First, read tomorrow's schedule. Then, add it to your Notion page.",
+  it("says the plan as one line, in order, with the same phrases", () => {
+    expect(spokenPlan(plan, REGISTRY)).toBe(
+      "Two steps. First, read your calendar. Then, add a note to the Notion page.",
     );
   });
 
-  it("cleans each description, so no em dash reaches the engine", () => {
-    // Model-authored text going straight to a synthesizer M14 established garbles dashes.
-    const spoken = spokenPlan([
+  // M28's live step: `rewrite`, which the model described as leaving the text unchanged.
+  it("names a rewrite step for what it does, whatever the model said it does", () => {
+    const m28 = [step("rewrite", { tone: "" }, "Capture the selected text unchanged to use as the issue description")];
+    expect(previewPlan(m28, REGISTRY)).toBe("One step:\n1. Reword the text you copied");
+    expect(spokenPlan(m28, REGISTRY)).toBe("One step. First, reword the text you copied.");
+  });
+
+  it("neither shows nor speaks any of the model's describe", () => {
+    const described = [
       step("readSchedule", {}, "check the 3pm slot"),
       step("sendMessage", {}, "email Alex — the 3pm attendee"),
-    ]);
+    ];
+    for (const said of [previewPlan(described, REGISTRY), spokenPlan(described, REGISTRY)]) {
+      expect(said).not.toContain("3pm");
+      expect(said).not.toContain("Alex");
+      expect(said).not.toContain("—");
+    }
+  });
 
-    expect(spoken).not.toContain("—");
-    expect(spoken).toContain("Alex");
+  it("falls back to the tool name, never the describe, for a tool it has no phrase for", () => {
+    // Verbatim, NOT capitalized: this one is an identifier, and "ReadSchedule" is a different
+    // string from the one in the registry — the sort of small lie that sends someone looking
+    // for a tool that doesn't exist. Validation rules this case out before any preview.
+    const unknown = [step("readSchedule", {}, "read Friday")];
+    expect(previewPlan(unknown, [])).toBe("One step:\n1. readSchedule");
+    // The same fallback for the ear and the console, which share their own lookup.
+    expect(spokenPlan(unknown, [])).toBe("One step. First, readSchedule.");
+    expect(planPhrases(unknown, [])).toEqual([{ tool: "readSchedule", phrase: "readSchedule" }]);
+  });
+
+  it("hands the console each step's tool beside its phrase", () => {
+    expect(planPhrases(plan, REGISTRY)).toEqual([
+      { tool: "readSchedule", phrase: "read your calendar" },
+      { tool: "addToPage", phrase: "add a note to the Notion page" },
+    ]);
   });
 });
 
@@ -460,6 +487,7 @@ describe("preflightReferences", () => {
       description: "",
       inputSchema: { type: "object", properties: {}, required: [] },
       background: "ok",
+      planPhrase: "run a test step",
       risk: "safe",
       referenceArgs: ["where"],
       ...extra,

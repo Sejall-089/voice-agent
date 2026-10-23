@@ -124,6 +124,7 @@ function tools(ran: Ran): Tool[] {
     },
     risk: "dangerous",
     background: "ok",
+    planPhrase: "run a test step",
     contentArg: { title: "title", body: "body" },
     confirmSummary: (input): string => `File "${String(input["title"])}"?`,
     handler: handler("fileThing"),
@@ -138,6 +139,7 @@ function tools(ran: Ran): Tool[] {
     },
     risk: "dangerous",
     background: "ok",
+    planPhrase: "run a test step",
     confirmSummary: (input): string => `Tell ${String(input["channel"])}?`,
     handler: handler("tellThing"),
   };

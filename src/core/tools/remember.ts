@@ -66,6 +66,7 @@ export const rememberTool: Tool = {
   },
   risk: "reversible",
   background: "ok",
+  planPhrase: "save a fact to memory",
   // This tool's args are literals to STORE, not references to look up. Without this, the planner
   // would resolve a subject like "the team" into the fact's current value before we ever saw it.
   resolvesReferences: false,

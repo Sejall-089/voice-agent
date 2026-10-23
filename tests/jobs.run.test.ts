@@ -35,6 +35,7 @@ function tools(spies: Spies, extra: { hold?: Promise<void>; world?: { value: str
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "safe",
     background: "ok",
+    planPhrase: "run a test step",
     handler: async (input, deps): Promise<string> => {
       record("readThing", input, deps);
       if (extra.hold !== undefined) await extra.hold;
@@ -48,6 +49,7 @@ function tools(spies: Spies, extra: { hold?: Promise<void>; world?: { value: str
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "caution",
     background: "ok",
+    planPhrase: "run a test step",
     narrate: (): string => "Noting the thing…",
     handler: (input, deps): Promise<string> => {
       record("noteThing", input, deps);
@@ -66,6 +68,7 @@ function tools(spies: Spies, extra: { hold?: Promise<void>; world?: { value: str
     },
     risk: extra.tier === undefined ? "dangerous" : { tiers: ["caution", "dangerous"], resolve: () => extra.tier?.() ?? "dangerous" },
     background: "ok",
+    planPhrase: "run a test step",
     confirmLabel: "Send thing",
     narrate: (): string => "Sending the thing…",
     confirmSummary: (input): string => {
@@ -84,6 +87,7 @@ function tools(spies: Spies, extra: { hold?: Promise<void>; world?: { value: str
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "safe",
     background: "foreground-only",
+    planPhrase: "run a test step",
     handler: (input, deps): Promise<string> => {
       record("screenThing", input, deps);
       return Promise.resolve("Did it on screen.");

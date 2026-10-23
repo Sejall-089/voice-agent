@@ -527,24 +527,36 @@ export function resolveStepArgs(args: ToolInput, results: readonly string[]): Ar
 
 // The whole plan, on screen, before any of it runs. Decision 2 of the milestone: transparency,
 // not approval — the gates still fire per step, on real arguments, when execution gets there.
-export function previewPlan(steps: readonly PlannedStep[]): string {
-  // Capitalized only when it is the model's PHRASE. The fallback is a tool name — an identifier
+//
+// Each line is the TOOL's own phrase (M29, `Tool.planPhrase`), never the model's `describe`: M28's
+// live run previewed a step as "Capture the selected text unchanged" while the tool behind it
+// reworded the text. `tools` is the run's registry; validation has already established that every
+// step names a tool in it.
+export function previewPlan(steps: readonly PlannedStep[], tools: readonly PhraseSource[]): string {
+  // Capitalized only when it is the tool's PHRASE. The fallback is a tool name — an identifier
   // — and "ReadSchedule" is a different string from the one in the registry, which is exactly
   // the sort of small lie that sends someone looking for a tool that doesn't exist.
   const lines = steps.map((step, index) => {
-    const described = step.describe.trim();
-    const label = described.length > 0 ? capitalize(described) : step.tool;
-    return `${index + 1}. ${label}`;
+    const phrase = phraseOf(step, tools);
+    return `${index + 1}. ${phrase === null ? step.tool : capitalize(phrase)}`;
   });
   return [`${countWord(steps.length)} ${plural(steps.length, "step")}:`, ...lines].join("\n");
+}
+
+// Each step's tool and the phrase that stood for it in the preview, for the `[main]` line (M29).
+export function planPhrases(
+  steps: readonly PlannedStep[],
+  tools: readonly PhraseSource[],
+): { tool: string; phrase: string }[] {
+  return steps.map((step) => ({ tool: step.tool, phrase: labelFor(step, tools) }));
 }
 
 // The same plan, said out loud. Returns a plain string; the planner runs it through
 // `toSpokenNarration`, which applies the same length cap every other narration lives under.
 //
-// Each description goes through the shared cleaner rather than being spoken raw: it is model
-// text, and a describe containing an em dash or a bullet would otherwise reach the engine as
-// the one thing M14 established it garbles.
+// The same phrases as the screen (M29), from the same lookup, so the ear never hears a claim the
+// screen no longer makes. They still go through the shared cleaner, though every phrase is
+// printable ASCII by test: it costs nothing, and a fallback tool name passes through it too.
 // The line added to a plan's preview when it ran only after the model was asked again because
 // it had answered with the provider's parallel wrapper (core/llm/toolChoice.ts). The wrapper
 // packed several actions into one "step"; the plan that came back on the retry may have left
@@ -554,9 +566,9 @@ export function plannedStepsNote(count: number): string {
   return `I planned ${count} steps. If you asked for more, say the rest after.`;
 }
 
-export function spokenPlan(steps: readonly PlannedStep[]): string {
+export function spokenPlan(steps: readonly PlannedStep[], tools: readonly PhraseSource[]): string {
   const parts = steps.map((step, index) => {
-    const said = toSpokenLine(labelFor(step));
+    const said = toSpokenLine(labelFor(step, tools));
     return index === 0 ? `First, ${said}` : `Then, ${said}`;
   });
   return [`${countWord(steps.length)} ${plural(steps.length, "step")}.`, ...parts].join(" ");
@@ -636,10 +648,20 @@ export function stoppedMessage(
 
 // --- Internals ---
 
-// What to call a step. The model authors it; the tool name is the fallback, because a missing
-// describe should cost a less friendly preview and never an empty line in a numbered list.
-function labelFor(step: PlannedStep): string {
-  return step.describe.trim().length > 0 ? step.describe.trim() : step.tool;
+// Where a step's phrase comes from: the tool, never the step (M29).
+type PhraseSource = Pick<Tool, "name" | "planPhrase">;
+
+// The phrase of the tool this step names, or null if that tool is not in `tools` (validation
+// rules that out before any preview). The step's `describe` is not read here, or anywhere a
+// person sees or hears.
+function phraseOf(step: PlannedStep, tools: readonly PhraseSource[]): string | null {
+  return tools.find((tool) => tool.name === step.tool)?.planPhrase ?? null;
+}
+
+// What to call a step: its tool's phrase, and the tool's name if there is none. Never the
+// model's words.
+function labelFor(step: PlannedStep, tools: readonly PhraseSource[]): string {
+  return phraseOf(step, tools) ?? step.tool;
 }
 
 interface Reference {

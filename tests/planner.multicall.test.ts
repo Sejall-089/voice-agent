@@ -65,6 +65,7 @@ function tools(ran: string[]): Tool[] {
     inputSchema: { type: "object", properties: { text: { type: "string" } }, required: [] },
     risk,
     background: "ok",
+    planPhrase: "run a test step",
     confirmSummary: (): string => `Run ${name}?`,
     handler: (): Promise<string> => {
       ran.push(name);
@@ -308,6 +309,7 @@ describe("as a job — attached and detached", () => {
       inputSchema: { type: "object", properties: {}, required: [] },
       risk: "safe",
       background: "ok",
+      planPhrase: "run a test step",
       handler: async (): Promise<string> => {
         ran.push("readThing");
         if (hold !== undefined) await hold;
@@ -320,6 +322,7 @@ describe("as a job — attached and detached", () => {
       inputSchema: { type: "object", properties: {}, required: [] },
       risk: "safe",
       background: "ok",
+      planPhrase: "run a test step",
       handler: (): Promise<string> => {
         ran.push("noteThing");
         return Promise.resolve("noted");
@@ -562,6 +565,7 @@ describe("multi_tool_use.parallel: the multi-call case in another shape", () => 
       inputSchema: { type: "object", properties: {}, required: [] },
       risk: "safe",
       background: "ok",
+      planPhrase: "run a test step",
       handler: (): Promise<string> => {
         ran.push(name);
         return Promise.resolve(`${name} done`);

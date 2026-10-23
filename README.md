@@ -318,9 +318,14 @@ three. It tells you the whole plan before it starts:
 
 ```
 Two steps:
-1. Read tomorrow's schedule
-2. Add it to your Notion page
+1. Read your calendar
+2. Add a note to the Notion page
 ```
+
+Each line is the tool's own phrase, written into the app (M29). It is never the model's own
+description of the step, which once said "Capture the selected text unchanged" over a step that
+reworded the text. The same words are spoken. The specifics, like which page or which channel,
+come at each step.
 
 ...and then runs them, announcing where it is as it goes ("Step 2 of 2: Adding a note to
 Roadmap…").
@@ -1018,7 +1023,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3044 tests across 137 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3195 tests across 138 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1029,14 +1034,22 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M29 is in progress.** Fix 1 of 2, for M28's first live finding, is built and waiting for its live
-run by a person. Inside a multi-step plan, `rewrite` no longer touches the clipboard. It hands only
-the rewritten text to the next step, with no "Rewritten (…) and copied to clipboard." line in
-front. A plain "rewrite this politely" still replaces the clipboard, because there you asked for
-it. The app keeps no copy of what a clipboard write replaces, so the `reversible` tier's wording
-no longer calls the clipboard recoverable unless you asked for the write. Fix 2, a preview line
-written by the app for each step instead of the model's own description, is at the design stage.
-**3044 tests green across 137 files, 96 skipped.** See `docs/M29-live-checklist.md` and `spec.md`
+**M29 is in progress.** Both fixes for M28's first live finding are built and waiting for their
+live run by a person.
+
+- **Inside a multi-step plan, `rewrite` no longer touches the clipboard.** It hands only the
+  rewritten text to the next step, with no "Rewritten (…) and copied to clipboard." line in
+  front. A plain "rewrite this politely" still replaces the clipboard, because there you asked
+  for it. The app keeps no copy of what a clipboard write replaces, so the `reversible` tier's
+  wording no longer calls the clipboard recoverable unless you asked for the write.
+- **A plan's preview now names each step in the app's own words.** Each line is a fixed phrase
+  written into the tool ("Reword the text you copied", "Create a Linear issue"). Before, the line
+  was the model's own description of the step. Live, that description said "Capture the selected
+  text unchanged" over a step that reworded the text. The preview is shown and spoken the same
+  way. The console's `[main]` line lists each step's tool beside its phrase. The model is asked
+  exactly what it was asked before.
+
+**3195 tests green across 138 files, 96 skipped.** See `docs/M29-live-checklist.md` and `spec.md`
 §9 (M29).
 
 **M28 (refuse unfilled placeholders; the plan-choice eval set) is closed (23 Oct 2026), after a

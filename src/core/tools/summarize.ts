@@ -27,6 +27,7 @@ export const summarizeTool: Tool = {
   },
   risk: "safe",
   background: "ok",
+  planPhrase: "summarize the text you copied",
   // Reads the clipboard the user copied (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {

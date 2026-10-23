@@ -31,7 +31,7 @@ function heldWorld() {
   const slow: Tool = {
     name: "slowThing", description: "Do a slow thing.",
     inputSchema: { type: "object", properties: {}, required: [] },
-    risk: "safe", background: "ok", handler: () => gate.promise,
+    risk: "safe", background: "ok", planPhrase: "run a test step", handler: () => gate.promise,
   };
   const w = jobWorld({
     script: { "summarize this quarterly report for the whole team please": tool("slowThing") },

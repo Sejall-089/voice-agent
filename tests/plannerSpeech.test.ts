@@ -30,6 +30,7 @@ function probe(overrides: Partial<Tool> = {}): Tool {
     description: "test double",
     inputSchema: { type: "object", properties: {}, required: [] },
     background: "ok",
+    planPhrase: "run a test step",
     risk: "safe",
     handler: () => Promise.resolve("Done."),
     ...overrides,

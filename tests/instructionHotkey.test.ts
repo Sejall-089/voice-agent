@@ -501,6 +501,7 @@ const readThing: Tool = {
   description: "Read a thing.",
   inputSchema: { type: "object", properties: {}, required: [] },
   background: "ok",
+  planPhrase: "run a test step",
   risk: "safe",
   handler: (): Promise<string> => Promise.resolve("THING ONE"),
 };
@@ -514,6 +515,7 @@ const sendThing: Tool = {
     required: ["text"],
   },
   background: "ok",
+  planPhrase: "run a test step",
   risk: "dangerous",
   confirmSummary: (): string => `Send it?`,
   handler: (): Promise<string> => Promise.resolve("Sent it"),

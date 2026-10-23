@@ -278,6 +278,7 @@ describe("the planner labels its two planning calls", () => {
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "safe",
     background: "ok",
+    planPhrase: "run a test step",
     handler: (): Promise<string> => Promise.resolve("read"),
   };
 

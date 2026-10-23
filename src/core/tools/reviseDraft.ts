@@ -30,6 +30,7 @@ export const reviseDraftTool: Tool = {
   },
   risk: "caution",
   background: "foreground-only",
+  planPhrase: "change the Gmail draft",
   // Reads the open email and its draft (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
   narrate: (): string => "Updating the draft in the reply box…",

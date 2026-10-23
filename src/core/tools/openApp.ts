@@ -48,6 +48,7 @@ export const openAppTool: Tool = {
   // `cmd.exe /c del ...`; it cannot, because the catalog is closed and lives in the shell.
   risk: "reversible",
   background: "foreground-only",
+  planPhrase: "open an app",
   // `app` is a literal to match against a closed list, not a reference to look up — the same
   // call `pointAt` makes about its `target`. Memory resolution would be strictly harmful here:
   // a user who taught the app "spotify is https://open.spotify.com" would have `app: "spotify"`

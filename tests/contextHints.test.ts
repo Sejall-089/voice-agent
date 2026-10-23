@@ -446,6 +446,28 @@ describe("runInstruction prints what the model sent when it was refused", () => 
     ]);
   });
 
+  // M29. Which tool stood behind each line of the preview, beside the phrase the preview used.
+  it("puts each step's tool and its phrase on the [main] line", async () => {
+    const lines = await run({
+      status: "cancelled",
+      tool: "linear__create_issue",
+      result: null,
+      chain: { completed: 1, total: 3 },
+      plan: [
+        { tool: "rewrite", phrase: "reword the text you copied" },
+        { tool: "linear__create_issue", phrase: "create a Linear issue" },
+        { tool: "sendMessage", phrase: "post a message to Slack" },
+      ],
+      planning: { emailHint: false, emailCheckMs: 0, clipboardChars: 1188 },
+    });
+    expect(lines).toEqual([
+      "[main] cancelled (chain 1/3) " +
+        '[plan: rewrite "reword the text you copied" > linear__create_issue "create a Linear issue" > ' +
+        'sendMessage "post a message to Slack"] ' +
+        "[email hint: not sent, check 0ms; clipboard: 1188 chars]: ",
+    ]);
+  });
+
   it("prints neither for an ordinary outcome", async () => {
     const lines = await run({ status: "ok", tool: "summarize", result: "SUMMARY" });
     expect(lines).toHaveLength(1);

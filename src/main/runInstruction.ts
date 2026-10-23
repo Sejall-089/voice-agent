@@ -60,6 +60,13 @@ export function createRunInstruction(
       // apart. Absent entirely for a single-step run, which is what every line before this
       // milestone was.
       const chain = outcome.chain ? ` (chain ${outcome.chain.completed}/${outcome.chain.total})` : "";
+      // M29. Which tool stood behind each line of the plan's preview, and the phrase the preview
+      // used for it. M28's live run previewed "Capture the selected text unchanged" over a
+      // `rewrite`, and only the action log could say so. Tool names and our own phrases — never
+      // the model's `describe`, and never an argument.
+      const plan = outcome.plan
+        ? ` [plan: ${outcome.plan.map((step) => `${step.tool} "${step.phrase}"`).join(" > ")}]`
+        : "";
       // M19. What the model was told, on the same ground-truth line as what it then did:
       // whether the email hint was in the prompt, how long the Gmail check took, and how many
       // characters of clipboard went with it. Numbers and a flag — never the clipboard itself.
@@ -67,11 +74,12 @@ export function createRunInstruction(
         ? ` [email hint: ${outcome.planning.emailHint ? "sent" : "not sent"}, ` +
           `check ${outcome.planning.emailCheckMs}ms; clipboard: ${outcome.planning.clipboardChars} chars]`
         : "";
-      console.log(`[main] ${outcome.status}${chain}${told}: ${outcome.result ?? ""}`);
+      console.log(`[main] ${outcome.status}${chain}${plan}${told}: ${outcome.result ?? ""}`);
       // M19. When the model's answer was refused before anything ran, print what it actually
       // sent. The message on screen quotes one tool name; diagnosing the "functions." prefix
       // took the action log and a guess, because the plan itself had been thrown away. Console
       // only, and in full — the action log gets the tool names and nothing else.
+      // Describes included, on purpose (M29): this records what the model sent, and nothing ran.
       if (outcome.proposed?.plan !== undefined) {
         console.log(`[main] refused plan, as sent: ${JSON.stringify(outcome.proposed.plan)}`);
       }

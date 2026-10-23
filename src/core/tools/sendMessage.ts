@@ -478,6 +478,7 @@ export const sendMessageTool: Tool = {
   },
   risk: "dangerous",
   background: "ok",
+  planPhrase: "post a message to Slack",
   // With no `notes`, it sends what the user copied — it reads the clipboard itself, so a plan
   // that pairs it with a create has used what "these notes" pointed at (core/chain.ts,
   // `checkUnreadContent`). With `notes`, the message is the instruction's words, not the clipboard.

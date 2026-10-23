@@ -18,11 +18,11 @@ const LONG =
 
 const summary: Tool = {
   name: "readInbox", description: "Summarize the inbox.", inputSchema: { type: "object", properties: {}, required: [] },
-  risk: "safe", background: "ok", handler: () => Promise.resolve(LONG),
+  risk: "safe", background: "ok", planPhrase: "run a test step", handler: () => Promise.resolve(LONG),
 };
 const shortAnswer: Tool = {
   name: "shortThing", description: "Answer briefly.", inputSchema: { type: "object", properties: {}, required: [] },
-  risk: "safe", background: "ok", handler: () => Promise.resolve("It's 2:51 PM."),
+  risk: "safe", background: "ok", planPhrase: "run a test step", handler: () => Promise.resolve("It's 2:51 PM."),
 };
 
 function world() {

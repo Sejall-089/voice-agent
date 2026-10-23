@@ -912,6 +912,13 @@ resolve it. A model that names `plan` as a *step* inside a plan is refused by th
 unknown-tool check, with no special case anywhere. Its input is `{ steps: [{ tool, arguments,
 describe }] }`, and it produces a fourth `ToolChoice` variant, `{ kind: "plan", steps }`.
 
+**`describe` is parsed and then unused (M29).** It is still in the schema, still required, and
+still capped at 80 characters by `parsePlan`. It is not shown, spoken or logged: the preview reads
+each tool's own `planPhrase` (Execution, step 1). It was kept so the planning prompt stays
+byte-for-byte unchanged, which is also why the schema's own text still says the phrase "is read
+out before anything runs". Removing or rewording it changes the prompt, and needs an eval with
+controls first (M28).
+
 Chosen over letting a provider emit several `tool_use` blocks: parallel tool use is trained for
 *independent* work, so a dependent chain would under-trigger, and the dependency between steps
 would be implicit in block order rather than stated. The meta-tool is also identical across
@@ -1007,6 +1014,22 @@ it is `draftReply → reviseDraft → sendReply`.
    **Transparency, not approval**: this supersedes the earlier sketch in
    `docs/context/PROJECT_CONTEXT_UPDATE_4.md`, which proposed a whole-plan approval *replacing*
    today's per-step confirm. It does not replace it.
+
+   **Each line is the tool's own phrase (M29).** It comes from `Tool.planPhrase`, written in the
+   tool's code ("reword the text you copied"); for a connector tool it comes from the pinned
+   definition, never from the server. Until M29 each line was the model's `describe`, and M28's
+   live run showed "Capture the selected text unchanged" over a `rewrite` step. The screen and
+   speech read the same phrase from the same lookup (`previewPlan`, `spokenPlan`), and a tool
+   with no phrase shows its name, never the describe.
+   - **The `[main]` console line** carries each step's tool beside its phrase:
+     `[plan: rewrite "reword the text you copied" > linear__create_issue "create a Linear issue" > …]`.
+     It is set exactly when a preview was shown (`PlannerOutcome.plan`).
+   - **The cost, accepted:** the preview is accurate but generic. Two steps of one tool read
+     alike, and specifics such as the channel arrive at each step's own narration or confirm.
+   - **The phrase never reaches the model:** `toToolSchemas` drops it, and
+     `tests/planPhrase.test.ts` pins that. The same file holds every phrase to its rules: at most
+     40 characters, printable ASCII, lowercase start, no trailing punctuation, no identifier, and
+     unique across all 28 tools.
 2. **Per step**, in order: substitute `{stepN}` from the results so far, then run the identical
    `runStep` a lone instruction runs — memory resolution, validation, tier resolution, narration
    gate, confirm gate, handler, log row. **There is no second gate implementation for chains to
@@ -1605,34 +1628,40 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 > a *step* inside a plan is refused by the ordinary unknown-tool check with no special case
 > written anywhere. The closed world of this table is exactly what it was before M17.
 
-| Tool          | Task(s) it serves                    | Reads memory? | Irreversible | Handler does |
-|---------------|--------------------------------------|---------------|--------------|--------------|
-| `summarize`   | 1. Summarize selection               | no            | safe         | LLM summarizes `context.selectedText`; showResult |
-| `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard. **In a chain (M29): returns only the rewritten text; no clipboard write, no header line** |
-| `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` |
-| `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible   | `memory.write()` (versions old fact on conflict) |
-| `sendMessage` | 5. Format notes and send             | yes (channel only — `referenceArgs`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST |
-| `recall`      | 7. What do you remember about…       | reads         | safe         | `memory.query()` → showResult with metadata |
-| `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft |
-| `reviseDraft` | 9. Tweak that reply                   | yes (tone)    | caution      | re-compose from the LIVE box text → replace it |
-| `sendReply`   | 10. Send it                           | no            | **dangerous**| confirm (recipient + whole draft) → click Gmail's Send |
-| `addToPage`   | 11. Add a note to the open Notion page | yes (tone)   | caution      | read open page → compose → real-CDP click + type at the end |
-| `readSchedule`| 12. What's on my calendar             | no            | safe         | list a time window → format as text |
-| `createEvent` | 13. Put something on the calendar     | no            | caution / **dangerous** | create it; `dangerous` when anyone is invited |
-| `moveEvent`   | 14. Move something                    | no            | caution / **dangerous** | find it (default-deny) → move; `dangerous` when it has guests |
-| `elaborate`   | 15. "And the rest?"                   | no            | safe         | read back what the last spoken summary held back (§4d) |
-| `pointAt`     | 16. Where's the send button?          | no            | caution      | read the window's controls → model picks one BY NUMBER → code resolves its rect → draw a marker (§6d) |
-| `openApp`     | 17. Open an installed app             | no            | reversible   | match the user's NAME against a closed catalog → `openApp` action; refuse with the list on no match |
-| `systemVolume`| 18. Turn the volume up/down/mute      | no            | reversible   | 1–15 presses of a real volume key via `SendInput`; says what was SENT as a change in percent ("Volume up about 10%"), never a level |
-| `mediaControl`| 19. Play/pause, next, previous        | no            | reversible   | one press of a real media key, to whichever app owns the media session |
-| `searchSpotify`| 20. Find something on Spotify        | no            | reversible   | `openUrl` to a fixed-template Spotify search URL; the USER presses play |
-| `readEmail`   | 21. What does this email say          | no            | safe         | read the open Gmail message → From / Subject / body as text (M19; gated with the Gmail group) |
-| `linear__create_issue` | 22. File an issue in Linear  | **never** (`resolvesReferences: false`) | **dangerous** | validate → merge `team` from config → drift check → remote `save_issue` → `Created ID: title` + link (§6e) |
-| `linear__search_issues`| 23. Find an issue in Linear  | never         | safe (a server hint may raise it) | remote `list_issues` with `limit` and `fields` fixed in code → up to 5 lines with links |
-| `linear__get_issue`    | 24. What does ENG-123 say    | never         | safe (a server hint may raise it) | remote `get_issue` → title, status, link, description |
-| `github__create_issue` | 25. Open a GitHub issue      | never         | **dangerous** (declared; the server hints nothing) | validate → merge `method: "create"`, `owner`, `repo` → drift check → remote `issue_write` → `Created #N: title` + link, refused if the link is outside the pinned repo (§6e, M20) |
-| `github__list_issues`  | 26. What's open on GitHub    | never         | safe (a server hint may raise it) | remote `list_issues` with repo, page size, fields and order fixed in code → up to 5 lines, links built from settings |
-| `github__get_issue`    | 27. What does GitHub issue 12 say | never    | safe (a server hint may raise it) | remote `issue_read` with `method: "get"` and repo fixed → title, state, link, body |
+| Tool          | Task(s) it serves                    | Reads memory? | Irreversible | Handler does | Preview phrase (M29) |
+|---------------|--------------------------------------|---------------|--------------|--------------|----------------------|
+| `summarize`   | 1. Summarize selection               | no            | safe         | LLM summarizes `context.selectedText`; showResult | summarize the text you copied |
+| `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard. **In a chain (M29): returns only the rewritten text; no clipboard write, no header line** | reword the text you copied |
+| `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` | open a web page |
+| `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible   | `memory.write()` (versions old fact on conflict) | save a fact to memory |
+| `sendMessage` | 5. Format notes and send             | yes (channel only — `referenceArgs`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST | post a message to Slack |
+| `recall`      | 7. What do you remember about…       | reads         | safe         | `memory.query()` → showResult with metadata | look up a saved fact |
+| `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft | draft a reply in Gmail |
+| `reviseDraft` | 9. Tweak that reply                   | yes (tone)    | caution      | re-compose from the LIVE box text → replace it | change the Gmail draft |
+| `sendReply`   | 10. Send it                           | no            | **dangerous**| confirm (recipient + whole draft) → click Gmail's Send | send the Gmail reply |
+| `addToPage`   | 11. Add a note to the open Notion page | yes (tone)   | caution      | read open page → compose → real-CDP click + type at the end | add a note to the Notion page |
+| `readSchedule`| 12. What's on my calendar             | no            | safe         | list a time window → format as text | read your calendar |
+| `createEvent` | 13. Put something on the calendar     | no            | caution / **dangerous** | create it; `dangerous` when anyone is invited | add an event to your calendar |
+| `moveEvent`   | 14. Move something                    | no            | caution / **dangerous** | find it (default-deny) → move; `dangerous` when it has guests | move a calendar event |
+| `elaborate`   | 15. "And the rest?"                   | no            | safe         | read back what the last spoken summary held back (§4d) | read out the rest of the last answer |
+| `pointAt`     | 16. Where's the send button?          | no            | caution      | read the window's controls → model picks one BY NUMBER → code resolves its rect → draw a marker (§6d) | point at something on screen |
+| `openApp`     | 17. Open an installed app             | no            | reversible   | match the user's NAME against a closed catalog → `openApp` action; refuse with the list on no match | open an app |
+| `systemVolume`| 18. Turn the volume up/down/mute      | no            | reversible   | 1–15 presses of a real volume key via `SendInput`; says what was SENT as a change in percent ("Volume up about 10%"), never a level | change the volume |
+| `mediaControl`| 19. Play/pause, next, previous        | no            | reversible   | one press of a real media key, to whichever app owns the media session | control what is playing |
+| `searchSpotify`| 20. Find something on Spotify        | no            | reversible   | `openUrl` to a fixed-template Spotify search URL; the USER presses play | search Spotify |
+| `readEmail`   | 21. What does this email say          | no            | safe         | read the open Gmail message → From / Subject / body as text (M19; gated with the Gmail group) | read the open email |
+| `linear__create_issue` | 22. File an issue in Linear  | **never** (`resolvesReferences: false`) | **dangerous** | validate → merge `team` from config → drift check → remote `save_issue` → `Created ID: title` + link (§6e) | create a Linear issue |
+| `linear__search_issues`| 23. Find an issue in Linear  | never         | safe (a server hint may raise it) | remote `list_issues` with `limit` and `fields` fixed in code → up to 5 lines with links | search Linear issues |
+| `linear__get_issue`    | 24. What does ENG-123 say    | never         | safe (a server hint may raise it) | remote `get_issue` → title, status, link, description | read a Linear issue |
+| `github__create_issue` | 25. Open a GitHub issue      | never         | **dangerous** (declared; the server hints nothing) | validate → merge `method: "create"`, `owner`, `repo` → drift check → remote `issue_write` → `Created #N: title` + link, refused if the link is outside the pinned repo (§6e, M20) | open a GitHub issue |
+| `github__list_issues`  | 26. What's open on GitHub    | never         | safe (a server hint may raise it) | remote `list_issues` with repo, page size, fields and order fixed in code → up to 5 lines, links built from settings | list GitHub issues |
+| `github__get_issue`    | 27. What does GitHub issue 12 say | never    | safe (a server hint may raise it) | remote `issue_read` with `method: "get"` and repo fixed → title, state, link, body | read a GitHub issue |
+
+> **The `Preview phrase` column (M29)** is `Tool.planPhrase`: what a plan's preview shows and
+> says for a step of that tool, in place of the model's `describe` (§5b, Execution). It is
+> required on every tool and on every connector definition, with no default. `tellTime` ("tell
+> the time or date") and `jobStatus` ("check your background jobs") have no row in this table.
+> All 28 phrases are pinned word for word in `tests/planPhrase.test.ts`.
 
 > **The three `linear__` rows are not constants of `registry.ts`**, unlike every row above them:
 > they are built at startup by `core/mcp/load.ts` from a connector definition, `connectors.json`
@@ -4796,9 +4825,9 @@ Post-v0:
          No state waited for an answer: M21's lesson, live.
 
 - [ ] **M29 — `rewrite` leaves the clipboard alone inside a chain; code-written plan preview
-      lines.** **In progress.** Fix 1 of 2, from M28's live finding 1, is built and waiting for
-      its live pass (`docs/M29-live-checklist.md`). Fix 2, code-written preview lines (option A
-      of the M28 investigation), is at the design stage; no code yet.
+      lines.** **In progress.** Both fixes come from M28's live finding 1. Both are built, and
+      both are waiting for their live pass (`docs/M29-live-checklist.md`). Fix 1 was committed
+      as `bd3abc9`. Fix 2 is option A of the M28 investigation: code-written preview lines.
 
       **Fix 1: `rewrite` never touches the clipboard inside a chain.**
 
@@ -4872,6 +4901,73 @@ Post-v0:
       mutations were run again together and caught by 3.
 
       **Build record (2026-10-23, before the live pass).** `npm test`: **3044 passed across 137
+      files, 96 skipped**. Both typechecks clean. No model calls.
+
+      **Fix 2: each preview line is the tool's own phrase, not the model's `describe`.**
+
+      - **`Tool.planPhrase`.** A required string on every tool, with no default, like
+        `background`. It is a lowercase imperative ("reword the text you copied"), capitalised
+        on screen and placed after "First,"/"Then," in speech. The 28 phrases are in §6's table
+        and pinned in `tests/planPhrase.test.ts`. The elaborate phrase is 36 characters, so the
+        short alternative was not needed.
+      - **Connector tools.** `ConnectorToolDef.planPhrase` is required and pinned in the
+        definition beside `confirmLabel`; the adapter copies it, and nothing is taken from the
+        server.
+      - **Screen and speech read the same phrase** from one lookup (`previewPlan` and
+        `spokenPlan` now take the run's tools). A tool with no phrase, which validation rules
+        out, shows its name, never the describe.
+      - **The `[main]` line** gets `[plan: tool "phrase" > …]`. It is set from
+        `PlannerOutcome.plan`, which is present exactly when a preview was shown.
+      - **`describe` is still in the plan schema,** required and capped at 80 characters. It is
+        not shown, spoken or logged. The planning prompt is unchanged: `core/llm/` and
+        `registry.ts` have no code changes (the two `plan.ts` edits are comments), and every
+        tool-file change is a `planPhrase` line. `toToolSchemas` drops the field, and a test
+        pins that.
+      - **Not changed.** The `[main] refused plan, as sent:` line (M19) still prints a refused
+        plan in full, describes included. It is console only and existed before this fix.
+
+      **Tests.** 151 new; 3195 total.
+      - `tests/planPhrase.test.ts` (new, 144):
+        - all 28 phrases word for word;
+        - each rule over every phrase: at most 40 characters, printable ASCII, lowercase start,
+          no trailing punctuation, no identifier, and no two alike. An identifier is a word with
+          an underscore, or camelCase starting lowercase, as tool names are. A brand ("GitHub")
+          or a plain word ("summarize") is not one;
+        - the schemas, and what the planner hands `FakeLLM`, have exactly `name`,
+          `description` and `inputSchema`.
+      - `tests/chain.test.ts`: the preview tests rewritten. Each plan's describe differs from
+        its tool's phrase, so the tests tell the two apart. The M28 step reads "Reword the text
+        you copied", no describe text is shown or spoken, the screen, speech and console fall
+        back to the tool's name, and `planPhrases` is checked.
+      - `tests/planner.chain.test.ts`: its fakes have phrases unlike their describes, and its
+        three preview assertions were re-justified on that basis.
+      - `tests/mcpAdapter.test.ts` (+2): the phrase is the pinned one, and holds after a real
+        call to a server whose description and title say "Capture the selected text
+        unchanged".
+      - `tests/planner.mcp.test.ts` (+2, the M28 replay): the notify payload, the spoken
+        preview and `outcome.plan`; and the real `[main]` line through `createRunInstruction`.
+      - `tests/contextHints.test.ts` (+1): the line's exact format.
+
+      Mutations (each made with the Edit tool and reverted):
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | The screen shows the phrase | show `describe` when present | 7 |
+      | No describe as a fallback, on screen | fall back to `describe` when there is no phrase | 1 |
+      | The same, for speech and the console | fall back to `describe` in `labelFor` | **0, then 1** |
+      | A connector's phrase is pinned | the adapter takes the server's name for the tool (`remote`) | 4 |
+      | Speech reads the same phrase | speak `describe` while the screen shows the phrase | 7 |
+      | The console names the phrase | drop it, keeping the tool names | 2 |
+      | The model never sees a phrase | `toToolSchemas` passes it through | 2 |
+
+      The third mutation survived at first: the fallback test checked only the screen. Speech
+      and the console have their own lookup (`labelFor`). The test now checks all three, and
+      the mutation was re-run and caught. The connector mutation uses the server's name for the
+      tool because the server's description and title only arrive asynchronously, after
+      connecting. A phrase is a plain string fixed when the tool is built, so the server cannot
+      supply one.
+
+      **Build record (2026-10-23, before the live pass).** `npm test`: **3195 passed across 138
       files, 96 skipped**. Both typechecks clean. No model calls.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the

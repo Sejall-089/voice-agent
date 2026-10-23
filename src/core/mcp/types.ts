@@ -77,6 +77,10 @@ export interface ConnectorToolDef {
   // and never anything the server says about its tool — not its description, its title or its
   // annotations. Omitted → the shell's default ("Send"). See `Tool.confirmLabel`.
   confirmLabel?: string;
+  // What a plan's preview calls a step of this tool, shown and spoken (M29, `Tool.planPhrase`):
+  // "create a Linear issue". PINNED HERE for the reason `confirmLabel` is: never the server's
+  // description, title or annotations. Required, with no default.
+  planPhrase: string;
   // What the model may propose, and what its proposal is validated against BEFORE anything is
   // sent. Must set `additionalProperties: false`: an argument that is not listed here cannot
   // reach the server, which is the whole of how `save_issue` is narrowed to "create".

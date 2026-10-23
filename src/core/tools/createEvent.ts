@@ -89,6 +89,7 @@ export const createEventTool: Tool = {
     resolve: (input: ToolInput): Risk => tierFor(input),
   },
   background: "ok",
+  planPhrase: "add an event to your calendar",
   // Shown only when the call resolves to `dangerous` (an event with guests, who are emailed).
   confirmLabel: "Create event",
   // The `caution` path: nobody else is affected, so it announces rather than asks.

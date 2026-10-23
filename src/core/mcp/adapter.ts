@@ -165,6 +165,8 @@ export function buildConnectorTools(
       // conditional spread, so a tool that pins none has no property at all and gets the
       // shell's default.
       ...(tool.confirmLabel === undefined ? {} : { confirmLabel: tool.confirmLabel }),
+      // From the pinned definition too (M29), and for the same reason: never the server's text.
+      planPhrase: tool.planPhrase,
       // Which arguments are a create's title and body, from the pinned definition (core/chain.ts,
       // `checkUnreadContent`). Absent on every tool that creates nothing.
       ...(tool.contentArg === undefined ? {} : { contentArg: tool.contentArg }),

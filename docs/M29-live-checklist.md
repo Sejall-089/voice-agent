@@ -1,8 +1,8 @@
 # M29 — live verification checklist (by hand)
 
-> **NOT YET RUN.** Fix 1 of 2 only: `rewrite` leaves the clipboard alone inside a chain
-> (`spec.md` §9, M29). Fix 2 (preview lines written by the app) is not built yet and gets its
-> own boxes when it is.
+> **NOT YET RUN.** Both fixes (`spec.md` §9, M29). Fix 1: `rewrite` leaves the clipboard alone
+> inside a chain (boxes 1 and 2). Fix 2: each line of a plan's preview is the tool's own phrase,
+> shown and spoken, and the console's `[main]` line names each step's tool beside it (box 3).
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
 >
@@ -16,9 +16,10 @@
 Run `npm run dev`. (The sandbox sets `ELECTRON_RUN_AS_NODE=1`; clear it first or the app boots
 as plain node.) Restart it after pulling: the main process is built once at startup.
 
-**How to tell which tools a plan ran.** The preview cannot tell you: each line is still the
-model's own description of its step (fix 2 is about that). Read the action log instead. It is
-read-only, and the app can stay running:
+**How to tell which tools a plan ran.** Since fix 2 the preview says it: a `rewrite` step reads
+"Reword the text you copied". The terminal running `npm run dev` also prints the `[main]` line
+with each tool's name, e.g. `[plan: rewrite "reword the text you copied" > …]`. The action log
+is the third witness, independent of both. It is read-only, and the app can stay running:
 
 ```
 python -c "import sqlite3,os; c=sqlite3.connect('file:'+os.path.join(os.environ['APPDATA'],'voice-agent','memory.db')+'?mode=ro',uri=True); [print(r) for r in c.execute('select id, ts, tool, status, substr(arguments,1,80) from action_log order by id desc limit 6')]"
@@ -48,10 +49,10 @@ Error: Connection terminated unexpectedly
 Going to leave it for now and pick it up after lunch. If anyone has seen pg drop the connection mid-transaction like this before, shout — I'd rather not bisect the whole job.
 ```
 
-Type **"create a linear issue and send to fun"**. At the Linear dialog, read the description,
-press **Cancel**, then run the action log command above. Repeat (re-copying the text is not
-needed) until a try has a `rewrite` row, up to five tries. The model does not plan the step
-every time.
+Type **"create a linear issue and send to fun"**. Read the preview, then at the Linear dialog
+read the description and press **Cancel**. Repeat (re-copying the text is not needed) until a
+preview starts "1. Reword the text you copied", up to five tries. The model does not plan the step
+every time. Box 3 is about that same preview.
 
 - [ ] **1.1** In the try with a `rewrite` row: the Linear dialog's description does **not**
       start with "Rewritten (clear, natural, and concise) and copied to clipboard." (It will
@@ -62,9 +63,10 @@ every time.
 - [ ] **1.3** On the try after that one, the dialog's description is the original text (or a
       rewording of it), not a rewording of a rewording.
 
-If no try in five has a `rewrite` row, write that here and leave the boxes open: the three
+If no try in five has a rewrite step, write that here and leave boxes 1 and 3.1–3.3 open. The
 replay tests in `tests/planner.mcp.test.ts` ("rewrite inside a chain leaves the clipboard
-alone") cover it against `MockShell`, and only a person can say what the real clipboard did.
+alone") cover them against `MockShell`, but only a person can say what the real clipboard did
+and what the real preview looked and sounded like.
 
 ## 2. A plain rewrite still replaces the clipboard
 
@@ -74,9 +76,34 @@ Copy **"hey can u send me that file when u get a sec"**. Type **"rewrite this po
       close to it), followed by the rewrite.
 - [ ] **2.2** Paste into Notepad: the clipboard now holds the rewrite, not what you copied.
 
+## 3. The preview names each step in the app's words
+
+Use a try from box 1 that had a rewrite step: its preview is the one to read. Have the speaker on.
+
+- [ ] **3.1** The preview reads, line for line:
+      ```
+      Three steps:
+      1. Reword the text you copied
+      2. Create a Linear issue
+      3. Post a message to Slack
+      ```
+      (A plan without the send step shows two lines; write down what it showed.) Nothing on it
+      says "unchanged" or "capture".
+- [ ] **3.2** The spoken preview says the same words: "Three steps. First, reword the text you
+      copied. Then, create a Linear issue. Then, post a message to Slack."
+- [ ] **3.3** The terminal running `npm run dev` has a `[main]` line for that try containing
+      `[plan: rewrite "reword the text you copied" > linear__create_issue "create a Linear issue"`.
+- [ ] **3.4** One try **without** a rewrite step (any other preview from box 1): its lines are
+      the phrases for the tools the action log shows, and nothing else.
+
 ## Machine-verified, not watched
 
 - No clipboard write and no header line in a chain; a lone call and a one-step plan still write
   it and keep it (`tests/tools.test.ts`, `tests/planner.mcp.test.ts`, 5 tests, four mutations
   caught — `spec.md` §9, M29).
 - `MockShell` now reads its clipboard back as the next capture, as Windows does.
+- Every tool's phrase, word for word and against each rule; the model is never sent one; the
+  screen, speech and console use the phrase, never the model's `describe`, the fallback
+  included (`tests/planPhrase.test.ts`, `tests/chain.test.ts`, `tests/planner.mcp.test.ts`,
+  `tests/mcpAdapter.test.ts`, `tests/contextHints.test.ts`; seven mutations caught, one only
+  after a test was added — `spec.md` §9, M29).

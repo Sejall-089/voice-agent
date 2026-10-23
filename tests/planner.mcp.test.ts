@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Database } from "better-sqlite3";
 import { Planner } from "../src/core/planner.ts";
+import { createRunInstruction } from "../src/main/runInstruction.ts";
 import { buildRegistry } from "../src/core/registry.ts";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { InMemoryChainState } from "../src/core/chainState.ts";
@@ -1321,6 +1322,55 @@ describe("rewrite inside a chain leaves the clipboard alone (M29)", () => {
     expect(h.shell.clipboard).toBe(COPIED);
     // What the NEXT try would read as "the clipboard" — the original, not the rewrite.
     expect((await h.shell.getContext()).selectedText).toBe(COPIED);
+  });
+
+  // Fix A: the preview the person read live said "Capture the selected text unchanged…" for step
+  // 1. Each line is now the tool's own phrase, on screen and aloud, and the outcome carries the
+  // same list for the `[main]` line.
+  it("the preview names each step by its tool's phrase, never the model's describe", async () => {
+    const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [false] });
+    const outcome = await h.planner.run("create a linear issue and send to fun");
+
+    const notifies = h.shell.actions.filter((action) => action.kind === "notify");
+    expect(notifies[0]?.payload).toBe(
+      "Three steps:\n1. Reword the text you copied\n2. Create a Linear issue\n3. Post a message to Slack",
+    );
+    expect(h.shell.spoken[0]).toBe(
+      "Three steps. First, reword the text you copied. Then, create a Linear issue. " +
+        "Then, post a message to Slack.",
+    );
+    for (const said of [String(notifies[0]?.payload), h.shell.spoken[0] ?? ""]) {
+      expect(said).not.toContain("unchanged");
+    }
+    expect(outcome.plan).toEqual([
+      { tool: "rewrite", phrase: "reword the text you copied" },
+      { tool: "linear__create_issue", phrase: "create a Linear issue" },
+      { tool: "sendMessage", phrase: "post a message to Slack" },
+    ]);
+  });
+
+  // The real planner through the real call site: the console line names `rewrite` beside its
+  // phrase, and carries none of the model's describe.
+  it("the [main] line names each step's tool beside its phrase", async () => {
+    const h = harness(plan(LIVE_PLAN), { email: null, context: copied, confirms: [false] });
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      lines.push(String(line));
+    });
+    try {
+      await createRunInstruction(
+        { run: (text: string) => h.planner.run(text) },
+        { showThinking: () => undefined, showResult: () => undefined },
+      )("create a linear issue and send to fun");
+    } finally {
+      spy.mockRestore();
+    }
+    const line = lines.find((entry) => entry.startsWith("[main] cancelled"));
+    expect(line).toContain(
+      '[plan: rewrite "reword the text you copied" > linear__create_issue "create a Linear issue" > ' +
+        'sendMessage "post a message to Slack"]',
+    );
+    expect(line).not.toContain("unchanged");
   });
 
   it("the dialog's description is the rewritten text alone — no header line", async () => {

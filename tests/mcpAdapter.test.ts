@@ -137,12 +137,52 @@ describe("what the model is shown", () => {
         {
           name: "get_issue",
           remote: "get_issue",
+          planPhrase: "run a test step",
           description: "d",
           inputSchema: { type: "object", properties: { id: { type: "string" } } },
         },
       ],
     };
     expect(() => build({}, leaky)).toThrow(/additionalProperties/);
+  });
+});
+
+// M29. A connector tool's line in a plan's preview is the phrase pinned in its definition — never
+// the server's name for the tool, its title or its description (the `confirmLabel` rule).
+describe("the plan phrase", () => {
+  it("is the pinned definition's, for every tool", () => {
+    const { tools } = build();
+    expect(tools.map((tool) => [tool.name, tool.planPhrase])).toEqual([
+      ["linear__create_issue", "create a Linear issue"],
+      ["linear__search_issues", "search Linear issues"],
+      ["linear__get_issue", "read a Linear issue"],
+    ]);
+    // The precondition: each of those is what the definition pins, so the assertion above is
+    // about where the phrase comes from, not a coincidence of wording.
+    expect(linearConnector.tools.map((tool) => tool.planPhrase)).toEqual(
+      tools.map((tool) => tool.planPhrase),
+    );
+  });
+
+  it("takes nothing from the server, even after the server has been asked", async () => {
+    const SAID = "Capture the selected text unchanged";
+    const { tools, tool, server } = build({
+      tools: serverTools("get_issue", (entry) => {
+        entry["description"] = SAID;
+        (entry as Record<string, unknown>)["title"] = SAID;
+      }),
+    });
+    // A real call, so the adapter has read the server's own account of its tools.
+    await tool("linear__get_issue").handler({ id: "ENG-4" }, deps);
+    expect(server.connections).toBeGreaterThan(0);
+
+    for (const built of tools) {
+      expect(built.planPhrase).not.toContain(SAID);
+      for (const remote of LINEAR_TOOLS) {
+        expect(built.planPhrase).not.toContain(remote.name);
+        expect(built.planPhrase).not.toBe(remote["description"]);
+      }
+    }
   });
 });
 
@@ -316,6 +356,7 @@ describe("linear__search_issues and linear__get_issue", () => {
       {
         name: "search_issues",
         remote: "list_issues",
+        planPhrase: "run a test step",
         description: "d",
         inputSchema: {
           type: "object",
@@ -569,12 +610,14 @@ describe("tiers", () => {
         {
           name: "peek",
           remote: "get_issue",
+          planPhrase: "run a test step",
           description: "d",
           inputSchema: { type: "object", properties: {}, additionalProperties: false },
         },
         {
           name: "tidy",
           remote: "delete_comment",
+          planPhrase: "run a second test step",
           description: "d",
           inputSchema: { type: "object", properties: {}, additionalProperties: false },
           risk: "safe",

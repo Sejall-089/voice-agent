@@ -22,6 +22,7 @@ export const sendReplyTool: Tool = {
   inputSchema: { type: "object", properties: {}, required: [] },
   risk: "dangerous",
   background: "foreground-only",
+  planPhrase: "send the Gmail reply",
   confirmLabel: "Send reply",
   // Reads the live compose box (SAFE) so the user approves the words that will actually go out.
   // Throwing here means the planner never opens a dialog and nothing is sent.

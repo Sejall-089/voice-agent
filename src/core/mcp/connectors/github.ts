@@ -53,6 +53,7 @@ export const githubConnector: ConnectorDef = {
     {
       name: "create_issue",
       remote: "issue_write",
+      planPhrase: "open a GitHub issue",
       description:
         "Create a NEW issue in the user's GitHub repository. Use this ONLY when the user asks " +
         "for GitHub by name ('open a GitHub issue', 'file this on GitHub') — never for a " +
@@ -112,6 +113,7 @@ export const githubConnector: ConnectorDef = {
     {
       name: "list_issues",
       remote: "list_issues",
+      planPhrase: "list GitHub issues",
       description:
         "List the most recent issues in the user's GitHub repository: up to 5, newest first, " +
         "each with its number, title, state and link. Use this when the user asks what issues " +
@@ -161,6 +163,7 @@ export const githubConnector: ConnectorDef = {
     {
       name: "get_issue",
       remote: "issue_read",
+      planPhrase: "read a GitHub issue",
       description:
         "Read one issue in the user's GitHub repository by its number: its title, state, link " +
         "and full text. Use this when the user names a specific GitHub issue (like 'issue 12' " +

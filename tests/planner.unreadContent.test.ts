@@ -56,6 +56,7 @@ function tools(ran: Ran): Tool[] {
     },
     risk: "dangerous",
     background: "ok",
+    planPhrase: "run a test step",
     contentArg: { title: "title", body: "body" },
     confirmSummary: (input): string => `File "${String(input["title"])}"?`,
     handler: handler("fileThing"),
@@ -70,6 +71,7 @@ function tools(ran: Ran): Tool[] {
     },
     risk: "dangerous",
     background: "ok",
+    planPhrase: "run a test step",
     // Reads the clipboard itself when it has no notes — the shape `sendMessage` declares.
     readsContext: (args) => typeof args["notes"] !== "string" || args["notes"].trim() === "",
     confirmSummary: (input): string => `Tell ${String(input["channel"])}?`,
@@ -81,6 +83,7 @@ function tools(ran: Ran): Tool[] {
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "safe",
     background: "ok",
+    planPhrase: "run a test step",
     readsContext: true,
     handler: handler("readThing"),
   };

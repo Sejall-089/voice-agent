@@ -42,6 +42,7 @@ export const addToPageTool: Tool = {
   },
   risk: "caution",
   background: "foreground-only",
+  planPhrase: "add a note to the Notion page",
   // Reads the clipboard as material for the note (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
   // SAFE: reading the open page to name it in the narration. If Notion isn't reachable at

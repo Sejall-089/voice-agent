@@ -30,6 +30,7 @@ function tools(hold: Promise<void>): Tool[] {
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "safe",
     background,
+    planPhrase: "run a test step",
     handler: async (): Promise<string> => {
       await hold;
       return `${name} done`;
@@ -41,6 +42,7 @@ function tools(hold: Promise<void>): Tool[] {
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "dangerous",
     background: "ok",
+    planPhrase: "run a test step",
     confirmSummary: (): string => "Send it?",
     handler: (): Promise<string> => Promise.resolve("Sent."),
   };

@@ -42,6 +42,7 @@ export const linearConnector: ConnectorDef = {
     {
       name: "create_issue",
       remote: "save_issue",
+      planPhrase: "create a Linear issue",
       description:
         "Create a NEW issue (a ticket, a bug report, a task) in the user's Linear workspace. " +
         "Use this when the user asks to file, create, open or log an issue, ticket or bug in " +
@@ -98,6 +99,7 @@ export const linearConnector: ConnectorDef = {
     {
       name: "search_issues",
       remote: "list_issues",
+      planPhrase: "search Linear issues",
       description:
         "Search the user's Linear workspace for existing issues whose title or description " +
         "matches some words. Use this when the user asks to find, look up or check for an issue " +
@@ -137,6 +139,7 @@ export const linearConnector: ConnectorDef = {
     {
       name: "get_issue",
       remote: "get_issue",
+      planPhrase: "read a Linear issue",
       description:
         "Read one Linear issue by its identifier (like ENG-123): its title, status, link and " +
         "full description. Use this when the user names a specific issue and asks what it says " +

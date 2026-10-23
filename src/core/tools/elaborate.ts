@@ -35,6 +35,7 @@ export const elaborateTool: Tool = {
   inputSchema: { type: "object", properties: {}, required: [] },
   risk: "safe",
   background: "foreground-only",
+  planPhrase: "read out the rest of the last answer",
   handler: async (_input: ToolInput, deps: ToolDeps): Promise<string> => {
     const held = deps.speech.take();
     if (held === null) {

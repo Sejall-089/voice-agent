@@ -23,9 +23,13 @@ import type { PlannedStep, ToolInput, ToolSchema } from "../types.ts";
 
 export const PLAN_TOOL_NAME = "plan";
 
-// The cap on a step's `describe`. This is untrusted model text that gets displayed and spoken,
-// so it is bounded where it ENTERS the app rather than at each of the places that render it.
-// Roughly a phrase; the preview is a list of these and has to stay glanceable.
+// The cap on a step's `describe`, untrusted model text bounded where it ENTERS the app.
+//
+// Since M29 nothing a person sees or hears uses it: the preview, shown and spoken, is each
+// tool's own `planPhrase`, after M28's live run previewed "Capture the selected text unchanged"
+// over a `rewrite`. It stays in the schema, required, so the planning prompt is byte-for-byte
+// what it was — which is also why the schema's text below still says it is "read out".
+// Changing that text changes the prompt, and needs an eval with controls (M28's lesson).
 export const MAX_DESCRIBE_CHARS = 80;
 
 // What the user is told when the model called `plan` but what came back was not a plan. Its own
@@ -132,8 +136,8 @@ export function planToolFor(tools: readonly ToolSchema[]): ToolSchema {
 // Lenient where the schema is strict, on purpose: `arguments` and `describe` are defaulted
 // rather than rejected when missing. A model that omits `arguments` on `readSchedule` (which
 // requires none) has not made a mistake worth failing an entire plan over, and a missing
-// `describe` costs a nicer preview, not correctness — `core/chain.ts` falls back to the tool
-// name. What CANNOT be defaulted is `tool`: there is no sane guess for which tool was meant.
+// `describe` costs nothing at all since M29 — the preview reads each tool's `planPhrase`. What
+// CANNOT be defaulted is `tool`: there is no sane guess for which tool was meant.
 export function parsePlan(input: unknown): PlannedStep[] | null {
   if (!isRecord(input)) return null;
 

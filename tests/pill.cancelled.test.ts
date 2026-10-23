@@ -43,6 +43,7 @@ async function scenario(
     inputSchema: { type: "object", properties: {}, required: [] },
     risk: "safe",
     background: "ok",
+    planPhrase: "run a test step",
     handler: async (): Promise<string> => {
       ran.push(`${name} started`);
       entered[name].resolve();
@@ -181,6 +182,7 @@ describe("cancelled after a step ran: shown, with its own message (case B)", () 
           inputSchema: { type: "object", properties: {}, required: [] },
           risk: "safe",
           background: "ok",
+          planPhrase: "run a test step",
           handler: async () => {
             ran.push("slow");
             entered.resolve();
@@ -194,6 +196,7 @@ describe("cancelled after a step ran: shown, with its own message (case B)", () 
           inputSchema: { type: "object", properties: {}, required: [] },
           risk: "safe",
           background: "ok",
+          planPhrase: "run a test step",
           handler: () => {
             ran.push("post");
             return Promise.resolve("post result");
@@ -240,6 +243,7 @@ describe("cancelled after a step ran: shown, with its own message (case B)", () 
       inputSchema: { type: "object", properties: {}, required: [] },
       risk: "safe",
       background: "ok",
+      planPhrase: "run a test step",
       handler: () => {
         ran.push(name);
         return Promise.resolve(`${name} result`);

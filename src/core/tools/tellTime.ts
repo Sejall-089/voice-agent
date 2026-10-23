@@ -63,6 +63,7 @@ export const tellTimeTool: Tool = {
   },
   risk: "safe",
   background: "ok",
+  planPhrase: "tell the time or date",
   statusOnly: true,
   // Nothing to look up: the answer is the clock.
   resolvesReferences: false,

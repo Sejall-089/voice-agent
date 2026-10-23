@@ -29,6 +29,7 @@ export const jobStatusTool: Tool = {
   inputSchema: { type: "object", properties: {}, required: [] },
   risk: "safe",
   background: "ok",
+  planPhrase: "check your background jobs",
   statusOnly: true,
   // Nothing to look up: it takes no arguments.
   resolvesReferences: false,

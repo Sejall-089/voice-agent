@@ -838,6 +838,21 @@ export interface Tool extends ToolSchema {
   // about a moment, and a `dangerous` Slack post is still fine to prepare in the background —
   // the confirm gate is what stops it, not this.
   background: BackgroundTag;
+  // What a plan's preview calls a step of this tool, on screen and aloud (M29): "reword the text
+  // you copied". A lowercase imperative; the screen capitalises it, speech puts it after "First,"
+  // or "Then,".
+  //
+  // Written HERE, in the tool's code, because until M29 the preview line was the model's own
+  // `describe` for the step, and M28's live run showed it saying "Capture the selected text
+  // unchanged" over a step that reworded the text. The model's describe is still parsed (the
+  // planning prompt is unchanged) and is no longer shown, spoken or logged.
+  //
+  // Never sent to the model: it is not part of `ToolSchema`, and `toToolSchemas` drops it.
+  // REQUIRED, WITH NO DEFAULT, like `background`, so a new tool cannot reach a preview without
+  // one. `tests/planPhrase.test.ts` holds every phrase in the registry to the same rules: at
+  // most 40 characters, printable ASCII (it is spoken, and M14 found Piper garbles dashes),
+  // lowercase start, no trailing punctuation, no identifier, and no two tools sharing one.
+  planPhrase: string;
   // Answers from the app's own records and does nothing else (M23): never queued behind running
   // jobs, never listed as a job, never counted in its own answer. `jobStatus` is the one.
   statusOnly?: boolean;
@@ -1002,6 +1017,11 @@ export interface PlannerOutcome {
   // `completed` counts steps that ran to `ok`, so a chain that stopped at step 2 of 3 reports
   // `{ completed: 1, total: 3 }`.
   chain?: { completed: number; total: number };
+  // The plan as its preview showed it (M29): each step's tool and the phrase that stood for it,
+  // in order. Present exactly when a preview was shown. `runInstruction.ts` puts it on the
+  // `[main]` line, so which tool stood behind which preview line can be read off the console
+  // rather than out of the action log (M28's lesson).
+  plan?: readonly { tool: string; phrase: string }[];
   // What the model actually sent, when what it sent was REFUSED before anything ran (M19) — a
   // plan that failed validation, or a single call naming a tool that is not on the menu.
   //

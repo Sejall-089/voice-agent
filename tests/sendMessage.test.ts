@@ -386,6 +386,7 @@ describe("referenceArgs — the planner resolves only the arguments a tool decla
       description: "records what it was handed",
       inputSchema: { type: "object", properties: {}, required: [] },
       background: "ok",
+      planPhrase: "run a test step",
       risk: "safe",
       ...declared,
       handler: (input) => {
@@ -783,6 +784,7 @@ describe("sendMessage — what is approved is what is sent", () => {
         description: "",
         inputSchema: { type: "object", properties: {}, required: [] },
         background: "ok",
+        planPhrase: "run a test step",
         risk: "safe",
         prepare: (args, deps) => {
           seen = deps;
@@ -1106,6 +1108,7 @@ describe("Tool.prepare — arguments are settled once, before the gates", () => 
       description: "",
       inputSchema: { type: "object", properties: {}, required: ["text"] },
       background: "ok",
+      planPhrase: "run a test step",
       risk: {
         tiers: ["dangerous"],
         resolve: (args) => {

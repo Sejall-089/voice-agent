@@ -30,6 +30,7 @@ import {
   preflightReferences,
   previewHoldRemaining,
   plannedStepsNote,
+  planPhrases,
   previewPlan,
   resolveStepArgs,
   spokenPlan,
@@ -777,6 +778,10 @@ export class Planner {
     // never be observed in different states — WindowsShell.confirm()'s own rule for
     // `confirmPending`, applied to the flag that has to hold for very much longer.
     this.chain.begin(steps.length);
+    // What the preview below shows, step by step, for the `[main]` line (M29). On every outcome
+    // from here on, because every one of them comes after the preview was shown.
+    const shown = planPhrases(steps, this.registry);
+    const withPlan = (outcome: PlannerOutcome): PlannerOutcome => ({ ...outcome, plan: shown });
     try {
       // Decision 2: the whole plan, up front, for transparency. NOT approval — the gates still
       // fire per step, on real arguments, when execution reaches them.
@@ -785,9 +790,9 @@ export class Planner {
       // length cap on speech can never cut it off): the only sign a dropped action would leave.
       const note = afterWrapperRetry ? plannedStepsNote(steps.length) : null;
       const previewShownAt = Date.now();
-      const preview = previewPlan(steps);
+      const preview = previewPlan(steps, this.registry);
       await this.shell.executeAction({ kind: "notify", payload: note === null ? preview : `${preview}\n${note}` });
-      await this.say(toSpokenNarration(spokenPlan(steps)));
+      await this.say(toSpokenNarration(spokenPlan(steps, this.registry)));
       if (note !== null) await this.say(toSpokenNarration(note));
 
       // LIVE-TESTING FIX: hold the preview on screen for a minimum read time before step 1 may
@@ -809,7 +814,7 @@ export class Planner {
       for (const [index, step] of steps.entries()) {
         this.chain.step(index + 1);
         const tool = this.registry.find((t) => t.name === step.tool);
-        if (tool === undefined) return await this.refuse(instruction);
+        if (tool === undefined) return withPlan(await this.refuse(instruction));
 
         // Substituted HERE — after the earlier steps have actually run, and before this step's
         // own gate. The confirm dialog therefore describes the real argument, never a
@@ -825,7 +830,9 @@ export class Planner {
             result: resolved.reason,
             status: "refused",
           });
-          return await this.stopChain(steps, index, resolved.reason, "refused", step.tool);
+          return withPlan(
+            await this.stopChain(steps, index, resolved.reason, "refused", step.tool),
+          );
         }
 
         const position: StepPosition = {
@@ -849,7 +856,7 @@ export class Planner {
         // a cancelled confirm, a thrown error. The step has already logged itself.
         if (outcome.status !== "ok") {
           const reason = outcome.result ?? DECLINED;
-          return await this.stopChain(steps, index, reason, outcome.status, tool.name);
+          return withPlan(await this.stopChain(steps, index, reason, outcome.status, tool.name));
         }
         results.push(outcome.result ?? "");
       }
@@ -858,12 +865,12 @@ export class Planner {
       // there is nothing further to announce. What the outcome adds is the accounting, for the
       // one line of ground truth in runInstruction.ts.
       const last = steps[steps.length - 1];
-      return {
+      return withPlan({
         status: "ok",
         tool: last?.tool ?? null,
         result: results[results.length - 1] ?? null,
         chain: { completed: steps.length, total: steps.length },
-      };
+      });
     } finally {
       // In the `finally`, not after: a chain that THREW must not leave the hotkeys blocked
       // forever with nothing running. Same reasoning as confirm()'s own finally.

@@ -25,6 +25,7 @@ describe("three concurrent jobs, start to finish", () => {
       inputSchema: { type: "object", properties: {}, required: [] },
       risk: "safe",
       background: "ok",
+      planPhrase: "run a test step",
       handler: (): Promise<string> => {
         ran.push(name);
         return Promise.resolve(`${name} result`);

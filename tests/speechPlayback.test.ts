@@ -825,6 +825,7 @@ describe("M24 — simulation: a job's long answer, then 'read the rest'", () => 
       inputSchema: { type: "object", properties: {}, required: [] },
       risk: "safe",
       background: "ok",
+      planPhrase: "run a test step",
       handler: () => Promise.resolve(LONG_RESULT),
     };
     const llm = new ScriptedLLM({

@@ -48,6 +48,7 @@ export const searchSpotifyTool: Tool = {
   // reason: the user closes it.
   risk: "reversible",
   background: "foreground-only",
+  planPhrase: "search Spotify",
   // A literal to put in a search box, not a reference to resolve. Letting memory near it would
   // rewrite "my favourite album" into whatever URL happened to be stored under that name and
   // then search Spotify for a URL — the same failure `pointAt` avoids with its `target`.

@@ -60,6 +60,7 @@ function world() {
     inputSchema: { type: "object", properties: { text: { type: "string" } }, required: [] },
     risk: "safe",
     background: "ok",
+    planPhrase: "run a test step",
     handler: (): Promise<string> => {
       ran.push(name);
       return Promise.resolve(`${name} done`);

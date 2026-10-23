@@ -44,6 +44,7 @@ export const readScheduleTool: Tool = {
   },
   risk: "safe",
   background: "ok",
+  planPhrase: "read your calendar",
   // Reads the schedule the user is asking about (core/chain.ts, `checkUnreadContent`).
   readsContext: true,
   handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
