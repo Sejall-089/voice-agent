@@ -1,9 +1,9 @@
 # M31 — live verification checklist
 
-> **NOT RUN BY A PERSON.** `spec.md` §9 (M31): a plan or lone call that creates a Linear or
-> GitHub issue with no send step is refused when the instruction asked for a send to a channel
-> the app knows (`checkDroppedSends`, `spec.md` §5b, "A send the instruction asked for, missing
-> from the answer"). 0 ticked, 2 open.
+> **RUN 2026-10-23, by a person (H1, H2).** `spec.md` §9 (M31): a plan or lone call that creates
+> a Linear or GitHub issue with no send step is refused when the instruction asked for a send to a
+> channel the app knows (`checkDroppedSends`, `spec.md` §5b, "A send the instruction asked for,
+> missing from the answer"). 2 ticked, 0 open.
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
 >
@@ -16,17 +16,23 @@
 
 ## Human-only
 
-- [ ] **H1** Listen to the refusal through the real speech engine:
+- [x] **H1** *(Heard by Sejal 2026-10-23: natural, no slash.)* Listen to the refusal through the real speech engine:
       `npx vite-node scripts/m30-say-refusal.ts --dropped-send` (it plays audio; `--no-play` only
       writes the WAV). It should say, whole: "You asked me to send it too, but my plan had no send
       step, so nothing was filed. Ask again, or file it and send it as two requests." There is no
       slash in it; confirm it sounds natural, and write down anything that does not.
-- [ ] **H2** In the real app (`npm run dev`; clear `ELECTRON_RUN_AS_NODE` first), with any text
+- [x] **H2** In the real app (`npm run dev`; clear `ELECTRON_RUN_AS_NODE` first), with any text
       copied and no email open, say or type **"create a linear issue and send to fun"**.
       Normally: a preview listing "Create a Linear issue" then "Post a message to Slack"; press
       **Cancel** at the Linear dialog; nothing is filed and nothing is posted. **If it is refused
       instead**, write down what the bar showed and the terminal's `[main] refused …, as sent:`
       line (a lone create is this check; a summarize step first is M30's).
+      *(Seen by Sejal 2026-10-23: 'create a linear issue and send to fun' with text copied showed
+      Step 1 of 2 (create, then send); cancelled, nothing filed in Linear. Separate earlier try,
+      'create a linear issue and post in fun': the model replied in prose asking for a 'close-out
+      prompt' text and which channel 'Claude Code' is (it read the chat page on screen as
+      context); no tool ran, nothing filed. Recorded as a finding for the small-items milestone,
+      not an M31 failure.)*
 
 ## Script-verified (live model, faked connectors)
 
