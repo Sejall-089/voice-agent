@@ -358,6 +358,18 @@ describe("WindowsShell Escape — works whenever the bar is visible, not only wh
     expect(escapeHandler()).toBeUndefined();
   });
 
+  // M32. The case behind "Escape with the pill list open": once the bar is hidden by any route,
+  // the app holds no Escape, so the key reaches whatever app is in front and the pill (which never
+  // takes focus) cannot see it. Whether the real OS delivers it there is for a person (H4).
+  it("holds no Escape once the bar is hidden by another route (M32)", async () => {
+    void shell.showInput();
+    expect(escapeHandler()).toBeDefined(); // the precondition: it was held while visible
+    window.hide();
+    await Promise.resolve();
+    expect(escapeHandler()).toBeUndefined();
+    expect(globalShortcut._handlers.has("Escape")).toBe(false);
+  });
+
   it("closes the bar via the global shortcut even when focus is elsewhere", async () => {
     // The literal bug report: the bar is visible, but something else currently has focus
     // (the user briefly clicked away without triggering a full blur/hide — or, as below,

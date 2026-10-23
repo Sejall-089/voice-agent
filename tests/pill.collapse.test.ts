@@ -666,6 +666,35 @@ describe("THE REAL WIRING: an accepted hotkey press collapses an open pill", () 
     expect(w.last()?.expanded).toBe(false);
   });
 
+  // M32. What Escape does to an open list. With the bar HIDDEN the app holds no Escape at all
+  // (WindowsShell registers it only while the bar is visible — tests/WindowsShell.capture.test.ts),
+  // so the key goes to the app in front and nothing here can see it. With the bar visible, the one
+  // thing Escape does to jobs is `escapeAttached()` (main.ts) — and that leaves the list as it was.
+  // Whether the real OS hands Escape to the front app is for a person (M32 checklist, H4).
+  it.each([
+    ["before its first step (cancelled)", false],
+    ["after it started (sent to the background)", true],
+  ])("Escape on the attached job %s leaves an open list open", async (_name, started) => {
+    const { w } = await wired();
+    await w.waitingJob();
+    await w.pageLoaded();
+    const attached = w.manager.submit("summarize this");
+    if (started) {
+      // Started = entered its first step (JobManager.enterStep), not merely admitted.
+      const gate = w.manager.gateFor(attached);
+      await gate.admit({ tools: ["summarize"], statusOnly: false });
+      await gate.enterStep({ tool: "summarize", index: 1, total: 1, foregroundOnly: false });
+    }
+    w.controller.onExpand(true);
+    expect(w.last()?.expanded).toBe(true);
+
+    const did = w.manager.escapeAttached();
+    await w.flush();
+    // The precondition: Escape really did something to a job.
+    expect(did).toBe(started ? "detached" : "cancelled");
+    expect(w.last()?.expanded).toBe(true);
+  });
+
   it("the same press still detaches the job that had the bar", async () => {
     const { w, press } = await wired();
     const attached = w.manager.submit("summarize this");
