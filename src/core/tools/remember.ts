@@ -2,15 +2,15 @@ import { UnresolvedReferenceError } from "../errors.ts";
 import { normalizeReference } from "../memory/normalize.ts";
 import { userSource } from "../memory/source.ts";
 import { resolveSlackName, slackRefusalText } from "./sendMessage.ts";
-import type { Tool, ToolDeps, ToolInput } from "../types.ts";
+import type { PrepareDeps, Tool, ToolDeps, ToolInput } from "../types.ts";
 
 // The value to save for this fact (M22). Unchanged unless this install is in bot mode — a bot
 // sender AND a channel directory — and the fact is about a channel: its value starts with "#", or
 // its subject ends in "channel" ("bugs channel"). Then it must be a channel Slack has, and what is
 // saved is Slack's own "#name". A channel Slack does not have, or a Slack that cannot be asked,
 // is refused in the send's wording (but ending "so nothing was saved."), and NOTHING is written.
-async function channelFactValue(subject: string, value: string, deps: ToolDeps): Promise<string> {
-  const directory = deps.sender.mode === "bot" ? deps.channelDirectory : undefined;
+async function channelFactValue(subject: string, value: string, deps: PrepareDeps): Promise<string> {
+  const directory = deps.senderMode === "bot" ? deps.channelDirectory : undefined;
   if (directory === undefined) return value;
   if (!value.startsWith("#") && !/\bchannel$/.test(subject)) return value;
 
@@ -70,7 +70,10 @@ export const rememberTool: Tool = {
   // This tool's args are literals to STORE, not references to look up. Without this, the planner
   // would resolve a subject like "the team" into the fact's current value before we ever saw it.
   resolvesReferences: false,
-  handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
+  // M33. WHAT WILL BE SAVED IS SETTLED HERE, before the tier and any dialog (M21, `Tool.prepare`):
+  // the canonical subject and the value as it will be stored. Everything after this — and from
+  // M33 the tier and the dialog — sees these arguments, and the handler writes exactly them.
+  prepare: async (input: ToolInput, deps: PrepareDeps): Promise<ToolInput> => {
     const rawSubject = typeof input["subject"] === "string" ? input["subject"] : "";
     const value = typeof input["value"] === "string" ? input["value"].trim() : "";
 
@@ -84,7 +87,15 @@ export const rememberTool: Tool = {
     // M22. In bot mode a CHANNEL fact is checked against Slack before it is saved, and saved as
     // Slack's own name for the channel ("#help") — so "remember the bugs channel is #bgus" is
     // refused with what Slack does have, instead of being remembered and failing at the next send.
-    const stored = await channelFactValue(subject, value, deps);
+    return { subject, value: await channelFactValue(subject, value, deps) };
+  },
+  handler: async (input: ToolInput, deps: ToolDeps): Promise<string> => {
+    // Settled by `prepare`: written exactly as they are, with no second lookup.
+    const subject = typeof input["subject"] === "string" ? input["subject"] : "";
+    const stored = typeof input["value"] === "string" ? input["value"] : "";
+    if (subject.length === 0 || stored.length === 0) {
+      throw new Error("I need both what to remember and what its value is.");
+    }
 
     // What did we believe before? (Lets the result show the correction, and makes the
     // versioning visible to the user rather than silent.)

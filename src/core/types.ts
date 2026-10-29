@@ -749,6 +749,10 @@ export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 //             The second outside call a prepare may make, and like the model it can only answer:
 //             it holds no way to post. It lets a send to a channel Slack does not have be refused
 //             before the formatter is paid for and before any dialog.
+//   senderMode   (M33; present, as "bot", only when the sender says it is a bot) the sender's
+//             mode and nothing else of it. `remember` checks a channel fact in Slack only in bot
+//             mode, exactly as its handler did before M33 moved that check here; the directory's
+//             presence alone is not that signal (a test hands one in next to a webhook sender).
 //
 // Deliberately absent: the shell (no dialogs, no actions, no clipboard writes), the sender, and
 // every app surface. A tool that needs one of those to decide what it will do is describing an
@@ -760,6 +764,7 @@ export interface PrepareDeps {
   memory: Pick<Memory, "resolve">;
   chained: boolean;
   channelDirectory?: ChannelDirectory;
+  senderMode?: "bot";
 }
 
 // What a chain's pre-flight hands a tool's own checks (M22): the plan's steps as WRITTEN — before

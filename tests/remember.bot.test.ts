@@ -58,6 +58,23 @@ describe("bot-mode remember: channel facts are checked and canonical", () => {
     },
   );
 
+  // M33 commit 1 moved this check from the handler into `prepare`. The real action log's row 475,
+  // replayed: the same words, `refused`, nothing written, no dialog, and each of §6f's spellings
+  // looked up once (as typed, without "channel", with hyphens) — none of them a second time.
+  it("row 475: 'the second channel' = 'fun channel' is refused the same way from prepare", async () => {
+    const h = harness(remember("the second channel", "fun channel"));
+    const outcome = await h.planner.run("remember the second channel is fun channel");
+
+    expect(outcome.status).toBe("refused");
+    expect(h.shell.results).toEqual([notFound("#fun channel")]);
+    expect(h.facts()).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]);
+    expect(h.log.entries).toEqual([
+      expect.objectContaining({ tool: "remember", status: "refused", result: notFound("#fun channel") }),
+    ]);
+    expect(h.directory.calls).toEqual(["fun channel", "fun", "fun-channel"]);
+  });
+
   it("does not leave an existing fact changed when the new value is refused", async () => {
     const h = harness(remember("bugs channel", "#nope"), { facts: { "bugs channel": "#help" } });
     await h.planner.run("the bugs channel is #nope");

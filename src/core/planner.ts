@@ -586,6 +586,8 @@ export class Planner {
         // A lookup and nothing more (see PrepareDeps). Absent outside bot mode, so this object's
         // keys are exactly what they were for every install without a bot token.
         ...(this.channelDirectory === undefined ? {} : { channelDirectory: this.channelDirectory }),
+        // M33. The sender's mode, and only when it is "bot": absent, these keys are unchanged.
+        ...(this.sender.mode === "bot" ? { senderMode: "bot" as const } : {}),
       };
       try {
         args = await tool.prepare(resolved, preparing);
