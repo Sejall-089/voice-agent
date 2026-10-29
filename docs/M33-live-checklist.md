@@ -2,38 +2,49 @@
 
 > **NOT YET RUN by a person.** `spec.md` §9 (M33): `remember` asks before it replaces a value you
 > taught it, with *Change what I remember for "team" from #social to social?* and a **Change it**
-> button; a new fact and the same value said again are saved with no dialog. 0 ticked, 2 open.
+> button; a new fact and the same value said again are saved with no dialog. Spoken, a value's
+> leading "#" is said as "hash" ("from hash social to social"); the written dialog is unchanged.
+> 0 ticked, 4 open (H4 optional).
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
 >
 > - `[x]` **Human-verified**: a person saw, heard or did it.
 > - `[ ]` **Not yet watched**, including everything that only a test or a script has shown.
 >
-> **Nothing here files an issue or posts a message.** If a try reaches a Linear or Slack dialog,
-> press **Cancel**. Neither box changes a fact if you follow it: H1 ends in Cancel, and H2 says a
-> value memory already holds.
+> **Nothing here files an issue, posts a message or changes a fact you taught it.** Every dialog
+> is answered **Cancel**. H2 is a value memory already holds: no new version, though the fact's
+> "updated" time is refreshed. **H4 is the one box that may write.** In the scripted run, the
+> correction it uses saved a NEW fact with no dialog in 5 of 27 tries (`channel` = #social,
+> `channel:fun` = social). New facts are never asked about. H4 says what to look for.
 
 Run `npm run dev` (clear `ELECTRON_RUN_AS_NODE` first). Restart it after pulling: the main process
 is built once at startup. Before H1, check what the app holds: "what do you remember about the
-team" should say `#social`. To hear the dialog's wording without the app:
-`npx vite-node scripts/m30-say-refusal.ts --remember-change` (plays audio; `--no-play` only writes
-the WAV). It says "Change what I remember for team from social to social?": the speech layer drops
-the "#", so read the dialog rather than trusting the voice for this one.
+team" should say `#social`.
 
 ## Human-only
 
-- [ ] **H1** In the real app, ask "create a linear issue and post in fun" with some text copied, and
-      press **Cancel** at the first dialog. Then, within a minute, say "actually, post it in social
-      instead".
-      - **If the model plans a `remember`:** a dialog *Change what I remember for "…" from … to …?*
-        appears with a **Change it** button. Read it and press **Cancel**. Then ask "what do you
-        remember about the team": it must still say `#social`.
+- [ ] **H1** In the real app, say "remember the team is #fun" (the team is stored as `#social`). A
+      dialog *Change what I remember for "team" from #social to #fun?* appears, with a **Change
+      it** button. Press **Cancel**. Then ask "what do you remember about the team": it must still
+      say `#social` (`v1`).
+- [ ] **H2** Say "remember that team is #social". Expect: **no dialog**, and *Remembered: team =
+      #social*.
+- [ ] **H3** With sound on, run `npx vite-node scripts/m30-say-refusal.ts --remember-change` and
+      listen to the overwrite dialog as the app says it: *"Change what I remember for team from
+      hash social to social?"* "Hash" must be audible, and the sentence clear. It runs no app, no
+      model and no memory.
+- [ ] **H4** *(Optional; may not reproduce: 0 of 24 scripted tries planned the overwrite.)* Ask
+      "create a linear issue and post in fun" with some text copied, and press **Cancel** at the
+      first dialog. Then, within a minute, say "actually, post it in social instead".
+      - **If the model plans a `remember` that would change the team:** a dialog *Change what I
+        remember for "team" from #social to …?* appears. Press **Cancel**. "What do you remember
+        about the team" must still say `#social`.
       - **If it plans a send instead:** note what the preview or dialog showed, and press
         **Cancel**.
-      - Either way, the terminal's `[main]` line names what ran, and the action log's last row says
-        which tool.
-- [ ] **H2** Say "remember that team is #social" (the value it already holds). Expect: **no dialog**,
-      and *Remembered: team = #social*. "what do you remember about the team" still shows `v1`.
+      - **If the result says "Remembered: …"** with no dialog, it saved a new fact, as in 5 of 27
+        scripted tries. Note its name (for example `channel`). It does not change the team. Since
+        "forget" is not built, it can only be removed by hand.
+      - Either way, the terminal's `[main]` line and the action log's last row say which tool ran.
 
 ## Script-verified (live model, faked connectors)
 
@@ -131,4 +142,13 @@ filed an issue, sent a message, reached a blocked host or changed a seeded fact.
   - Cancel still writing (24);
   - the same value counted as a change (2);
   - the cap removed (1).
-- **3447 tests passed across 144 files, 96 skipped; both typechecks clean.**
+- **The dialog as spoken** (follow-up, `31aa8d0`), through the planner, heard and written.
+  - The value pairs: #social → social is heard "from hash social to social"; social → #social;
+    #social → #fun; and values with no "#".
+  - Only a leading "#" is said, and only after the 200-character cut. The unread and nothing
+    forms, and the chain prefix, are spoken too.
+  - The written dialog is unchanged, and `remember` is the only tool with a spoken variant.
+  - A bot-mode send, a webhook send and a Linear create are still spoken as before.
+  - Two more mutations: the spoken form unchanged (caught by 4); "hash" in the written dialog
+    too (caught by 22).
+- **3459 tests passed across 144 files, 96 skipped; both typechecks clean.**

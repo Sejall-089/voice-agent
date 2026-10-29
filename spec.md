@@ -1416,13 +1416,16 @@ it". Inside a chain it gets the step prefix. A detached job waits at the pill, l
 confirm. If memory cannot be read, the tier escalates and the dialog says *Change what I
 remember for "team" to social? I couldn't check what it holds now.* Cancel writes nothing and
 logs the row `cancelled`. Approve versions the old row as before (*Updated "team": #social →
-social (v2).*). The dialog's first paragraph is spoken, and the speech layer drops the quotes
-and the "#", so the weaker-form case is **heard** as "from social to social" (a finding, below).
+social (v2).*).
+
+**As spoken.** The speech cleaner drops every "#" (right for "Send to #design-team?"), which
+would make the weaker-form case heard as "from social to social". So `remember` declares
+`speakConfirm` (§6). In the spoken words only, a value's leading "#" is said as "hash": *Change
+what I remember for team from hash social to social?* The dialog on screen is unchanged.
 
 **Known gaps.**
 - A first write is never asked about. In M33's live runs a correction wrote a junk new fact 5
   times in 27 (`channel:fun` = social twice, `channel` = #social three times), silently.
-- The spoken form loses the "#", so the voice cannot tell `#social` from `social`.
 - The ask path's answer (`settleReferences`) writes facts without going through `remember`, and
   is unchanged.
 - "forget" is still not built.
@@ -2333,6 +2336,20 @@ being acted on, not in the arguments the model proposed, so a dialog that could 
 would be describing a guess. It may do **SAFE work only**: it runs before the user has agreed
 to anything. If it throws, the planner never opens the dialog and nothing runs — "we cannot say
 what would happen" is itself a refusal.
+
+### `speakConfirm` (added 2026-10-30, M33)
+
+The words SAID before a dialog opens, when the dialog's own words would not survive being
+spoken. `(args, deps) => string | Promise<string>`, with the same rules as `confirmSummary`: it
+reads only, and it runs in the same `try`, so a throw refuses the call before any dialog. The
+planner still puts the step prefix in front and runs the result through `toSpokenConfirm`,
+so the cleaning and the length cap stay in one place; only the words handed in differ. The
+dialog on screen is `confirmSummary`'s, unchanged. **Only `remember` declares it**: the
+cleaner drops every "#", so its *Change what I remember for "team" from #social to social?*
+would be heard as "from social to social". `spokenChangeQuestion` says a value's leading "#" as
+"hash" ("from hash social to social"), after the 200-character cut. Every other tool still has
+its dialog's first paragraph spoken, "#" dropped, as before (`tests/remember.overwrite.test.ts`
+replays a bot-mode send, a webhook send and a Linear create).
 
 ### 4d. Voice output (M14) — a parallel contract, not a change to OSShell
 
@@ -5767,7 +5784,9 @@ Post-v0:
       - `bdcebcf`: `prepare` settles the saved value; no behaviour change.
       - `6fb3a63`: the harness, `scripts/m33-live.ts`, committed this time.
       - `984fdc2`: the confirm and its tests.
-      - The scripted results and checklist: this entry's commit.
+      - `f813f52`: the scripted results and checklist.
+      - `31aa8d0`: the "#" said as "hash" in the spoken dialog (follow-up, below).
+      - The checklist for the real app: this entry's latest commit.
 
       **1. Settled in `prepare`** (`bdcebcf`). `remember`'s canonical subject, trimmed value and
       bot-mode channel check moved from its handler into `prepare`. The handler writes exactly
@@ -5898,19 +5917,47 @@ Post-v0:
       - Approve: *Updated "team": #social → social (v2).*, with v1 inactive and v2 active.
 
       **Sound.** `scripts/m30-say-refusal.ts --remember-change` speaks the dialog as the app does.
-      It was run with `--no-play` only, and says "Change what I remember for team from social to
-      social?".
+      At `f813f52` it said "Change what I remember for team from social to social?". That was
+      finding 2, fixed in the follow-up below. It now says "Change what I remember for team from
+      hash social to social?". Both runs used `--no-play` only.
+
+      **3. Follow-up: the "#" spoken** (`31aa8d0`; §6, "`speakConfirm`"; no model calls). The
+      speech cleaner drops every "#", for every tool, on purpose ("design team", not "hash design
+      team"). Changing it would have changed every other tool's speech, so the fix is per tool:
+      - **The new field.** `Tool.speakConfirm` gives the words to say in place of the dialog's.
+        The planner still adds the step prefix and runs them through `toSpokenConfirm`.
+      - **Only `remember` declares it.** `spokenChangeQuestion` says a value's leading "#" as
+        "hash", after the 200-character cut, in the spoken words only.
+      - **The written dialog is unchanged.**
+
+      Tests (+12, in `tests/remember.overwrite.test.ts`):
+      - through the planner, heard and written: #social → social ("from hash social to social"),
+        social → #social, #social → #fun, and values with no "#";
+      - only a leading "#" is said; the cap applies first; the unread and nothing forms; the
+        chain prefix spoken;
+      - `remember` is the only tool with a spoken variant;
+      - a bot-mode send ("Send to social? Check the dialog."), a webhook send and a Linear create
+        are still spoken as before.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | The spoken form says "hash" | `speakConfirm` returns the written text | 4 |
+      | Only the spoken form changes | "hash" in the written dialog too | 22 |
+
+      Both mutations were made and undone with the Edit tool. **3459 tests, 96 skipped**; both
+      typechecks clean.
 
       **Model calls: 42 of the 45 allowed**, est. ~$0.056:
       - T1 12 (~$0.021), T2 12 (~$0.020), T3 3 (~$0.005);
       - controls 15 (~$0.011).
       - No retry calls; each run was capped at its trial count.
 
-      **Findings, recorded and not fixed here:**
+      **Findings** (recorded; all but finding 2 are not fixed here):
       1. **Row 323 was an unwanted overwrite.** A statement that was not a correction replaced the
          stored name and stood for four days, until row 435. The confirm now asks before that.
-      2. **The spoken dialog loses the "#".** The weaker-form case is heard as "from social to
-         social". The dialog's text shows the difference; the voice does not.
+      2. ~~**The spoken dialog loses the "#".** The weaker-form case is heard as "from social to
+         social".~~ **Fixed in `31aa8d0`:** said as "from hash social to social"; the written
+         dialog is unchanged. Hearing it is H3 of the checklist.
       3. **First writes are never asked about.** 5 of 27 correction trials wrote a junk new fact
          (`channel:fun` = social, `channel` = #social).
       4. **`remember`'s description** ("Do NOT re-run the previous action, and do NOT treat it as

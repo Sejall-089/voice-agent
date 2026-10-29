@@ -430,9 +430,10 @@ saying is not cut off and run half-said. **"What's the date and time?"** gets bo
 you taught it, a dialog shows both: *Change what I remember for "team" from #social to social?*,
 with a **Change it** button. Cancel keeps the old value. A new fact, or the same value said again,
 is saved with no dialog, as before. This is there because a correction can be misread as a memory
-write: "actually, post it in social instead" once planned `team` = `social`. Spoken, the "#" is
-dropped, so that case sounds like "from social to social"; read the dialog. See spec.md §5b, "A
-fact that replaces a different value".
+write: "actually, post it in social instead" once planned `team` = `social`. Spoken, a value's
+leading "#" is said as "hash" ("from hash social to social"), so the difference can be heard
+too. Other dialogs are spoken as before. See spec.md §5b, "A fact that replaces a different
+value".
 
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
@@ -1064,7 +1065,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3447 tests across 144 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3459 tests across 144 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1084,10 +1085,12 @@ The code, the tests and the scripted live run are done. The live checklist waits
 - **Every recorded `remember` call was replayed.** The real log's 12, M32's, and the scripted
   evals': the dialog appears on exactly the three real overwrites (one of them unwanted), M32's
   row and the flagship corrections.
+- **Spoken, the dialog says "hash" for a leading "#"**, so "#social" and "social" sound
+  different. The written dialog and every other tool's speech are unchanged.
 
 Scripted against the real model with every connector faked (42 calls, ~$0.056), the correction
 never planned the overwrite in 24 tries. One control ("no, I meant the design channel") did, and
-the dialog stopped it. No seeded fact changed in any trial. **3447 tests green across 144
+the dialog stopped it. No seeded fact changed in any trial. **3459 tests green across 144
 files, 96 skipped.** See `docs/M33-live-checklist.md` and `spec.md` §9 (M33).
 
 **M32 (small items) is closed (30 Oct 2026), after a live run by a person: all six boxes
