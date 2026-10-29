@@ -804,7 +804,11 @@ describe("sendMessage — what is approved is what is sent", () => {
       expect(Object.keys(seen ?? {}).sort()).toEqual(["chained", "context", "instruction", "llm", "memory"]);
       expect((seen as unknown as { instruction: string }).instruction).toBe("probe");
       // And the memory it gets can look things up but has no way to write.
-      expect(Object.keys((seen as unknown as { memory: object }).memory)).toEqual(["resolve"]);
+      // RE-JUSTIFIED AT M34: `query` joined `resolve` (remember's first-write check lists active
+      // facts by exact subject). Both are reads; what this pins — no write — is unchanged.
+      const keys = Object.keys((seen as unknown as { memory: object }).memory).sort();
+      expect(keys).toEqual(["query", "resolve"]);
+      expect(keys).not.toContain("write");
     });
 
     it("has sent, saved and done nothing by the time the dialog is on screen", async () => {

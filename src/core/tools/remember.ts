@@ -35,14 +35,26 @@ function currentFact(subject: string, memory: Pick<Memory, "query">): Fact | und
   return memory.query(subject).find((fact) => fact.subject === subject);
 }
 
+// M34. What writing `value` under `subject` would do, judged against the active fact with exactly
+// that subject. ONE function for every place that asks — `prepare`, the tier and the handler — so
+// they cannot disagree about what a first write is. A memory that cannot be read throws.
+export function writeJudgement(
+  subject: string,
+  value: string,
+  memory: Pick<Memory, "query">,
+): { judgement: Judgement; current: Fact | undefined } {
+  const current = currentFact(subject, memory);
+  return { judgement: judge(current, value), current };
+}
+
 // M33. The fact this call would REPLACE with a different value, or null: a first write, the same
 // value said again and the same name in another form are not replacements. A memory that cannot
 // be read throws, and the tier escalates (core/risk.ts).
 function replaced(args: ToolInput, memory: Pick<Memory, "query">): Fact | null {
   const subject = typeof args["subject"] === "string" ? args["subject"] : "";
   const value = typeof args["value"] === "string" ? args["value"] : "";
-  const current = currentFact(subject, memory);
-  return current !== undefined && judge(current, value) === "change" ? current : null;
+  const { judgement, current } = writeJudgement(subject, value, memory);
+  return judgement === "change" && current !== undefined ? current : null;
 }
 
 // M33. In the dialog only, a long value is cut; what is saved stays whole.
@@ -208,11 +220,11 @@ export const rememberTool: Tool = {
 
     // What did we believe before? (Lets the result show the correction, and makes the
     // versioning visible to the user rather than silent.)
-    const previous = currentFact(subject, deps.memory);
+    const { judgement, current: previous } = writeJudgement(subject, stored, deps.memory);
 
     // M33. The same name in a form no better than the stored one ("social" for #social): the
     // stored form stands, and nothing is written — not even a refresh.
-    if (previous !== undefined && judge(previous, stored) === "keep") {
+    if (previous !== undefined && judgement === "keep") {
       return `Already remembered "${subject}" as ${previous.value}.`;
     }
 

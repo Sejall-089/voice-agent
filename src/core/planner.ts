@@ -581,7 +581,12 @@ export class Planner {
         context,
         instruction,
         llm: this.llm,
-        memory: { resolve: (reference) => this.memory.resolve(reference) },
+        // Two reads and no write, built key by key so there is nothing else to reach (M34 added
+        // `query`, for `remember`'s first-write check).
+        memory: {
+          resolve: (reference) => this.memory.resolve(reference),
+          query: (subjectLike) => this.memory.query(subjectLike),
+        },
         chained: step.chained,
         // A lookup and nothing more (see PrepareDeps). Absent outside bot mode, so this object's
         // keys are exactly what they were for every install without a bot token.

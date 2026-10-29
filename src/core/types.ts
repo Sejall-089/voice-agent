@@ -743,7 +743,9 @@ export type ToolHandler = (input: ToolInput, deps: ToolDeps) => Promise<string>;
 //                having copied the whole instruction into an argument. Not a channel to the
 //                user, and nothing a prepare can act with.
 //   llm       the model — the one outside call a prepare may make
-//   memory    lookups only: no `write`, so nothing can be remembered before it is approved
+//   memory    lookups only: no `write`, so nothing can be remembered before it is approved.
+//             `resolve` answers a reference; `query` (M34) lists active facts, so `remember` can
+//             tell a FIRST write from a replacement by the exact subject, as its tier does.
 //   chained   where this call sits, which decides whether there is anything to prepare
 //   channelDirectory  (M22, bot mode only; absent otherwise) a LOOKUP of Slack's channel list.
 //             The second outside call a prepare may make, and like the model it can only answer:
@@ -761,7 +763,7 @@ export interface PrepareDeps {
   context: CapturedContext;
   instruction: string;
   llm: LLMClient;
-  memory: Pick<Memory, "resolve">;
+  memory: Pick<Memory, "resolve" | "query">;
   chained: boolean;
   channelDirectory?: ChannelDirectory;
   senderMode?: "bot";
