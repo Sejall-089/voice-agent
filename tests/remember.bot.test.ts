@@ -28,11 +28,16 @@ describe("bot-mode remember: channel facts are checked and canonical", () => {
     const [fact] = h.facts();
     expect(fact?.value).toBe(stored);
     expect(h.shell.results[0]).toMatch(new RegExp(`= ${stored}$`));
+    // A first write: no dialog (M33). This harness approves by default, so say so outright.
+    expect(h.shell.confirmMessages).toEqual([]);
   });
 
+  // M33: an update replaces a value, so it is confirmed — and the dialog names the value Slack
+  // settled in `prepare` (#bug-reports), not what was typed. Approved by the harness's default.
   it("an update reports the canonical value it stored", async () => {
     const h = harness(remember("bugs channel", "bug-reports"), { facts: { "bugs channel": "#help" } });
     await h.planner.run("actually the bugs channel is bug-reports");
+    expect(h.shell.confirmMessages).toEqual(['Change what I remember for "bugs channel" from #help to #bug-reports?']);
     expect(h.shell.results).toEqual(['Updated "bugs channel": #help → #bug-reports (v2).']);
   });
 
@@ -93,6 +98,7 @@ describe("bot-mode remember: other facts are untouched", () => {
     expect(outcome.status).toBe("ok");
     expect(h.facts()).toEqual([{ subject, value, active: 1 }]);
     expect(h.directory.calls).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]); // a first write (M33)
   });
 });
 

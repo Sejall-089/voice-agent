@@ -97,6 +97,8 @@ describe("✅ The seven demo tasks (spec §6)", () => {
     });
     expect(outcome.status).toBe("ok");
     expect(memory.resolve("my upwork")?.value).toBe("https://upwork.com/me");
+    // A first write is not confirmed (M33); this shell would have approved one unseen.
+    expect(shell.confirmMessages).toEqual([]);
   });
 
   it("5. Format notes and send them (irreversible → confirmed first)", async () => {
@@ -113,11 +115,18 @@ describe("✅ The seven demo tasks (spec §6)", () => {
   });
 
   it("6. A correction sticks (versions the old fact, changes future behavior)", async () => {
+    // M33: the correction replaces #design-team, so it is confirmed first (approved), and then
+    // the send is confirmed too — two dialogs.
+    shell = new MockShell({
+      context: { selectedText: NOTES, activeApp: null, activeWindowTitle: null },
+      confirms: [true, true],
+    });
     await run("no, I meant #general", {
       kind: "tool",
       name: "remember",
       input: { subject: "team", value: "#general" },
     });
+    expect(shell.confirmMessages).toEqual(['Change what I remember for "team" from #design-team to #general?']);
 
     // The next send goes to the corrected channel.
     await run(

@@ -60,5 +60,6 @@ describe.each(["none", "webhook"] as const)("sender mode %s", (mode) => {
     await h.planner.run("remember the team is #Nope");
     expect(h.shell.results).toEqual(["Remembered: team = #Nope"]);
     expect(h.directory.calls).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]); // a first write (M33); the harness would approve one unseen
   });
 });

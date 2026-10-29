@@ -129,6 +129,8 @@ describe("bot mode: 'X channel' is the channel X", () => {
     await h.planner.run("remember the bugs channel is fun channel");
     expect(h.facts()).toEqual([{ subject: "bugs channel", value: "#fun", active: 1 }]);
     expect(h.shell.results).toEqual(["Remembered: bugs channel = #fun"]);
+    // A first write: no dialog (M33). The harness approves by default, so it is asserted.
+    expect(h.shell.confirmMessages).toEqual([]);
   });
 
   it("an answer of 'fun channel' to the question is saved as #fun", async () => {
@@ -167,5 +169,6 @@ describe("webhook mode: no suffix retry", () => {
     await h.planner.run("remember the bugs channel is fun channel");
     expect(h.facts()).toEqual([{ subject: "bugs channel", value: "fun channel", active: 1 }]);
     expect(h.directory.calls).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]); // a first write (M33)
   });
 });

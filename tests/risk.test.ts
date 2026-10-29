@@ -364,6 +364,9 @@ describe("registry invariants", () => {
     // which: GitHub's server does NOT hint that its write is destructive (recon), so
     // `github__create_issue` is on this list only because its definition declares it —
     // tests/mcpGithub.test.ts pins that against the server's real, silent hints.
+    //
+    // `remember` joins it in M33. It sends nothing, but it CAN replace a value the user taught
+    // with one a misread correction produced, and that is now confirmed (tools/remember.ts).
     expect(gated.sort()).toEqual([
       "createEvent",
       "github__create_issue",
@@ -373,6 +376,7 @@ describe("registry invariants", () => {
       "linear__get_issue",
       "linear__search_issues",
       "moveEvent",
+      "remember",
       "sendMessage",
       "sendReply",
     ]);

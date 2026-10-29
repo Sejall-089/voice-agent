@@ -2,7 +2,41 @@ import { UnresolvedReferenceError } from "../errors.ts";
 import { normalizeReference } from "../memory/normalize.ts";
 import { userSource } from "../memory/source.ts";
 import { resolveSlackName, slackRefusalText } from "./sendMessage.ts";
-import type { PrepareDeps, Tool, ToolDeps, ToolInput } from "../types.ts";
+import type { Fact, Memory, PrepareDeps, Tool, ToolDeps, ToolInput } from "../types.ts";
+
+// M33. The fact this call would REPLACE: an active fact with exactly this subject (not `query`'s
+// LIKE match, which would let "channel" stand in for "bugs channel") holding a value other than
+// the one `prepare` settled. Null for a first write and for the same value said again. A memory
+// that cannot be read throws, and the tier escalates (core/risk.ts).
+function replaced(args: ToolInput, memory: Pick<Memory, "query">): Fact | null {
+  const subject = typeof args["subject"] === "string" ? args["subject"] : "";
+  const value = typeof args["value"] === "string" ? args["value"] : "";
+  const current = memory.query(subject).find((fact) => fact.subject === subject);
+  return current !== undefined && current.value !== value ? current : null;
+}
+
+// M33. In the dialog only, a long value is cut; what is saved stays whole.
+export const DIALOG_VALUE_MAX = 200;
+const forDialog = (value: string): string =>
+  value.length > DIALOG_VALUE_MAX ? `${value.slice(0, DIALOG_VALUE_MAX)}...` : value;
+
+// What the dialog knows about the value being replaced.
+//   value    the value being replaced
+//   unread   memory could not be read, so what it holds is not known (the tier escalated)
+//   nothing  memory was read and holds nothing to replace — reached only when the tier escalated
+//            on an earlier failed read, so the dialog says what is true now
+export type Replacing = { kind: "value"; value: string } | { kind: "unread" } | { kind: "nothing" };
+
+// The dialog's question. Plain ASCII around the values: its first paragraph is spoken.
+export function changeQuestion(subject: string, from: Replacing, to: string): string {
+  if (from.kind === "value") {
+    return `Change what I remember for "${subject}" from ${forDialog(from.value)} to ${forDialog(to)}?`;
+  }
+  if (from.kind === "unread") {
+    return `Change what I remember for "${subject}" to ${forDialog(to)}? I couldn't check what it holds now.`;
+  }
+  return `Remember "${subject}" as ${forDialog(to)}?`;
+}
 
 // The value to save for this fact (M22). Unchanged unless this install is in bot mode — a bot
 // sender AND a channel directory — and the fact is about a channel: its value starts with "#", or
@@ -64,7 +98,30 @@ export const rememberTool: Tool = {
     },
     required: ["subject", "value"],
   },
-  risk: "reversible",
+  // M33. REPLACING a value the user taught is confirmed first. The old row is kept, but nothing
+  // shows it again (`recall` lists active facts only) and nothing restores it — so a write the
+  // model planned for a correction it misread ("actually, post it in social instead" → `team` =
+  // `social`, M32) would quietly change what "the team" means. A first write, the same value
+  // again, and anything `prepare` refused stay as they were: no dialog.
+  risk: {
+    tiers: ["reversible", "dangerous"],
+    resolve: (args: ToolInput, deps: ToolDeps) => (replaced(args, deps.memory) === null ? "reversible" : "dangerous"),
+  },
+  // From the settled arguments, so the dialog names what will be saved (Slack's "#social", not a
+  // typed "Social"). If memory cannot be read here either, the dialog still asks, and says so.
+  confirmSummary: (args: ToolInput, deps: ToolDeps): string => {
+    const subject = typeof args["subject"] === "string" ? args["subject"] : "";
+    const value = typeof args["value"] === "string" ? args["value"] : "";
+    let from: Replacing;
+    try {
+      const current = replaced(args, deps.memory);
+      from = current === null ? { kind: "nothing" } : { kind: "value", value: current.value };
+    } catch {
+      from = { kind: "unread" };
+    }
+    return changeQuestion(subject, from, value);
+  },
+  confirmLabel: "Change it",
   background: "ok",
   planPhrase: "save a fact to memory",
   // This tool's args are literals to STORE, not references to look up. Without this, the planner

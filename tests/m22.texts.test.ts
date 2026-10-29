@@ -75,6 +75,8 @@ describe("slackRefusalText: what did not happen", () => {
     });
     await remembered.planner.run("remember the team is #help");
     expect(remembered.shell.results).toEqual(["I couldn't reach Slack to check the channel, so nothing was saved."]);
+    // Refused in `prepare` (M33 moved the check there): before any tier or dialog.
+    expect(remembered.shell.confirmMessages).toEqual([]);
 
     const sent = harness({ kind: "tool", name: "sendMessage", input: { channel: "#help" } }, { failOn: { 0: "network" } });
     await sent.planner.run("send these to #help");

@@ -175,6 +175,8 @@ describe("bot mode: spaces as hyphens, end to end", () => {
     );
     await h.planner.run("remember the bugs channel is new channel");
     expect(h.facts()).toEqual([{ subject: "bugs channel", value: "#new-channel", active: 1 }]);
+    // A first write: no dialog (M33). The harness approves by default, so it is asserted.
+    expect(h.shell.confirmMessages).toEqual([]);
   });
 });
 
@@ -198,6 +200,7 @@ describe("webhook mode: no hyphen retry", () => {
     await h.planner.run("remember the bugs channel is new channel");
     expect(h.facts()).toEqual([{ subject: "bugs channel", value: "new channel", active: 1 }]);
     expect(h.directory.calls).toEqual([]);
+    expect(h.shell.confirmMessages).toEqual([]); // a first write (M33)
   });
 });
 

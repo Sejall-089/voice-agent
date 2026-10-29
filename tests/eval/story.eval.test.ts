@@ -25,8 +25,11 @@ const NEW_URL = "https://new.example.com";
 
 const db = createDatabase(":memory:");
 const memory = new SqliteMemory(db);
+// One approval queued, for Step 4's correction: since M33 a fact that replaces a different value
+// is confirmed first. Every other step asserts it showed no dialog.
 const shell = new MockShell({
   context: { selectedText: null, activeApp: null, activeWindowTitle: null },
+  confirms: [true],
 });
 
 // One instruction through the full planner path. The FakeLLM stands in for tool choice.
@@ -65,6 +68,7 @@ describe("📖 The memory story (eval harness — one continuous scenario)", () 
 
     expect(outcome.status).toBe("ok");
     expect(memory.resolve("my dashboard")?.value).toBe(OLD_URL);
+    expect(shell.confirmMessages).toEqual([]); // a first write: nothing replaced, no dialog
     narrate(`✅ remembered  target:dashboard = ${OLD_URL}  (v1)`);
   });
 
@@ -85,6 +89,10 @@ describe("📖 The memory story (eval harness — one continuous scenario)", () 
     });
 
     expect(outcome.status).toBe("ok");
+    // M33: replacing a value is confirmed first, with both values on the dialog — approved here.
+    expect(shell.confirmMessages).toEqual([
+      `Change what I remember for "target:dashboard" from ${OLD_URL} to ${NEW_URL}?`,
+    ]);
 
     const rows = factsFor("target:dashboard");
     expect(rows).toHaveLength(2); // the old fact is KEPT, not overwritten

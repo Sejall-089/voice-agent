@@ -1228,7 +1228,8 @@ describe("🏆 the flagship trace, end to end", () => {
   // instruction → planner → resolve(CORRECTED fact) → confirm(RESOLVED) → send.
   // The correction from M4 is what makes the send land in the right channel.
   it("a corrected fact changes where the message actually goes", async () => {
-    const s = session({ confirms: [true] });
+    // M33: two dialogs now, both approved — the correction (it replaces #general), then the send.
+    const s = session({ confirms: [true, true] });
     s.memory.write("team", "#general"); // what we believed before
 
     // Turn 1 — the user corrects us. Routed through the planner, not a direct write().
@@ -1236,12 +1237,13 @@ describe("🏆 the flagship trace, end to end", () => {
       { kind: "tool", name: "remember", input: { subject: "team", value: "#design-team" } },
       "no, I meant the design channel",
     );
+    expect(s.shell.confirmMessages).toEqual(['Change what I remember for "team" from #general to #design-team?']);
 
     // Turn 2 — send to "the team". It must land in the CORRECTED channel.
     const outcome = await s.turn(sendChoice("the team"), "send these notes to the team");
 
     expect(outcome.status).toBe("ok");
-    expect(s.shell.confirmMessages[0]).toContain("#design-team");
+    expect(s.shell.confirmMessages[1]).toContain("#design-team");
     const sender = s.sender as FakeSender;
     expect(sender.calls).toHaveLength(1);
     expect(sender.calls[0]?.channel).toBe("#design-team");

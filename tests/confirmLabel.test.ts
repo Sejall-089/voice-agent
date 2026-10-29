@@ -52,6 +52,8 @@ describe("each tool's approve button", () => {
     moveEvent: "Move event",
     linear__create_issue: "Create issue",
     github__create_issue: "Create issue",
+    // M33: its dialog appears only when a fact would replace a different value.
+    remember: "Change it",
   };
 
   it.each(Object.entries(LABELS))("%s says %j", (name, label) => {

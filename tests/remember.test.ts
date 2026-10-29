@@ -15,10 +15,13 @@ function contextWith(selectedText: string | null): CapturedContext {
 // One DB + one MockShell, but a fresh planner per turn — because each turn is a separate
 // instruction and the LLM proposes a different tool each time. This mirrors the real app,
 // where memory persists across hotkey presses.
-function session(selectedText: string | null = null) {
+//
+// M33: a remember that REPLACES a different value is confirmed first, so a correction now meets a
+// dialog. `confirms` is what the user presses; with none queued the dialog is cancelled.
+function session(selectedText: string | null = null, confirms: boolean[] = []) {
   const db: Database = createDatabase(":memory:");
   const memory = new SqliteMemory(db);
-  const shell = new MockShell({ context: contextWith(selectedText) });
+  const shell = new MockShell({ context: contextWith(selectedText), confirms });
 
   // Run one instruction with a canned LLM tool choice, through the full planner path.
   const turn = (choice: ToolChoice, instruction: string, completion = "") => {
@@ -36,7 +39,7 @@ function session(selectedText: string | null = null) {
 
 describe("remember (M4)", () => {
   it("stores a new fact through the planner", async () => {
-    const { memory, turn, factsFor } = session();
+    const { memory, shell, turn, factsFor } = session();
 
     const outcome = await turn(
       { kind: "tool", name: "remember", input: { subject: "tone", value: "concise and warm" } },
@@ -44,6 +47,8 @@ describe("remember (M4)", () => {
     );
 
     expect(outcome.status).toBe("ok");
+    // A first write is not confirmed (M33): nothing is replaced.
+    expect(shell.confirmMessages).toEqual([]);
     expect(outcome.tool).toBe("remember");
     expect(factsFor("tone")).toHaveLength(1);
     expect(memory.resolve("my tone")?.value).toBe("concise and warm");
@@ -53,7 +58,7 @@ describe("remember (M4)", () => {
   // model hands us a non-compliant subject like "the team", the planner must not swap it for the
   // fact's current value (#general) before the handler sees it.
   it("does not let the resolve step clobber the subject it is being told to write", async () => {
-    const { memory, turn, factsFor } = session();
+    const { memory, shell, turn, factsFor } = session(null, [true]);
     memory.write("team", "#general");
 
     await turn(
@@ -61,6 +66,11 @@ describe("remember (M4)", () => {
       "the team is the design channel",
     );
 
+    // M33: this replaces #general, so it was confirmed — and the dialog names the CANONICAL
+    // subject, not the model's "the team" and not a subject resolved into "#general".
+    expect(shell.confirmMessages).toEqual([
+      'Change what I remember for "team" from #general to #design-team?',
+    ]);
     // Stored under the canonical subject, with the value we were given...
     const rows = factsFor("team");
     expect(rows.at(-1)).toMatchObject({ subject: "team", value: "#design-team", active: 1 });
@@ -75,10 +85,11 @@ describe("🏆 the correction loop (M4 flagship)", () => {
   // assertion — that layer was proved in M3. This goes instruction → planner → remember → write
   // → resolve → openTarget → real side effect.
   it("a correction supersedes the old fact and changes future behavior", async () => {
-    const { memory, shell, turn, factsFor } = session();
+    const { memory, shell, turn, factsFor } = session(null, [true]);
     memory.write("target:dashboard", "https://old.example.com");
 
-    // Turn 1 — the user corrects us.
+    // Turn 1 — the user corrects us. Since M33 the replacement is confirmed first, with both
+    // values shown, and approved here.
     const correction = await turn(
       {
         kind: "tool",
@@ -89,6 +100,9 @@ describe("🏆 the correction loop (M4 flagship)", () => {
     );
 
     expect(correction.status).toBe("ok");
+    expect(shell.confirmMessages).toEqual([
+      'Change what I remember for "target:dashboard" from https://old.example.com to https://new.example.com?',
+    ]);
 
     // The old fact was versioned, not overwritten.
     const rows = factsFor("target:dashboard");
@@ -117,8 +131,10 @@ describe("🏆 the correction loop (M4 flagship)", () => {
 
   // The spec's literal flagship narrative (§6 task 6). sendMessage lands in M5, so the *read* is
   // asserted via resolve — but the WRITE still routes through the planner, not a direct call.
+  // M33: the flagship correction now passes through a dialog that shows what it replaces, and
+  // the user approves it. Cancelled, the old value stands (tests/remember.overwrite.test.ts).
   it("'no, I meant the design channel' changes what 'the team' resolves to", async () => {
-    const { memory, turn } = session();
+    const { memory, shell, turn } = session(null, [true]);
     memory.write("team", "#general");
     expect(memory.resolve("the team")?.value).toBe("#general");
 
@@ -127,17 +143,23 @@ describe("🏆 the correction loop (M4 flagship)", () => {
       "no, I meant the design channel",
     );
 
+    expect(shell.confirmMessages).toEqual(['Change what I remember for "team" from #general to #design-team?']);
+    expect(shell.confirmLabels).toEqual(["Change it"]);
     expect(memory.resolve("the team")?.value).toBe("#design-team");
   });
 
   it("a corrected tone reaches the rewrite tool on the next turn", async () => {
-    const { memory, turn } = session("hey can u send me that thing");
+    const { memory, shell, turn } = session("hey can u send me that thing", [true]);
     memory.write("tone", "stiff and formal");
 
     await turn(
       { kind: "tool", name: "remember", input: { subject: "tone", value: "concise and warm" } },
       "actually my tone is concise and warm",
     );
+    // M33: confirmed, because it replaces the stored tone; approved.
+    expect(shell.confirmMessages).toEqual([
+      'Change what I remember for "tone" from stiff and formal to concise and warm?',
+    ]);
 
     const rewritten = await turn(
       { kind: "tool", name: "rewrite", input: { tone: "my tone" } },

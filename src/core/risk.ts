@@ -7,9 +7,9 @@
 // so "reversible?" stops being the useful question. Two different ones replace it:
 //
 //   SAFE       read-only (read the open email, read the compose box)     → run
-//   REVERSIBLE mutates, but recoverable (a browser tab, a versioned      → run
-//              fact whose old row is kept), or a clipboard write the
-//              user asked for
+//   REVERSIBLE mutates, but recoverable (a browser tab, a FIRST fact     → run
+//              written, or the same value again), or a clipboard write
+//              the user asked for
 //   CAUTION    irreversible but routine (open the reply box, insert a    → run, but SAY SO first
 //              draft) — no undo, low stakes
 //   DANGEROUS  irreversible AND high-stakes (send a message, click       → PAUSE for confirmation
@@ -18,6 +18,11 @@
 // The last clause is the load-bearing one, and it lives in the Gmail layer rather than here:
 // a control we cannot resolve by role + accessible name is never clicked at all. If we can't
 // reason about what an action does, we don't do it — see `gmailScript.ts`.
+//
+// A fact that REPLACES a different value is DANGEROUS (M33, `tools/remember.ts`). The old row is
+// kept, but nothing shows it again (`recall` lists active facts only) and nothing restores it, so
+// in practice it is gone; and a model that misread a correction ("actually, post it in social
+// instead") can plan one. Until M33 that whole tool was REVERSIBLE on the strength of the kept row.
 //
 // The clipboard is NOT recoverable in itself: the app keeps no copy of what a write replaces. A
 // clipboard write is only acceptable at REVERSIBLE because the user asked for it ("rewrite this"
