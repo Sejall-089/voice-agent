@@ -869,12 +869,18 @@ Given the user's instruction and captured context, run exactly this sequence:
    is never sent to the model. There is no shell, no sender and no app surface in that object — a `prepare`
    cannot send, save or act because it holds nothing to do it with. It runs once per step. A
    throw ends the call before any gate: a `UserFixableError` as a refusal in the tool's words,
-   anything else as an error.
+   anything else as an error. Two keys are added only in bot mode: `channelDirectory` (M22, a
+   lookup of Slack's list) and **`senderMode: "bot"`** (M33), the sender's mode and nothing else
+   of it; without a bot sender both are absent and the five keys are unchanged. `remember` became
+   the second user of `prepare` in M33: it settles the canonical subject and the value to be
+   saved there (with the bot-mode channel check, moved from its handler), so its tier and dialog
+   judge what will actually be written.
 5b. **Resolve the tier** — what does *this* call cost (§6)? Usually the constant the tool
    declares; for a tool with a `RiskPolicy` it is worked out from the resolved arguments,
    and may read the world to do it. Resolved **once** and reused by both gates below —
    asking twice would let the two answers disagree, which is a hole in the gate rather
-   than a slow path.
+   than a slow path. (M33: `remember` reads memory here, and is `dangerous` when the fact it
+   would write replaces a different value; §6.)
 6. **Gate on the tier** — two steps, both driven by the tier alone (M10):
    - **6a. Narrate** — a `caution` tool announces what it is about to do, via
      `executeAction({ kind: "notify" })`, *before* the handler runs. It is not asked,
@@ -1383,6 +1389,45 @@ can't do that yet…") is unchanged and unframed. The `[main]` line says `[reply
 
 **Known gaps.** A correction asked more than ten minutes later loses its previous turn. A stale
 clipboard is still sent whole: only the previous turn ages out.
+
+### A fact that replaces a different value (added 2026-10-30, M33)
+
+**The hazard (M32's scripted run).** After a cancelled "create a linear issue and post in fun",
+"actually, post it in social instead" planned `remember` with `team` = `social`. `remember` was
+`reversible`, so it ran with no dialog. In the app that would replace `team` = `#social` with
+the bare word "social". The old row is kept, but nothing shows it again (`recall` lists active
+facts only) and nothing restores it. The real log has one such overwrite that nobody wanted:
+row 323, a statement ("Hello my name is …") that was not a correction, which replaced the stored
+name and stood for four days until row 435 put it back.
+
+**The rule.** `remember`'s tier depends on its arguments (`RiskPolicy`). It is `dangerous` when
+an active fact with **exactly** the normalized subject holds a value **other than the one
+`prepare` settled**. Otherwise it is `reversible`. The match is exact, not `query`'s LIKE, so
+"channel" is not "bugs channel". The settled value is compared, not what was typed, so in bot
+mode "Social" for a channel fact holding `#social` is the same value. A first write, the same
+value again, and anything `prepare` refused stay silent. The rule does not depend on the
+instruction's wording: no word list and no prompt change. M28 showed that prompt rules regress
+the controls.
+
+**The dialog.** *Change what I remember for "team" from #social to social?*, built by
+`changeQuestion` (`tools/remember.ts`) from the settled arguments. A value over 200 characters is
+cut with "..." in the dialog only, and the saved value stays whole. The button is a fixed "Change
+it". Inside a chain it gets the step prefix. A detached job waits at the pill, like every
+confirm. If memory cannot be read, the tier escalates and the dialog says *Change what I
+remember for "team" to social? I couldn't check what it holds now.* Cancel writes nothing and
+logs the row `cancelled`. Approve versions the old row as before (*Updated "team": #social →
+social (v2).*). The dialog's first paragraph is spoken, and the speech layer drops the quotes
+and the "#", so the weaker-form case is **heard** as "from social to social" (a finding, below).
+
+**Known gaps.**
+- A first write is never asked about. In M33's live runs a correction wrote a junk new fact 5
+  times in 27 (`channel:fun` = social twice, `channel` = #social three times), silently.
+- The spoken form loses the "#", so the voice cannot tell `#social` from `social`.
+- The ask path's answer (`settleReferences`) writes facts without going through `remember`, and
+  is unchanged.
+- "forget" is still not built.
+- The `remember` description's "do NOT re-run the previous action" still pulls corrections
+  toward a memory write. It is not edited (M28).
 
 ### Deliberately deferred
 
@@ -5715,6 +5760,180 @@ Post-v0:
          missing Notion step.
       7. **The spend gate refused a run once** because Windows reused a process ID from an earlier
          run that held a slot. Re-running fixed it. Noted, not fixed.
+
+- [ ] **M33 — confirm before `remember` replaces a different value.** **IN PROGRESS: code, tests
+      and the scripted live run are done; the live checklist (`docs/M33-live-checklist.md`) waits
+      for a person.** For M32's open finding 1. Commits:
+      - `bdcebcf`: `prepare` settles the saved value; no behaviour change.
+      - `6fb3a63`: the harness, `scripts/m33-live.ts`, committed this time.
+      - `984fdc2`: the confirm and its tests.
+      - The scripted results and checklist: this entry's commit.
+
+      **1. Settled in `prepare`** (`bdcebcf`). `remember`'s canonical subject, trimmed value and
+      bot-mode channel check moved from its handler into `prepare`. The handler writes exactly
+      what `prepare` returned.
+      - `PrepareDeps` gained `senderMode: "bot"`, present only when the sender is a bot. That
+        keeps the check's sender-mode gate: a directory handed in next to a webhook sender is
+        still never consulted, and `sendMessage.test.ts`'s exact-keys test is unchanged.
+      - Row 475's refusal is pinned: same text, `refused`, nothing written, no dialog, and each
+        spelling looked up once.
+      - One visible difference: the logged arguments of a `remember` row are now the settled
+        ones ("team", not "the team").
+
+      **Recon before the confirm (T1, live, 12 calls).** The harness:
+      - real planner and spend gate, gpt-5-mini at low effort;
+      - Linear over `FakeMcpServer`, GitHub `UnavailableConnection`;
+      - a bot-mode `FakeSender` with a `FakeChannelDirectory` (help, social, fun, general);
+      - a real `SqliteMemory(":memory:")` that keeps its writes, seeded with `team` = #social,
+        `social channel` = #social, `third channel` = #fun and a placeholder name, and read back
+        after every trial;
+      - a fresh action log holding a cancelled "create a linear issue and post in fun" 40 s old;
+      - M28's long trace on the clipboard, no email open;
+      - `fetch` limited to api.openai.com, Cancel at every dialog, the model's `complete` half
+        faked.
+
+      Before any model call, scripted answers checked each fake:
+      - a Linear create reached the fake server only;
+      - GitHub was rejected;
+      - a send reached the fake directory and sender, and Cancel sent nothing;
+      - memory kept a write;
+      - slack.com was refused.
+
+      | "actually, post it in social instead" (`team` = #social stored) | Trials |
+      |---|---|
+      | **`remember` replacing a different value (the hazard)** | **0** |
+      | `remember` writing a new fact: `channel:fun` = social | 2 |
+      | lone `sendMessage` to "social", dialog, cancelled | 9 |
+      | plan: `linear__search_issues` > `sendMessage`, dialog, cancelled | 1 |
+      | `team` read back as #social (v1) | 12 of 12 |
+
+      The hazard did not reproduce in 12 trials. The confirm was built as planned: M32's trial
+      and row 323 are the evidence.
+
+      **2. The confirm** (`984fdc2`; §5b, "A fact that replaces a different value"; §6's tier
+      row). `remember`'s tier is `{ tiers: ["reversible", "dangerous"], resolve }`:
+      - `dangerous` when an active fact with exactly the normalized subject holds a value other
+        than the settled one;
+      - the dialog is *Change what I remember for "team" from #social to social?*, with values
+        over 200 characters cut in the dialog only;
+      - the button is "Change it";
+      - a failed memory read escalates the tier to a dialog that says it could not check.
+
+      **Tests: 60 new** (`tests/remember.overwrite.test.ts`); **3447 total**, 96 skipped.
+      - **The rule:** an empty store, the same value and a different value; a weaker form
+        (#social → social) asks; exact subject, with its precondition (LIKE would have matched);
+        "the team" judged as "team".
+      - **Cancel and Approve:** Cancel leaves the facts table unchanged (rows read back) and logs
+        `cancelled`; Approve writes v2 and keeps v1 inactive.
+      - **Bot mode:** "Social" against #social gives no dialog; against #help the dialog shows
+        #social, not the typed value; Slack is asked once, in `prepare`; a refusal comes before
+        any dialog.
+      - **A memory read that fails:** the tier escalates, the dialog says so, and Cancel writes
+        nothing.
+      - **Chain and job:** a chain's step prefix; a detached job at the pill (`needs-you`,
+        waiting for confirm, nothing written); a detached first write does not wait.
+      - **The text:** the 200-character cap, and exactly 200 not cut; ASCII; spoken whole.
+      - **The phrasing set:** 4 corrections and 4 real remembers, each in two memory states. The
+        dialog appears in exactly the 8 "different value stored" cases.
+      - **The replay** (`tests/fixtures/rememberCalls/replay.ts`): the 12 real rows with the
+        memory as it stood before each (rebuilt from fact versions), M32's row, and 9 scripted
+        eval answers. Names and row 591's value are markers.
+        - Dialogs on exactly rows 323, 389 and 435, M32's row, and the six flagship/eval
+          corrections.
+        - Each of those, cancelled, leaves the facts unchanged; approved, it reproduces the
+          recorded result.
+        - The other 12 reproduce their recorded result and status with no dialog (row 396's
+          error and row 475's refusal included).
+
+      **Re-justified** (each now asserts the dialog, or its absence, rather than only the outcome):
+      - **Correction tests:** `remember.test.ts` :55 (the subject guard; the dialog names "team"),
+        :77 (the dashboard), :120 (the M4 flagship; text and the "Change it" label), :133 (tone),
+        and the new-fact test (no dialog).
+      - **Evals:** `demoTasks` #6 (two dialogs now) and #4 (none); `story.eval` step 4 (dialog,
+        approved) and step 2 (none); `sendMessage.test.ts`'s flagship trace (two dialogs).
+      - **Harnesses that approve by default, so a dialog was invisible to them:**
+        `remember.bot`'s update (the dialog shows Slack's #bug-reports) and its first writes;
+        `channelSuffix.bot` and `channelHyphen.bot` (first writes, both modes);
+        `m22.webhookUnchanged` (a first write); `m22.texts` (refused before any dialog).
+      - **Registry invariants:** `risk.test.ts` (`remember` joins the list of tools that can
+        confirm) and `confirmLabel.test.ts` ("Change it").
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Replacing a different value asks | resolver always `reversible` | 34 |
+      | The subject matches exactly | `query`'s first LIKE hit | 1 |
+      | The settled value is compared | settling moved behind the dialog, into the handler | 4 |
+      | The dialog shows the settled value | dialog shows the typed value | 3 |
+      | Slack is asked once, before the dialog | the handler re-runs the check | 1 |
+      | Cancel writes nothing | a write while the dialog is built | 24 |
+      | The same value is silent | any existing fact counts as a replacement | 2 |
+      | Long values are cut in the dialog | the cap removed | 1 |
+
+      All eight were caught the first time. Each was made and undone with the Edit tool against a
+      committed tree, which was checked clean after.
+
+      **Live, after the confirm (30 calls, the same harness).**
+
+      | Setup | Trials | What was planned | Ended | Facts afterwards |
+      |---|---|---|---|---|
+      | T2: "actually, post it in social instead", `team` = #social | 12 | 10 lone `sendMessage` to social; 1 create > send; 1 `remember channel = social` (a new fact) | 11 at a send/create dialog, cancelled; 1 saved, no dialog | `team` = #social (v1) 12 of 12; `channel` = #social added once |
+      | T3: the same, `team` not stored | 3 | 1 `remember channel`; 1 lone send; 1 plan `remember channel` > send | #1 saved, no dialog; #2 send dialog, cancelled; #3 saved `channel`, then its send dialog cancelled | `channel` = #social added twice |
+      | C1: "remember that team is #social", `team` empty | 3 | `remember team = #social` ×3 | saved, no dialog | `team` = #social (v1) |
+      | C2: the same, `team` = #social stored | 3 | `remember team = #social` ×3 | no dialog (a refresh) | `team` = #social (v1) |
+      | C3: "my name is Sam Placeholder", name empty | 3 | `remember name` ×3 | saved, no dialog | name (v1) |
+      | C4: "remember the team is #fun", `team` = #social | 3 | `remember team = #fun` ×3 | **the dialog**, cancelled ×3 | `team` = #social (v1) |
+      | C5: "no, I meant the design channel" after a cancelled send to the team | 3 | lone send to "the design channel" (refused by the reference check); lone send to "design channel" (refused: Slack has no such channel); **`remember team = "the design channel"`** | 2 refusals; **1 dialog, cancelled** | `team` = #social (v1) |
+
+      **C5's third trial is the hazard seen live.** A correction planned `team` = "the design
+      channel"; the dialog showed *Change what I remember for "team" from #social to the design
+      channel?*, and Cancel kept #social. No trial created an issue, sent a message, reached a
+      blocked host or changed a seeded fact.
+
+      **Dry run, scripted (no model)** (`scripts/m33-live.ts --scripted`): `remember team = social`
+      with #social stored.
+      - The dialog reads *Change what I remember for "team" from #social to social?*, with the
+        button "Change it".
+      - Cancel: no result, the log row is `remember` with `{"subject":"team","value":"social"}`,
+        `cancelled`, and `team` = #social v1 active.
+      - Approve: *Updated "team": #social → social (v2).*, with v1 inactive and v2 active.
+
+      **Sound.** `scripts/m30-say-refusal.ts --remember-change` speaks the dialog as the app does.
+      It was run with `--no-play` only, and says "Change what I remember for team from social to
+      social?".
+
+      **Model calls: 42 of the 45 allowed**, est. ~$0.056:
+      - T1 12 (~$0.021), T2 12 (~$0.020), T3 3 (~$0.005);
+      - controls 15 (~$0.011).
+      - No retry calls; each run was capped at its trial count.
+
+      **Findings, recorded and not fixed here:**
+      1. **Row 323 was an unwanted overwrite.** A statement that was not a correction replaced the
+         stored name and stood for four days, until row 435. The confirm now asks before that.
+      2. **The spoken dialog loses the "#".** The weaker-form case is heard as "from social to
+         social". The dialog's text shows the difference; the voice does not.
+      3. **First writes are never asked about.** 5 of 27 correction trials wrote a junk new fact
+         (`channel:fun` = social, `channel` = #social).
+      4. **`remember`'s description** ("Do NOT re-run the previous action, and do NOT treat it as
+         a retry") pulls corrections toward a memory write. It is not edited, because prompt edits
+         regress controls (M28).
+      5. **After `team` = social, M31 would stop treating "the team" as a destination:**
+         `channelKnowledge` counts only `#` values.
+      6. **The bare facts are invisible to M31 for the same reason:** "bugs channel", "main
+         channel" and "issue channel" all equal `help` in the real memory.
+      7. **The active "samurai" fact** (row 591, a 1,481-character clipboard dump) was left
+         untouched in the real memory.
+      8. **"forget" is still unbuilt.**
+
+      **Deferred to M34: a Slack channel never taught to memory** (M31's open finding 2). It needs
+      a cache-only method on the channel directory, so it is an interface change (Plan Mode), and
+      seven decisions:
+      - cache only, or a lookup at plan time;
+      - warm the cache at startup;
+      - an expired list;
+      - which words count as a channel name;
+      - bare memory values;
+      - webhook mode;
+      - fixture channel names.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

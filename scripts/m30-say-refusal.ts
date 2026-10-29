@@ -15,6 +15,7 @@
 //   npx vite-node scripts/m30-say-refusal.ts --dropped-send   # M31: a create that dropped a send
 //   npx vite-node scripts/m30-say-refusal.ts --framed-prose   # M32: a model's reply, after the lead
 //   npx vite-node scripts/m30-say-refusal.ts --date-time      # M32: "what's the date and time"
+//   npx vite-node scripts/m30-say-refusal.ts --remember-change  # M33: the change-a-fact dialog, as spoken
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -23,8 +24,9 @@ import { join } from "node:path";
 import { DROPPED_SEND, UNASKED_STEP, UNASKED_STEP_NO_TEXT } from "../src/core/chain.ts";
 import { localZone } from "../src/core/llm/prompt.ts";
 import { PROSE_LEAD } from "../src/core/planner.ts";
-import { toSpokenResult, toSpokenWithLead } from "../src/core/speech.ts";
+import { toSpokenConfirm, toSpokenResult, toSpokenWithLead } from "../src/core/speech.ts";
 import type { SpokenText } from "../src/core/speech.ts";
+import { changeQuestion } from "../src/core/tools/remember.ts";
 import { formatTimeAnswer } from "../src/core/tools/tellTime.ts";
 import { PiperSynthesizer } from "../src/core/synthesizers/PiperSynthesizer.ts";
 
@@ -47,7 +49,10 @@ const engine = new PiperSynthesizer({
 
 const has = (flag: string): boolean => process.argv.includes(flag);
 // Each wording through the same function the app uses for it.
-const spoken: SpokenText = has("--framed-prose")
+const spoken: SpokenText = has("--remember-change")
+  ? // M33: the dialog's first paragraph is spoken before it opens, through toSpokenConfirm.
+    toSpokenConfirm(changeQuestion("team", { kind: "value", value: "#social" }, "social"))
+  : has("--framed-prose")
   ? toSpokenWithLead(PROSE_LEAD, SAMPLE_MODEL_REPLY)
   : has("--date-time")
     ? toSpokenResult(formatTimeAnswer("both", Date.now(), localZone()))

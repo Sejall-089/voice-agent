@@ -426,6 +426,14 @@ previous turn's age, and a reply in the model's own words".
 saying is not cut off and run half-said. **"What's the date and time?"** gets both in one answer
 (*"It's Friday, 23 October, 5:41 PM."*).
 
+**Changing something it already remembers asks first.** If a fact would replace a different value
+you taught it, a dialog shows both: *Change what I remember for "team" from #social to social?*,
+with a **Change it** button. Cancel keeps the old value. A new fact, or the same value said again,
+is saved with no dialog, as before. This is there because a correction can be misread as a memory
+write: "actually, post it in social instead" once planned `team` = `social`. Spoken, the "#" is
+dropped, so that case sounds like "from social to social"; read the dialog. See spec.md §5b, "A
+fact that replaces a different value".
+
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
 you later.
@@ -1056,7 +1064,7 @@ Step 5 — the same task uses the CORRECTED value      ✅ opened https://new.ex
 Step 6 — recall reveals it        🧠 target:dashboard → https://new… (confidence 0.80, v2, today)
 ```
 
-`npm test` runs everything (3384 tests across 143 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
+`npm test` runs everything (3447 tests across 144 files, plus 96 opt-in checks that skip themselves — the real-model evals and one real-Piper check): the planner, each tool, the memory engine, the risk gates,
 the LLM-provider factory, the voice state machine, the dictation state machine, the Gmail reply
 flow, the Notion page-writing flow, the calendar tools, and both eval suites. All headless against `MockShell`, a
 `MockInputInjector` standing in for real `SendInput`, fake Gmail/Notion tabs, a fake calendar and a fake Google token endpoint, and jsdom
@@ -1066,6 +1074,21 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M33 (confirm before `remember` replaces a different value) is in progress (30 Oct 2026).**
+The code, the tests and the scripted live run are done. The live checklist waits for a person.
+- **`remember` now asks before replacing a value you taught it.** A new fact and the same value
+  stay silent.
+- **Its saved value is settled before the dialog**, Slack's channel check included, so the
+  dialog names what will actually be saved.
+- **Every recorded `remember` call was replayed.** The real log's 12, M32's, and the scripted
+  evals': the dialog appears on exactly the three real overwrites (one of them unwanted), M32's
+  row and the flagship corrections.
+
+Scripted against the real model with every connector faked (42 calls, ~$0.056), the correction
+never planned the overwrite in 24 tries. One control ("no, I meant the design channel") did, and
+the dialog stopped it. No seeded fact changed in any trial. **3447 tests green across 144
+files, 96 skipped.** See `docs/M33-live-checklist.md` and `spec.md` §9 (M33).
 
 **M32 (small items) is closed (30 Oct 2026), after a live run by a person: all six boxes
 ticked.** Escape with the pill list open stays as it is, by decision. The stale-turn and
