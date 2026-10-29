@@ -174,6 +174,23 @@ describe("the flows that read and write the box still work", () => {
     expect(bridge.sent.filter((entry) => entry.startsWith("submit"))).toEqual(['submit:"open my dashboard"']);
   });
 
+  // M34 (E2). M33's rows 672 and 674 logged "remember the team is social" for what Sejal says she
+  // typed with a "#". The box is not where it goes missing: typed one key at a time, as a keyboard
+  // delivers it, with the microphone idle and with it recording (the bar opens listening), the
+  // "#" is in the box and in what is submitted.
+  it.each(["idle", "recording"])(
+    "INSTRUCTION CAPTURE keeps a '#': 'remember the team is #social', typed key by key (microphone %s)",
+    (voice) => {
+      bridge.fire("show");
+      if (voice === "recording") bridge.fire("voiceState", "recording");
+      const typed = "remember the team is #social";
+      for (let end = 1; end <= typed.length; end += 1) enter(typed.slice(0, end));
+      expect(box().value).toBe(typed);
+      press("Enter");
+      expect(bridge.sent.filter((entry) => entry.startsWith("submit"))).toEqual([`submit:${JSON.stringify(typed)}`]);
+    },
+  );
+
   it("QUESTION REPLY: the question appears, the box starts empty, and Enter sends the ANSWER", () => {
     enter("a half-typed instruction");
     bridge.fire("ask", "Which channel is the bugs channel?");

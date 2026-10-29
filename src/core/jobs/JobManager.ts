@@ -1,6 +1,6 @@
 import type { JobState, JobSummary, JobsReader } from "../types.ts";
 import type { GateAnswer, JobGate, StepEntry } from "./gate.ts";
-import type { JobRecord, JobStore } from "./JobStore.ts";
+import type { InstructionInput, JobRecord, JobStore } from "./JobStore.ts";
 import { EXPIRY_MS, MAX_RUNNING } from "./messages.ts";
 
 // Every job, what state it is in, and who is allowed to move it (M23).
@@ -181,7 +181,10 @@ export class JobManager implements JobsReader {
 
   // A new job, attached. Only one job is attached at a time: whatever was attached before is
   // detached first (the hotkey has normally done that already).
-  submit(instruction: string): string {
+  //
+  // `input` (M34) is how the instruction arrived, written down with the job and nowhere else.
+  // Absent means not recorded.
+  submit(instruction: string, input: InstructionInput | null = null): string {
     this.detachAttached("submit");
     // The backstop for a refusal. If the job that had the bar could not be detached (it holds
     // the foreground — the hotkey guards should never have let a submission through), the new
@@ -208,6 +211,7 @@ export class JobManager implements JobsReader {
       result: null,
       seenAt: null,
       stepsRun: 0,
+      input,
       attached: !barIsTaken,
       lines: [],
       cancelRequested: false,

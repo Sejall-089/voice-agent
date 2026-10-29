@@ -608,7 +608,9 @@ describe("clearing from the pill deletes nothing", () => {
     m23.prepare(`INSERT INTO jobs (id, instruction, kind, state, background, created_at, updated_at, result) VALUES (?, ?, 'work', 'failed', 1, ?, ?, ?)`)
       .run("old-job", "send these notes", T0, T0, "Slack said no.");
     // RE-JUSTIFIED AT M27: the M23 table now gains steps_run as well, by the same guarded list.
-    expect(migrate(m23)).toEqual(["jobs.seen_at", "jobs.steps_run"]);
+    // RE-JUSTIFIED AT M34: and input (typed or spoken), by the same list — what this test pins,
+    // that seen_at is added once and the old row survives, is unchanged.
+    expect(migrate(m23)).toEqual(["jobs.seen_at", "jobs.steps_run", "jobs.input"]);
     expect(migrate(m23)).toEqual([]);
     m23.close();
 

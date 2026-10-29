@@ -47,7 +47,15 @@ export interface JobRecord {
   // pill, with its own message) from one cancelled before it did anything (never shown). Saved,
   // so the difference survives a restart.
   stepsRun: number;
+  // How the instruction reached the app (M34): typed into the bar, or spoken and transcribed.
+  // null on a row written before M34, and for a job submitted by anything but the hotkey. FOR A
+  // PERSON READING THE LOG ONLY: the planner is never told, so typed and dictated instructions
+  // still cannot be told apart by anything that decides what runs (spec §4a).
+  input: InstructionInput | null;
 }
+
+// M34. Which path the instruction hotkey took: the typed text, or the transcript.
+export type InstructionInput = "typed" | "spoken";
 
 export interface JobStore {
   save(record: JobRecord): void;
@@ -137,6 +145,7 @@ interface Row {
   result: string | null;
   seen_at: number | null;
   steps_run: number | null;
+  input: string | null;
 }
 
 function fromRow(row: Row): JobRecord {
@@ -164,6 +173,8 @@ function fromRow(row: Row): JobRecord {
     seenAt: row.seen_at ?? null,
     // NULL before M27: counted as none, so a job cancelled then stays hidden.
     stepsRun: row.steps_run ?? 0,
+    // NULL before M34, and anything else this column should never hold: not recorded.
+    input: row.input === "typed" || row.input === "spoken" ? row.input : null,
   };
 }
 
@@ -177,10 +188,10 @@ export class SqliteJobStore implements JobStore {
       .prepare(
         `INSERT INTO jobs (id, instruction, kind, state, background, acknowledged, created_at,
                            updated_at, step, total, tool, pause_reason, pause_since,
-                           in_flight_tool, in_flight_step, result, seen_at, steps_run)
+                           in_flight_tool, in_flight_step, result, seen_at, steps_run, input)
          VALUES (@id, @instruction, @kind, @state, @background, @acknowledged, @createdAt,
                  @updatedAt, @step, @total, @tool, @pauseReason, @pauseSince,
-                 @inFlightTool, @inFlightStep, @result, @seenAt, @stepsRun)
+                 @inFlightTool, @inFlightStep, @result, @seenAt, @stepsRun, @input)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind, state = excluded.state, background = excluded.background,
            acknowledged = excluded.acknowledged, updated_at = excluded.updated_at,

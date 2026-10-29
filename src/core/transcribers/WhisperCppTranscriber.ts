@@ -21,6 +21,10 @@ export interface WhisperCppOptions {
   modelPath: string;
   language?: string; // whisper's -l flag; "auto" lets whisper detect
   timeoutMs?: number;
+  // Arguments that come BEFORE whisper's own flags (M34), the same seam PiperSynthesizer has.
+  // main.ts never sets it: it is how a test runs a stand-in script through node, because Node
+  // refuses to spawn a .cmd shim without `shell: true`.
+  argsPrefix?: readonly string[];
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -54,6 +58,7 @@ export class WhisperCppTranscriber implements Transcriber {
     // -nt: no timestamps, -np: no progress prints — together they make stdout the plain
     // transcript and nothing else.
     const args = [
+      ...(this.options.argsPrefix ?? []),
       "-m",
       this.options.modelPath,
       "-f",

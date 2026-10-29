@@ -4,6 +4,7 @@ import type { JobGate } from "../../core/jobs/gate.ts";
 import type { JobManager } from "../../core/jobs/JobManager.ts";
 import { JobLog, JobShell, JobSpeechStore } from "../../core/jobs/JobShell.ts";
 import type { ForegroundShell, JobHandle } from "../../core/jobs/JobShell.ts";
+import type { InstructionInput } from "../../core/jobs/JobStore.ts";
 import { QUEUED_NOTICE } from "../../core/jobs/messages.ts";
 import type { Captured } from "../../core/planner.ts";
 import type { SpeechStore } from "../../core/speechStore.ts";
@@ -13,7 +14,9 @@ import { createRunInstruction, RUN_FAILED } from "../runInstruction.ts";
 
 // One instruction becomes one job (M23). This is the call site that used to be
 // `runInstruction(instruction)` and still has its signature: the hotkey handler hands it a
-// string and does not learn that anything changed.
+// string and does not learn that anything changed. (M34: and, optionally, whether that string
+// was typed or spoken — written to the job's record for a person to read, and never handed to
+// the planner.)
 //
 // What it does for each instruction:
 //   1. opens a job, attached, and STARTS CAPTURING CONTEXT AT ONCE — the clipboard and the
@@ -61,7 +64,9 @@ function endStateOf(outcome: PlannerOutcome | undefined): "done" | "failed" | "c
   return "failed";
 }
 
-export function createJobRunner(deps: JobRunnerDeps): (instruction: string) => Promise<void> {
+export function createJobRunner(
+  deps: JobRunnerDeps,
+): (instruction: string, input?: InstructionInput) => Promise<void> {
   const { manager } = deps;
 
   // Two things the bar has to be told when a job's standing changes, and only then.
@@ -85,10 +90,10 @@ export function createJobRunner(deps: JobRunnerDeps): (instruction: string) => P
     }
   });
 
-  return async (instruction: string): Promise<void> => {
+  return async (instruction: string, input?: InstructionInput): Promise<void> => {
     if (instruction.trim().length === 0) return;
 
-    const id = manager.submit(instruction);
+    const id = manager.submit(instruction, input ?? null);
     // Started HERE, synchronously with the submission, and awaited later inside the run — so
     // what is captured is the moment the instruction was given.
     const capturing = deps.capture();

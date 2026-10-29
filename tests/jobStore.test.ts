@@ -45,6 +45,7 @@ const record = (over: Partial<JobRecord>): JobRecord => ({
   result: null,
   seenAt: null,
   stepsRun: 0,
+  input: null,
   ...over,
 });
 
@@ -136,6 +137,9 @@ describe("the action_log migration (addition C)", () => {
       // M27: how many of its steps ran, so a job cancelled partway is told from one cancelled
       // before it did anything. A count, not content.
       "steps_run",
+      // M34: whether the instruction was typed or spoken — one of two fixed words, or NULL.
+      // Not content: the instruction itself was already a column.
+      "input",
     ]);
   });
 });

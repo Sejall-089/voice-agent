@@ -78,6 +78,9 @@ const ADDED_COLUMNS: readonly { table: string; column: string; type: string }[] 
   // M27: how many steps a job ran — whether one cancelled partway had done anything. NULL on
   // older rows, read as 0: a job cancelled before M27 stays hidden, as it was.
   { table: "jobs", column: "steps_run", type: "INTEGER" },
+  // M34: how the instruction arrived, "typed" or "spoken". NULL on older rows: not recorded.
+  // Read by a person diagnosing a row (M33's missing "#"), never by the planner.
+  { table: "jobs", column: "input", type: "TEXT" },
 ];
 
 export function migrate(db: DatabaseType): string[] {

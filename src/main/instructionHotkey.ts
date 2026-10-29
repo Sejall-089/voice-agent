@@ -1,3 +1,4 @@
+import type { InstructionInput } from "../core/jobs/JobStore.ts";
 import { toSpokenLine } from "../core/speech.ts";
 import { dictationIsBusy, type StateHolder } from "./dictate.ts";
 
@@ -95,7 +96,10 @@ export interface InstructionHotkeyDeps {
   // press, after every guard and before the bar is touched. Absent before M23 and in any
   // install without jobs. Told it was THIS hotkey (M25), for the detach log line.
   detach?: (trigger: "hotkey") => void;
-  runInstruction: (instruction: string) => Promise<void>;
+  // M34. Told which path the instruction took — the typed text or the transcript — so the job's
+  // record can say so. That is for a person reading the log (M33's missing "#": the log could
+  // not say whether the bar was typed into or spoken to); nothing passes it to the planner.
+  runInstruction: (instruction: string, input: InstructionInput) => Promise<void>;
 }
 
 export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => void {
@@ -230,10 +234,11 @@ export function createOnInstructionHotkey(deps: InstructionHotkeyDeps): () => vo
       const text = await typed;
       // Nothing typed means you dictated, and Enter was the "stop talking" gesture. If you
       // typed (or dismissed the bar), the session was already abandoned and answers "".
-      const instruction =
-        text.trim().length > 0 ? text : ((await voice?.finish()) ?? "");
+      // (M34) The same test decides the marker: one condition, so the two cannot disagree.
+      const wasTyped = text.trim().length > 0;
+      const instruction = wasTyped ? text : ((await voice?.finish()) ?? "");
 
-      await runInstruction(instruction);
+      await runInstruction(instruction, wasTyped ? "typed" : "spoken");
     })();
   };
 }
