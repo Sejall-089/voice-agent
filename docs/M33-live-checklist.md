@@ -1,10 +1,11 @@
 # M33 — live verification checklist
 
-> **NOT YET RUN by a person.** `spec.md` §9 (M33): `remember` asks before it replaces a value you
-> taught it, with *Change what I remember for "team" from #social to #fun?* and a **Change it**
-> button. A new fact, the same value said again, and the same channel with or without its "#"
-> ("social" for a stored `#social`) are saved with no dialog. Spoken, a value's leading "#" is
-> said as "hash"; the written dialog is unchanged. 0 ticked, 4 open (H4 optional).
+> **RUN 2026-10-30, by a person (H1-H3).** `spec.md` §9 (M33): `remember` asks before it replaces
+> a value you taught it, with *Change what I remember for "team" from #social to #fun?* and a
+> **Change it** button. A new fact, the same value said again, and the same channel with or
+> without its "#" ("social" for a stored `#social`) are saved with no dialog. Spoken, a value's
+> leading "#" is said as "hash"; the written dialog is unchanged. 3 ticked, 1 open (H4: not run,
+> optional).
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
 >
@@ -24,20 +25,35 @@ team" should say `#social`.
 
 ## Human-only
 
-- [ ] **H1** In the real app, say "remember the team is #fun" (the team is stored as `#social`). A
+- [x] **H1** *(Passed, Sejal, 2026-10-30. "remember the team is #fun" showed the dialog "Change what
+      I remember for "team" from #social to ...". She pressed Cancel, and "what do you remember
+      about the team" still said #social (v1). Screenshot sent.)* In the real app, say "remember the team is #fun" (the team is stored as `#social`). A
       dialog *Change what I remember for "team" from #social to #fun?* appears, with a **Change
       it** button. Press **Cancel**. Then ask "what do you remember about the team": it must still
       say `#social` (`v1`).
-- [ ] **H2** Type "remember the team is #social", and also "remember the team is social" (the live
+- [x] **H2** *(Passed, Sejal, 2026-10-30.*
+      - *Typing "remember the team is social" gave `Already remembered "team" as #social.` with no
+        dialog.*
+      - *"remember the team is #social" gave `Remembered: team = #social` (the same-value
+        refresh), with no dialog.*
+      - *Recall still said team -> #social, v1. Confidence went from 0.40 to 0.80 and the updated
+        time to today, from that refresh.*
+      - *Screenshots sent. Her requirement, confirmed: "#social" and "social" must count as the
+        same channel.)*
+
+      Type "remember the team is #social", and also "remember the team is social" (the live
       finding: said aloud, the "#" never arrives). **Neither shows a dialog.** Expect *Remembered:
       team = #social* for the first, *Already remembered "team" as #social.* for the second, and
       "what do you remember about the team" still says `#social` (`v1`). If the terminal's `[main]`
       line shows the model sent something else (another subject, say), note it.
-- [ ] **H3** With sound on, run `npx vite-node scripts/m30-say-refusal.ts --remember-change` and
+- [x] **H3** *(Passed, Sejal, 2026-10-30. She ran `--remember-change` with sound on and heard "hash"
+      before "social", in a clear sentence: "Change what I remember for team from hash social to
+      social?")* With sound on, run `npx vite-node scripts/m30-say-refusal.ts --remember-change` and
       listen to the overwrite dialog as the app says it: *"Change what I remember for team from
       hash social to social?"* "Hash" must be audible, and the sentence clear. It runs no app, no
       model and no memory.
-- [ ] **H4** *(Optional; may not reproduce: 0 of 24 scripted tries planned the overwrite.)* Ask
+- [ ] **H4** *(Not run, optional. It could write a junk fact to her real memory.)* *(Optional; may
+      not reproduce: 0 of 24 scripted tries planned the overwrite.)* Ask
       "create a linear issue and post in fun" with some text copied, and press **Cancel** at the
       first dialog. Then, within a minute, say "actually, post it in social instead".
       - **If the model plans a `remember` that would change the team:** a dialog *Change what I
