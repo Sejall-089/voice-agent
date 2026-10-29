@@ -962,6 +962,14 @@ export interface Tool extends ToolSchema {
     args: ToolInput,
     deps: ToolDeps,
   ) => string | Promise<string>;
+  // What to SAY in place of `confirmSummary`'s text, when the dialog's words would not survive
+  // being spoken (M33). The planner still adds the step prefix and runs it through
+  // `toSpokenConfirm`, so cleaning and the length cap stay in one place; only the words handed
+  // in differ. The dialog on screen is `confirmSummary`'s, unchanged. Absent — every tool but
+  // `remember` — the dialog's own text is spoken, as before. `remember` needs it because the
+  // cleaner drops "#" (a channel reads better as "design team"), and then `#social` → `social`
+  // is heard as "from social to social".
+  speakConfirm?: (args: ToolInput, deps: ToolDeps) => string | Promise<string>;
   // What to tell the user BEFORE a `caution` tool acts. Same shape and same reasoning as
   // confirmSummary — built from the resolved args — but it announces rather than asks, because
   // a caution action runs on its own. Narration is what stands in for the undo that doesn't exist.

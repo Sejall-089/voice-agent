@@ -667,10 +667,13 @@ export class Planner {
     //    planner asks the tool how to describe itself; it never knows which tool.
     if (needsConfirm(tier)) {
       let summary: string;
+      // What is said aloud (M33): the tool's own spoken words when it has them, else the dialog's.
+      let spokenSummary: string;
       try {
         summary = tool.confirmSummary
           ? await tool.confirmSummary(args, deps)
           : `Run ${tool.name}?`;
+        spokenSummary = tool.speakConfirm ? await tool.speakConfirm(args, deps) : summary;
       } catch (error) {
         // If we cannot even describe what would happen, we certainly do not do it.
         return await this.failOrRefuse(instruction, tool.name, args, error, step.report);
@@ -683,7 +686,7 @@ export class Planner {
       // Before the dialog, deliberately. Once showMessageBox is up it owns the user's
       // attention, and a question asked after the thing it is about has appeared is not a
       // question. Only the first paragraph is spoken — never the draft body (core/speech.ts).
-      await this.say(toSpokenConfirm(asked));
+      await this.say(toSpokenConfirm(`${step.label}${spokenSummary}`));
 
       // The approve button's word is the TOOL's — `confirmLabel`, a fixed string in its code —
       // and that property is the only thing ever placed in these options. Not `args`, not the

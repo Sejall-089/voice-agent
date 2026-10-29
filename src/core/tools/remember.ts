@@ -27,15 +27,37 @@ const forDialog = (value: string): string =>
 //            on an earlier failed read, so the dialog says what is true now
 export type Replacing = { kind: "value"; value: string } | { kind: "unread" } | { kind: "nothing" };
 
-// The dialog's question. Plain ASCII around the values: its first paragraph is spoken.
-export function changeQuestion(subject: string, from: Replacing, to: string): string {
+function question(subject: string, from: Replacing, to: string, show: (value: string) => string): string {
   if (from.kind === "value") {
-    return `Change what I remember for "${subject}" from ${forDialog(from.value)} to ${forDialog(to)}?`;
+    return `Change what I remember for "${subject}" from ${show(from.value)} to ${show(to)}?`;
   }
   if (from.kind === "unread") {
-    return `Change what I remember for "${subject}" to ${forDialog(to)}? I couldn't check what it holds now.`;
+    return `Change what I remember for "${subject}" to ${show(to)}? I couldn't check what it holds now.`;
   }
-  return `Remember "${subject}" as ${forDialog(to)}?`;
+  return `Remember "${subject}" as ${show(to)}?`;
+}
+
+// The dialog's question, as written. Plain ASCII around the values.
+export function changeQuestion(subject: string, from: Replacing, to: string): string {
+  return question(subject, from, to, forDialog);
+}
+
+// The same question as it is SAID (`speakConfirm`). The speech cleaner drops every "#", which
+// is right for "Send to #design-team?" and wrong here: `#social` → `social` would be heard as
+// "from social to social", the one difference the dialog exists to show. So a value's leading
+// "#" is said as "hash" — in the spoken words only; the written dialog is `changeQuestion`'s.
+export function spokenChangeQuestion(subject: string, from: Replacing, to: string): string {
+  return question(subject, from, to, (value) => forDialog(value).replace(/^#/, "hash "));
+}
+
+// What the dialog knows about the value this call would replace. A read that fails is "unread".
+function replacing(args: ToolInput, memory: Pick<Memory, "query">): Replacing {
+  try {
+    const current = replaced(args, memory);
+    return current === null ? { kind: "nothing" } : { kind: "value", value: current.value };
+  } catch {
+    return { kind: "unread" };
+  }
 }
 
 // The value to save for this fact (M22). Unchanged unless this install is in bot mode — a bot
@@ -112,14 +134,13 @@ export const rememberTool: Tool = {
   confirmSummary: (args: ToolInput, deps: ToolDeps): string => {
     const subject = typeof args["subject"] === "string" ? args["subject"] : "";
     const value = typeof args["value"] === "string" ? args["value"] : "";
-    let from: Replacing;
-    try {
-      const current = replaced(args, deps.memory);
-      from = current === null ? { kind: "nothing" } : { kind: "value", value: current.value };
-    } catch {
-      from = { kind: "unread" };
-    }
-    return changeQuestion(subject, from, value);
+    return changeQuestion(subject, replacing(args, deps.memory), value);
+  },
+  // Said before the dialog opens, with a value's leading "#" as "hash" (see spokenChangeQuestion).
+  speakConfirm: (args: ToolInput, deps: ToolDeps): string => {
+    const subject = typeof args["subject"] === "string" ? args["subject"] : "";
+    const value = typeof args["value"] === "string" ? args["value"] : "";
+    return spokenChangeQuestion(subject, replacing(args, deps.memory), value);
   },
   confirmLabel: "Change it",
   background: "ok",

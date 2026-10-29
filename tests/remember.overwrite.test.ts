@@ -1,18 +1,21 @@
 import type { Database } from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
+import { loadConnectorTools } from "../src/core/mcp/load.ts";
+import { SdkMcpConnection } from "../src/core/mcp/SdkConnection.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
 import { Planner } from "../src/core/planner.ts";
-import { registry } from "../src/core/registry.ts";
+import { buildRegistry, registry } from "../src/core/registry.ts";
 import { resolveRisk } from "../src/core/risk.ts";
 import { toSpokenConfirm } from "../src/core/speech.ts";
-import { DIALOG_VALUE_MAX, changeQuestion, rememberTool } from "../src/core/tools/remember.ts";
+import { DIALOG_VALUE_MAX, changeQuestion, rememberTool, spokenChangeQuestion } from "../src/core/tools/remember.ts";
 import type { Memory, MessageSender, ToolChoice, ToolDeps } from "../src/core/types.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import { FakeBotSender, harness } from "./botChainHarness.ts";
 import { FakeChannelDirectory } from "./FakeChannelDirectory.ts";
 import { FakeLLM } from "./FakeLLM.ts";
+import { FakeMcpServer } from "./FakeMcpServer.ts";
 import { FakeSender } from "./FakeSender.ts";
 import { CLIPBOARD_MARKER, REMEMBER_CALLS, type RememberCall } from "./fixtures/rememberCalls/replay.ts";
 import { jobWorld, settle } from "./jobWorld.ts";
@@ -273,17 +276,113 @@ describe("the dialog's text", () => {
       changeQuestion("team", { kind: "value", value: "#social" }, "social"),
       changeQuestion("team", { kind: "unread" }, "social"),
       changeQuestion("team", { kind: "nothing" }, "social"),
+      spokenChangeQuestion("team", { kind: "value", value: "#social" }, "social"),
     ];
     for (const text of forms) {
       expect(text, text).toMatch(/^[\x20-\x7e]+$/);
       expect(toSpokenConfirm(text).remainder, text).toBeNull(); // spoken whole, nothing held back
     }
-    // AS SPOKEN, the speech layer drops the quotes and the "#" — so the weaker-form case, the very
-    // one M33 is for, is heard as "from social to social". The dialog's text shows the difference;
-    // the voice does not. Pinned as it is, and recorded as an M33 finding, not fixed here.
-    expect(toSpokenConfirm(forms[0]!).text).toBe("Change what I remember for team from social to social?");
-    expect(toSpokenConfirm(forms[1]!).text).toBe("Change what I remember for team to social? I couldn't check what it holds now.");
-    expect(toSpokenConfirm(forms[2]!).text).toBe("Remember team as social?");
+  });
+});
+
+// M33 follow-up. The speech cleaner drops every "#" (core/speech.ts), so the dialog's own words
+// spoken would say "from social to social" for the one difference the dialog exists to show.
+// `remember` says a value's leading "#" as "hash" — aloud only (`speakConfirm`).
+describe("the dialog as spoken", () => {
+  // What the planner actually SAID before the dialog, and the dialog itself.
+  async function said(subject: string, stored: string, value: string, confirms: boolean[] = []) {
+    const w = world(remember(subject, value), { facts: [[subject, stored]], confirms });
+    await w.planner.run(`remember ${subject} is ${value}`);
+    return { spoken: w.shell.spoken, dialogs: w.shell.confirmMessages };
+  }
+
+  it.each([
+    { stored: "#social", value: "social", heard: "from hash social to social" },
+    { stored: "social", value: "#social", heard: "from social to hash social" },
+    { stored: "#social", value: "#fun", heard: "from hash social to hash fun" },
+    { stored: "stiff and formal", value: "concise and warm", heard: "from stiff and formal to concise and warm" },
+  ])("$stored -> $value is heard as '$heard'", async ({ stored, value, heard }) => {
+    const { spoken, dialogs } = await said("team", stored, value);
+    expect(spoken).toEqual([`Change what I remember for team ${heard}?`]);
+    // The dialog on screen is untouched: the "#" as written, no "hash".
+    expect(dialogs).toEqual([`Change what I remember for "team" from ${stored} to ${value}?`]);
+  });
+
+  it("only a LEADING # becomes 'hash'", () => {
+    expect(spokenChangeQuestion("tag", { kind: "value", value: "issue #4" }, "#a#b")).toBe(
+      'Change what I remember for "tag" from issue #4 to hash a#b?',
+    );
+  });
+
+  it("the 200-character cap still applies, before the # is said", () => {
+    const long = `#${"o".repeat(250)}`;
+    expect(spokenChangeQuestion("notes", { kind: "value", value: long }, "#fun")).toBe(
+      `Change what I remember for "notes" from hash ${"o".repeat(DIALOG_VALUE_MAX - 1)}... to hash fun?`,
+    );
+    expect(changeQuestion("notes", { kind: "value", value: long }, "#fun")).toBe(
+      `Change what I remember for "notes" from #${"o".repeat(DIALOG_VALUE_MAX - 1)}... to #fun?`,
+    );
+  });
+
+  it("the other two forms say 'hash' too", () => {
+    expect(toSpokenConfirm(spokenChangeQuestion("team", { kind: "unread" }, "#fun")).text).toBe(
+      "Change what I remember for team to hash fun? I couldn't check what it holds now.",
+    );
+    expect(toSpokenConfirm(spokenChangeQuestion("team", { kind: "nothing" }, "#fun")).text).toBe(
+      "Remember team as hash fun?",
+    );
+  });
+
+  it("inside a chain, the step prefix is spoken in front", async () => {
+    const choice: ToolChoice = {
+      kind: "plan",
+      steps: [
+        { tool: "recall", arguments: { subject: "team" }, describe: "look it up" },
+        { tool: "remember", arguments: { subject: "team", value: "#fun" }, describe: "change it" },
+      ],
+    };
+    const w = world(choice, { facts: [["team", "#social"]] });
+    await w.planner.run("check the team and then make it #fun");
+    expect(w.shell.spoken).toContain("Step 2 of 2: Change what I remember for team from hash social to hash fun?");
+    expect(w.shell.confirmMessages).toEqual(['Step 2 of 2: Change what I remember for "team" from #social to #fun?']);
+  });
+
+  it("no other tool declares a spoken variant", () => {
+    const every = buildRegistry({ gmail: true, notion: true, calendar: true, speech: true, pointing: true, jobs: true });
+    expect(every.filter((tool) => tool.speakConfirm !== undefined).map((tool) => tool.name)).toEqual(["remember"]);
+  });
+
+  // Every other tool still has its dialog's own first paragraph spoken, "#" dropped, as before.
+  it("a bot-mode send is still heard as 'Send to social?'", async () => {
+    const h = harness({ kind: "tool", name: "sendMessage", input: { channel: "#social", notes: "hi" } }, { confirms: [false] });
+    await h.planner.run("send hi to #social");
+    expect(h.shell.confirmMessages[0]?.startsWith("Send to #social?")).toBe(true);
+    expect(h.shell.spoken[0]).toBe("Send to social? Check the dialog.");
+  });
+
+  it("a webhook send is still heard with its note, '#' dropped", async () => {
+    const w = world({ kind: "tool", name: "sendMessage", input: { channel: "#social", notes: "hi" } });
+    await w.planner.run("send hi to #social");
+    expect(w.shell.confirmMessages[0]).toMatch(/^Send via your Slack webhook\?\n\(You asked for #social\./);
+    expect(w.shell.spoken[0]).toBe(toSpokenConfirm(w.shell.confirmMessages[0] ?? "").text);
+    expect(w.shell.spoken[0]).not.toContain("hash");
+    expect(w.shell.spoken[0]).toContain("You asked for social.");
+  });
+
+  it("a Linear create is still heard as its question and 'Check the dialog.'", async () => {
+    const server = new FakeMcpServer({ timeline: [] });
+    const connectors = loadConnectorTools({
+      configText: JSON.stringify({ connectors: { linear: { enabled: true, tools: ["create_issue"], settings: { defaultTeam: "Engineering" } } } }),
+      readKey: () => "lin_api_test",
+      connect: (def) => new SdkMcpConnection({ app: def.label, keyName: def.keyName, transport: server.transport, timeoutMs: 300, connectTimeoutMs: 300 }),
+    }).tools;
+    const shell = new MockShell({ context: { selectedText: null, activeApp: null, activeWindowTitle: null } });
+    const memory = new SqliteMemory(createDatabase(":memory:"));
+    const choice: ToolChoice = { kind: "tool", name: "linear__create_issue", input: { title: "Login #4 fails", description: "notes" } };
+    await new Planner(new FakeLLM(choice), shell, [...registry, ...connectors], memory, memory).run("create a linear issue");
+    expect(shell.confirmMessages[0]?.startsWith("Create this Linear issue in Engineering?\n\n")).toBe(true);
+    expect(shell.spoken[0]).toBe("Create this Linear issue in Engineering? Check the dialog.");
+    expect(server.created).toEqual([]);
   });
 });
 

@@ -26,7 +26,7 @@ import { localZone } from "../src/core/llm/prompt.ts";
 import { PROSE_LEAD } from "../src/core/planner.ts";
 import { toSpokenConfirm, toSpokenResult, toSpokenWithLead } from "../src/core/speech.ts";
 import type { SpokenText } from "../src/core/speech.ts";
-import { changeQuestion } from "../src/core/tools/remember.ts";
+import { spokenChangeQuestion } from "../src/core/tools/remember.ts";
 import { formatTimeAnswer } from "../src/core/tools/tellTime.ts";
 import { PiperSynthesizer } from "../src/core/synthesizers/PiperSynthesizer.ts";
 
@@ -50,8 +50,9 @@ const engine = new PiperSynthesizer({
 const has = (flag: string): boolean => process.argv.includes(flag);
 // Each wording through the same function the app uses for it.
 const spoken: SpokenText = has("--remember-change")
-  ? // M33: the dialog's first paragraph is spoken before it opens, through toSpokenConfirm.
-    toSpokenConfirm(changeQuestion("team", { kind: "value", value: "#social" }, "social"))
+  ? // M33: said before the dialog opens — `remember`'s spoken variant ("hash" for a leading #),
+    // through toSpokenConfirm, exactly as the planner does it.
+    toSpokenConfirm(spokenChangeQuestion("team", { kind: "value", value: "#social" }, "social"))
   : has("--framed-prose")
   ? toSpokenWithLead(PROSE_LEAD, SAMPLE_MODEL_REPLY)
   : has("--date-time")
