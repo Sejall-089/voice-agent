@@ -1,10 +1,10 @@
 # M32 — live verification checklist
 
-> **NOT RUN BY A PERSON.** `spec.md` §9 (M32): a second instruction-hotkey press during voice
+> **RUN 2026-10-29/30, by a person (H1-H6).** `spec.md` §9 (M32): a second instruction-hotkey press during voice
 > capture is ignored; a previous turn over ten minutes old is not sent to the model, and a reply in
 > the model's own words is framed ("Nothing ran. The model said: …"); "what's the date and time"
-> gets one combined answer; Escape with the pill list open is unchanged and now tested. 0 ticked,
-> 6 open.
+> gets one combined answer; Escape with the pill list open is unchanged and now tested. 6 ticked,
+> 0 open.
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
 >
@@ -21,27 +21,32 @@ is built once at startup. To hear the new wording without the app:
 
 ## Human-only
 
-- [ ] **H1** Press the instruction hotkey and start speaking. While the microphone is still
+- [x] **H1** *(Passed, Sejal, 2026-10-29.)* Press the instruction hotkey and start speaking. While the microphone is still
       recording, press the hotkey again; then press Enter, and while it is transcribing press the
       hotkey once more. Expect: no job is detached (the pill does not gain a job), nothing
       half-said runs, and the first capture finishes normally and runs once. The terminal shows
       `[main] instruction hotkey ignored - voice is recording` (and `… transcribing`).
-- [ ] **H2** Hear a framed prose reply, and judge whether "Nothing ran. The model said:" reads and
+- [x] **H2** *(Passed, Sejal, 2026-10-29: the framed wording heard through Piper.)* Hear a framed prose reply, and judge whether "Nothing ran. The model said:" reads and
       sounds natural. Provoke one if you can (an instruction the model is likely to answer with a
       question); if none comes, skip this box and say so. The terminal's `[main]` line should
       show `[reply: model prose]`. Without the app:
       `npx vite-node scripts/m30-say-refusal.ts --framed-prose`.
-- [ ] **H3** Ask "what's the date and time" and hear one short combined answer ("It's Friday, 23
+- [x] **H3** *(Passed, Sejal, 2026-10-29: heard one combined answer.)* Ask "what's the date and time" and hear one short combined answer ("It's Friday, 23
       October, 5:41 PM."). Also: `npx vite-node scripts/m30-say-refusal.ts --date-time`.
-- [ ] **H4** Open the pill's job list, then with another app in front (Notepad, say) press Escape.
+- [x] **H4** *(Passed, Sejal, 2026-10-29: with the list open and another app in front (Win+R),
+      Escape reached that app and the list stayed open. Her decision: that is the behaviour she
+      wants, so Escape does NOT close the list; no change needed.)* Open the pill's job list, then with another app in front (Notepad, say) press Escape.
       Expect: Escape reaches that app, and the list stays open. **Decision for Sejal:** should
       Escape close the list instead?
-- [ ] **H5** Dictate into Word. Expect: the text lands at the caret and nowhere else; the Enter
+- [x] **H5** *(Passed, Sejal, 2026-10-29: text landed at the caret. One Ctrl+Z removed the
+      dictated sentence together with the 3-4 blank lines typed just before it; a sentence typed
+      by hand after 3-4 Enters undid the same way, so this is Word's own typing-run grouping, not
+      the app.)* Dictate into Word. Expect: the text lands at the caret and nowhere else; the Enter
       that finishes dictation adds no paragraph; no autocorrect surprises (capitals, smart
       quotes); no repeated letters on a long sentence. Note how many Ctrl+Z presses undo one
       dictation. Switching windows mid-dictation gives the focus refusal, not text in the wrong
       place.
-- [ ] **H6** Dictate into Windows Terminal and into classic PowerShell. Expect: the text appears
+- [x] **H6** *(Passed, Sejal, 2026-10-30: reported "h6 passes", no further detail.)* Dictate into Windows Terminal and into classic PowerShell. Expect: the text appears
       at the prompt and **nothing executes on its own** (no Enter or newline reaches the shell);
       quotes, `$` and other special characters arrive as typed; an elevated (administrator)
       terminal gives a clear error with no partial text.
