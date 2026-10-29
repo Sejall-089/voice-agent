@@ -1078,15 +1078,23 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M33 (confirm before `remember` replaces a different value) is in progress (30 Oct 2026).**
-The code, the tests and the scripted live run are done. The live checklist waits for a person.
+**M33 (confirm before `remember` replaces a different value) is closed (30 Oct 2026), after a
+live run by a person: three of four boxes ticked.** The fourth, optional, was not run: it could
+write a junk fact to the real memory. In the real app:
+- a change showed the dialog, and Cancel kept `#social`;
+- "social" and "#social" showed no dialog;
+- the spoken "hash" was heard clearly.
+
+The hazard never reproduced live. The fix is proven by tests, dry runs, one real catch in a
+control trial, and the real-app check. Eight findings stay open for M34. The first is that a "#"
+went missing from two logged instructions, for reasons not yet found.
 - **`remember` now asks before replacing a value you taught it.** A new fact and the same value
   stay silent.
 - **Its saved value is settled before the dialog**, Slack's channel check included, so the
   dialog names what will actually be saved.
-- **Every recorded `remember` call was replayed.** The real log's 12, M32's, and the scripted
-  evals': the dialog appears on exactly the three real overwrites (one of them unwanted), M32's
-  row and the flagship corrections.
+- **Every recorded `remember` call was replayed:** the real log's 14, M32's and the scripted
+  evals'. The dialog appears on exactly the real changes (rows 323, 389, 435 and 672; row 323 was
+  unwanted) and the flagship corrections.
 - **Spoken, the dialog says "hash" for a leading "#"**, so a channel and a plain word sound
   different. The written dialog and every other tool's speech are unchanged.
 - **"#social" and "social" are the same channel** (a live finding: "remember the team is

@@ -238,9 +238,9 @@ recoverable* and *how much does it cost when it is wrong*.
 | Tier | Example | What happens |
 |------|---------|--------------|
 | `safe` | read the open email | run |
-| `reversible` | a clipboard write the user asked for, open a tab, version a fact | run |
+| `reversible` | a clipboard write the user asked for, open a tab, save a new fact | run |
 | `caution` | open the reply box, insert a draft | run, **after saying so** |
-| `dangerous` | Slack post, Gmail Send | **confirm first**, always |
+| `dangerous` | Slack post, Gmail Send, a fact that replaces a different value (M33) | **confirm first**, always |
 
 The clipboard is not recoverable in itself: the app keeps no copy of what a write replaces. A
 write sits at `reversible` only because the user asked for it. So inside a chain, where a step
@@ -305,6 +305,10 @@ two are true of the confirm itself:
 to the `remember` tool, which versions the old `team` fact inactive and writes a new
 one. The *next* send resolves to the corrected channel. That behavior — a correction
 that sticks — is the thing a plain prompt can't fake, and it's the flagship demo.
+Since M33 the replacement is confirmed first (*Change what I remember for "team" from
+#general to #design-team?*), because a misread correction could otherwise change a fact
+silently. The same channel with or without its "#" ("social" for `#social`) is not a change
+and asks nothing.
 
 ---
 

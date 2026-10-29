@@ -5808,18 +5808,21 @@ Post-v0:
       7. **The spend gate refused a run once** because Windows reused a process ID from an earlier
          run that held a slot. Re-running fixed it. Noted, not fixed.
 
-- [ ] **M33 — confirm before `remember` replaces a different value.** **IN PROGRESS: code, tests
-      and the scripted live run are done; the live checklist (`docs/M33-live-checklist.md`) waits
-      for a person.** For M32's open finding 1. Commits:
+- [x] **M33 — confirm before `remember` replaces a different value.** **Closed 2026-10-30, after a
+      live run by a person (3 of 4 boxes ticked; H4, optional, not run — `docs/M33-live-checklist.md`),
+      with eight open findings (the close-out record is at the end of this entry).** For M32's open
+      finding 1. Commits:
       - `bdcebcf`: `prepare` settles the saved value; no behaviour change.
       - `6fb3a63`: the harness, `scripts/m33-live.ts`, committed this time.
       - `984fdc2`: the confirm and its tests.
       - `f813f52`: the scripted results and checklist.
       - `31aa8d0`: the "#" said as "hash" in the spoken dialog (follow-up, below).
       - `3b12fd1`: the checklist for the real app.
-      - "social" and "#social" as the same channel (follow-up 2, below): this entry's latest
-        commit. **It supersedes the weaker-form decision recorded in sections 2 and 3:** #social
-        → social no longer reaches a dialog.
+      - `8144e81`: "social" and "#social" as the same channel (follow-up 2, below). **It
+        supersedes the weaker-form decision recorded in sections 2 and 3:** #social → social no
+        longer reaches a dialog.
+      - `4c24b5b`: the human results.
+      - The close-out docs: this entry's last commit.
 
       **1. Settled in `prepare`** (`bdcebcf`). `remember`'s canonical subject, trimmed value and
       bot-mode channel check moved from its handler into `prepare`. The handler writes exactly
@@ -6091,6 +6094,85 @@ Post-v0:
       - bare memory values;
       - webhook mode;
       - fixture channel names.
+
+      **Live, by a person (3 of 4 ticked, 2026-10-30).**
+      - **H1** (passed): "remember the team is #fun" showed *Change what I remember for "team"
+        from #social to …*. Cancel was pressed, and recall still said #social (v1). Screenshot
+        sent.
+      - **H2** (passed):
+        - "remember the team is social", typed, gave *Already remembered "team" as #social.* with
+          no dialog.
+        - "remember the team is #social" gave *Remembered: team = #social* (the same-value
+          refresh), with no dialog.
+        - Recall still said team → #social, v1. Confidence went from 0.40 to 0.80 and the updated
+          time to today, from that refresh.
+        - Screenshots sent. Her requirement, confirmed: "#social" and "social" must count as the
+          same channel.
+      - **H3** (passed): `--remember-change` with sound on. "Hash" was heard before "social", in a
+        clear sentence: "Change what I remember for team from hash social to social?".
+      - **H4: not run** (optional). It could have written a junk fact to her real memory.
+
+      **Close-out record (2026-10-30).**
+      - **Tests: 3482 passed across 144 files, 96 skipped; both typechecks clean.** Plain `npm
+        test` ran: no electron process held the SQLite binary.
+      - **Model calls: 42 of the 45 allowed**, est. ~$0.056:
+        - T1 recon 12: 0 of 12 planned the hazard;
+        - T2 12, T3 3, controls 15: 0 hazards in the 24 correction trials, and no seeded fact
+          changed in any trial.
+        - The follow-ups made no model call.
+      - **Eval skipped** (not run against the real model).
+      - **Mutations: 14, all caught.** Eight for the confirm (section 2's table), two for the
+        spoken "#" (section 3) and four for the same-channel rule (section 4).
+      - **Replay:** 24 calls, of which 14 real rows, M32's row and 9 scripted answers. A dialog on
+        exactly rows 323, 389, 435 and 672, and the six flagship/eval corrections. The other 14
+        reproduce their expected result. Row 674 and M32's row are now *Already remembered "team"
+        as #social.*
+      - **Dry runs (no model):**
+        - the confirm: Cancel keeps v1; Approve writes v2;
+        - follow-up 2: `social` and `#social` show no dialog and keep #social v1; `#fun` still
+          shows it.
+      - **Re-justified:**
+        - section 2: the correction, eval, flagship and bot/webhook tests, and the two registry
+          invariants;
+        - section 4: the weaker-form test, Cancel and Approve, the spoken pairs, and the replay's
+          M32 row and dialog list.
+
+      **Proven vs. live-only.**
+      - **The hazard never reproduced as M32 saw it.** 0 of 24 correction trials planned an
+        overwrite of `team`, and M32's own plan (`team` = social) is now the same channel.
+      - **The fix is proven by:** tests (the rule, the replay, 14 mutations); the dry runs; one
+        real catch in a control trial, where the model planned `team` = "the design channel", the
+        dialog caught it, and Cancel kept #social; and her real-app H1.
+      - **Seen only live:** the real dialog and Cancel (H1); the same-channel no-op and the
+        refresh in her real memory (H2); the spoken "hash" through real Piper (H3).
+
+      **Open findings, not fixed in M33 (the M34 candidates):**
+      1. **The "#" goes missing from instructions.** Rows 672 and 674 logged the instruction
+         itself as "remember the team is fun?" and "…is social", for what Sejal says she typed
+         with a "#". The model then sent what it received. The cause is unknown: no code strips
+         a "#" (the typed path, the IPC handler and the transcript cleaner were all read). The
+         same-channel equality protects same-name values only.
+      2. **New facts are never asked about.** 5 of 27 correction trials silently saved a junk new
+         fact (`channel:fun` = social, `channel` = #social). This needs its own design.
+      3. **The unknown-channel gap (M31).** A Slack channel never taught to memory is not a
+         destination. It needs a cache-only directory method (an interface change, so Plan Mode)
+         and the seven decisions above.
+      4. **Memory housekeeping.**
+         - "forget" is still unbuilt.
+         - The active "samurai" fact (row 591, a clipboard dump) was left untouched.
+         - Bare facts like "bugs channel" = help are invisible to M31, because only "#" values
+           count.
+      5. **`remember`'s description** line "do NOT re-run the previous action" pulls corrections
+         toward `remember`. It is not edited, because prompt edits regressed controls (M28).
+      6. **A same-value `remember` still refreshes** the fact's confidence and updated time (seen
+         in H2). Expected; noted.
+      7. **The action log does not record whether an instruction was typed or spoken.**
+      8. **The older queue:**
+         - re-ask once on a refusal (needs an eval);
+         - "what did that job say?";
+         - a third connector, with the add-connector skill;
+         - screen Q&A;
+         - the demo recording.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

@@ -5,10 +5,10 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-30): M0-M32 shipped; M32 closed 2026-10-30 after a live run by a
-person, with seven open findings (see M32 below).**
+**Current status (as of 2026-10-30): M0-M33 shipped; M33 closed 2026-10-30 after a live run by a
+person, with eight open findings (see M33 below).**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M32 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M33 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -155,6 +155,46 @@ only**. For M20 to M32 the status lives in `spec.md` (§9's entry for each, and 
 
   `npm test`: 3384 across 143 files, 96 skipped (run with a scratch SQLite build; an electron
   instance held the real one).
+- **M33 - confirm before `remember` replaces a different value.** Closed 2026-10-30 after a live
+  run by a person. `docs/M33-live-checklist.md`: 3 ticked, 1 open (H4, optional, not run: it
+  could write a junk fact to the real memory).
+  - **The changes.**
+    - `remember`'s tier depends on its arguments. It is `dangerous` when an active fact with
+      exactly this subject holds a different value: *Change what I remember for "team" from
+      #social to #fun?*, with the button "Change it".
+    - `prepare` settles the saved value: the bot-mode channel check moved there from the
+      handler, and `PrepareDeps` gained `senderMode: "bot"`, present only in bot mode.
+    - **The same-channel rule** (`sameName` and `judge`): values match ignoring one leading
+      "#", case and spaces.
+      - "social" for a stored #social writes nothing (*Already remembered "team" as #social.*).
+      - "#social" over a stored "social" is a silent upgrade to v2.
+    - A new `Tool.speakConfirm` field: `remember` says a leading "#" as "hash" in the spoken
+      dialog only.
+  - **New files.**
+    - `tests/remember.overwrite.test.ts`;
+    - `tests/fixtures/rememberCalls/` (the replay of every recorded `remember` call);
+    - `scripts/m33-live.ts`, the live harness, committed this time: faked connectors, a real
+      in-memory SQLite that keeps writes, fake checks before any model call, and `--scripted`
+      for the dry run.
+    - `scripts/m30-say-refusal.ts` gained `--remember-change`.
+  - **Evidence.**
+    - Scripted live with faked connectors, 42 calls: the hazard 0 of 24 correction trials, and
+      no seeded fact changed. One control ("no, I meant the design channel") planned `team` =
+      "the design channel", and the dialog caught it.
+    - 14 mutations, all caught.
+    - Her real-app H1-H3.
+  - **Open findings (M34 candidates).**
+    - A "#" missing from instructions as logged (rows 672 and 674), cause unknown.
+    - New facts are never asked about (5 of 27 junk writes).
+    - The unknown-channel gap (a cache-only directory method; Plan Mode; seven decisions).
+    - "forget" unbuilt; the "samurai" clipboard fact left in place; bare facts invisible to M31.
+    - `remember`'s "do NOT re-run" description line (not editable, M28).
+    - A same-value `remember` refreshes confidence and the updated time.
+    - The log does not record typed or spoken.
+    - The older queue: re-ask on refusal, "what did that job say?", a third connector, screen
+      Q&A, the demo recording.
+
+  `npm test`: 3482 across 144 files, 96 skipped (plain `npm test`; nothing held the SQLite binary).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -172,7 +212,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30, M31, M32) and the thirteen checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30, M31, M32, M33) and the fourteen checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`
