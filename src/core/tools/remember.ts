@@ -4,15 +4,45 @@ import { userSource } from "../memory/source.ts";
 import { resolveSlackName, slackRefusalText } from "./sendMessage.ts";
 import type { Fact, Memory, PrepareDeps, Tool, ToolDeps, ToolInput } from "../types.ts";
 
-// M33. The fact this call would REPLACE: an active fact with exactly this subject (not `query`'s
-// LIKE match, which would let "channel" stand in for "bugs channel") holding a value other than
-// the one `prepare` settled. Null for a first write and for the same value said again. A memory
-// that cannot be read throws, and the tier escalates (core/risk.ts).
+// M33 (live finding). Two values NAME THE SAME THING when they match once one leading "#" is set
+// aside, with case and surrounding spaces ignored: "#social", "social" and " #Social " are one
+// channel. Speech-to-text cannot write a "#" at all, so "remember the team is #social", said
+// aloud, arrives as "social" — and was being asked about as if it changed the team.
+export function sameName(a: string, b: string): boolean {
+  const name = (value: string): string => value.trim().replace(/^#/, "").trim().toLowerCase();
+  return name(a) === name(b);
+}
+
+// What writing `value` would do to the fact `current` (the active one with exactly this subject):
+//   first    nothing is stored: written, silently
+//   same     the very same text: written as before, which only refreshes it (no new version)
+//   keep     the same name, and the stored form is already the "#" one or differs only in case:
+//            NOTHING is written, and the stored form stands ("Already remembered …")
+//   upgrade  the same name, and only the new form has the "#": written silently, as v2
+//   change   a different value: asked about first (the tier is `dangerous`)
+export type Judgement = "first" | "same" | "keep" | "upgrade" | "change";
+
+export function judge(current: Pick<Fact, "value"> | undefined, value: string): Judgement {
+  if (current === undefined) return "first";
+  if (current.value === value) return "same";
+  if (!sameName(current.value, value)) return "change";
+  return value.trim().startsWith("#") && !current.value.trim().startsWith("#") ? "upgrade" : "keep";
+}
+
+// The active fact with EXACTLY this subject — not `query`'s LIKE match, which would let
+// "channel" stand in for "bugs channel". A memory that cannot be read throws.
+function currentFact(subject: string, memory: Pick<Memory, "query">): Fact | undefined {
+  return memory.query(subject).find((fact) => fact.subject === subject);
+}
+
+// M33. The fact this call would REPLACE with a different value, or null: a first write, the same
+// value said again and the same name in another form are not replacements. A memory that cannot
+// be read throws, and the tier escalates (core/risk.ts).
 function replaced(args: ToolInput, memory: Pick<Memory, "query">): Fact | null {
   const subject = typeof args["subject"] === "string" ? args["subject"] : "";
   const value = typeof args["value"] === "string" ? args["value"] : "";
-  const current = memory.query(subject).find((fact) => fact.subject === subject);
-  return current !== undefined && current.value !== value ? current : null;
+  const current = currentFact(subject, memory);
+  return current !== undefined && judge(current, value) === "change" ? current : null;
 }
 
 // M33. In the dialog only, a long value is cut; what is saved stays whole.
@@ -43,8 +73,8 @@ export function changeQuestion(subject: string, from: Replacing, to: string): st
 }
 
 // The same question as it is SAID (`speakConfirm`). The speech cleaner drops every "#", which
-// is right for "Send to #design-team?" and wrong here: `#social` → `social` would be heard as
-// "from social to social", the one difference the dialog exists to show. So a value's leading
+// is right for "Send to #design-team?" and wrong here: `#social` → `help` would be heard without
+// the one mark that tells a channel from a word. So a value's leading
 // "#" is said as "hash" — in the spoken words only; the written dialog is `changeQuestion`'s.
 export function spokenChangeQuestion(subject: string, from: Replacing, to: string): string {
   return question(subject, from, to, (value) => forDialog(value).replace(/^#/, "hash "));
@@ -122,8 +152,9 @@ export const rememberTool: Tool = {
   },
   // M33. REPLACING a value the user taught is confirmed first. The old row is kept, but nothing
   // shows it again (`recall` lists active facts only) and nothing restores it — so a write the
-  // model planned for a correction it misread ("actually, post it in social instead" → `team` =
-  // `social`, M32) would quietly change what "the team" means. A first write, the same value
+  // model planned for a correction it misread ("no, I meant the design channel" → `team` = "the
+  // design channel", seen live in M33) would quietly change what "the team" means. (M32's own
+  // `team` = `social` against #social is the same channel and changes nothing.) A first write, the same value
   // again, and anything `prepare` refused stay as they were: no dialog.
   risk: {
     tiers: ["reversible", "dangerous"],
@@ -177,7 +208,13 @@ export const rememberTool: Tool = {
 
     // What did we believe before? (Lets the result show the correction, and makes the
     // versioning visible to the user rather than silent.)
-    const previous = deps.memory.query(subject).find((fact) => fact.subject === subject);
+    const previous = currentFact(subject, deps.memory);
+
+    // M33. The same name in a form no better than the stored one ("social" for #social): the
+    // stored form stands, and nothing is written — not even a refresh.
+    if (previous !== undefined && judge(previous, stored) === "keep") {
+      return `Already remembered "${subject}" as ${previous.value}.`;
+    }
 
     // The existing, already-tested version-on-conflict write: on a differing value the old row
     // is deactivated and a new version is inserted. Never an overwrite.

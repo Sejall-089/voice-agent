@@ -21,8 +21,10 @@
 //
 // A fact that REPLACES a different value is DANGEROUS (M33, `tools/remember.ts`). The old row is
 // kept, but nothing shows it again (`recall` lists active facts only) and nothing restores it, so
-// in practice it is gone; and a model that misread a correction ("actually, post it in social
-// instead") can plan one. Until M33 that whole tool was REVERSIBLE on the strength of the kept row.
+// in practice it is gone; and a model that misread a correction ("no, I meant the design
+// channel" → `team` = "the design channel") can plan one. The same channel with or without its
+// "#" is not a different value. Until M33 that whole tool was REVERSIBLE on the strength of the
+// kept row.
 //
 // The clipboard is NOT recoverable in itself: the app keeps no copy of what a write replaces. A
 // clipboard write is only acceptable at REVERSIBLE because the user asked for it ("rewrite this"

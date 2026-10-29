@@ -2,8 +2,8 @@
 // the real planner with no model.
 //
 // SOURCES.
-//   - The real action log: all 12 `remember` rows (rows 14-591), read from a copy of memory.db on
-//     2026-10-30. `before` is the memory as it stood one second before each row, rebuilt from the
+//   - The real action log: all 14 `remember` rows (rows 14-591, and 672 and 674 from the M33 live
+//     run), read from copies of memory.db on 2026-10-30. `before` is the memory as it stood one second before each row, rebuilt from the
 //     fact table's versions and timestamps (a fact counts if it was created before then and was
 //     still active, or was deactivated after). Writes are listed in order, superseded values
 //     included, so the versions the replay reaches are the versions the app reached.
@@ -202,17 +202,49 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
     result: `Remembered: samurai = ${CLIPBOARD_MARKER}`,
   },
 
+  // --- 2026-10-30, the M33 live run (rows 672-674; 673 was a recall) ---
+  {
+    // Cancelled at the dialog live. A genuinely different value, so still asked about; approved
+    // here, it would write v2. (The "#" was not in the instruction the app received.)
+    id: "row 672",
+    source: "action log",
+    instruction: "remember the team is fun?",
+    arguments: { subject: "team", value: "fun" },
+    mode: "bot",
+    before: [...OCT_22, ["samurai", CLIPBOARD_MARKER]],
+    dialog: true,
+    status: "ok",
+    result: 'Updated "team": #social → fun (v2).',
+  },
+  {
+    // THE LIVE FINDING. Said as "remember the team is #social"; the instruction arrived without
+    // the "#" and the model sent "social". The app asked to change #social to social and Sejal
+    // cancelled. Now the same channel: no dialog, nothing written, #social kept at v1.
+    id: "row 674 (now a silent no-op that keeps #social)",
+    source: "action log",
+    instruction: "remember the team is social",
+    arguments: { subject: "team", value: "social" },
+    mode: "bot",
+    before: [...OCT_22, ["samurai", CLIPBOARD_MARKER]],
+    dialog: false,
+    status: "ok",
+    result: 'Already remembered "team" as #social.',
+  },
+
   // --- M32's scripted run ---
   {
-    id: "M32 correction",
+    // Was a dialog in M33's first build ("a weaker form is a change"). "social" names the same
+    // channel as the stored #social, so it is now a silent no-op that keeps #social. The
+    // overwrite M32 feared cannot happen this way; a correction naming a DIFFERENT value still asks.
+    id: "M32 correction (now a silent no-op that keeps #social)",
     source: "M32 scripted run",
     instruction: "actually, post it in social instead",
     arguments: { subject: "team", value: "social" },
     mode: "bot",
     before: [...OCT_22, ["samurai", CLIPBOARD_MARKER]],
-    dialog: true,
+    dialog: false,
     status: "ok",
-    result: 'Updated "team": #social → social (v2).',
+    result: 'Already remembered "team" as #social.',
   },
 
   // --- The scripted evals and flagship tests ---

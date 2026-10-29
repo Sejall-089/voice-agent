@@ -967,8 +967,8 @@ export interface Tool extends ToolSchema {
   // `toSpokenConfirm`, so cleaning and the length cap stay in one place; only the words handed
   // in differ. The dialog on screen is `confirmSummary`'s, unchanged. Absent — every tool but
   // `remember` — the dialog's own text is spoken, as before. `remember` needs it because the
-  // cleaner drops "#" (a channel reads better as "design team"), and then `#social` → `social`
-  // is heard as "from social to social".
+  // cleaner drops "#" (a channel reads better as "design team"), and then `#social` → `help`
+  // loses the one mark that tells a channel from a word.
   speakConfirm?: (args: ToolInput, deps: ToolDeps) => string | Promise<string>;
   // What to tell the user BEFORE a `caution` tool acts. Same shape and same reasoning as
   // confirmSummary — built from the resolved args — but it announces rather than asks, because

@@ -1,10 +1,10 @@
 # M33 — live verification checklist
 
 > **NOT YET RUN by a person.** `spec.md` §9 (M33): `remember` asks before it replaces a value you
-> taught it, with *Change what I remember for "team" from #social to social?* and a **Change it**
-> button; a new fact and the same value said again are saved with no dialog. Spoken, a value's
-> leading "#" is said as "hash" ("from hash social to social"); the written dialog is unchanged.
-> 0 ticked, 4 open (H4 optional).
+> taught it, with *Change what I remember for "team" from #social to #fun?* and a **Change it**
+> button. A new fact, the same value said again, and the same channel with or without its "#"
+> ("social" for a stored `#social`) are saved with no dialog. Spoken, a value's leading "#" is
+> said as "hash"; the written dialog is unchanged. 0 ticked, 4 open (H4 optional).
 >
 > **How results are marked** (same convention as the earlier checklists in `docs/`):
 >
@@ -12,8 +12,9 @@
 > - `[ ]` **Not yet watched**, including everything that only a test or a script has shown.
 >
 > **Nothing here files an issue, posts a message or changes a fact you taught it.** Every dialog
-> is answered **Cancel**. H2 is a value memory already holds: no new version, though the fact's
-> "updated" time is refreshed. **H4 is the one box that may write.** In the scripted run, the
+> is answered **Cancel**. H2's two instructions name the channel memory already holds. "…is
+> social" writes nothing. "…is #social" makes no new version, but refreshes the fact's "updated"
+> time. **H4 is the one box that may write.** In the scripted run, the
 > correction it uses saved a NEW fact with no dialog in 5 of 27 tries (`channel` = #social,
 > `channel:fun` = social). New facts are never asked about. H4 says what to look for.
 
@@ -27,8 +28,11 @@ team" should say `#social`.
       dialog *Change what I remember for "team" from #social to #fun?* appears, with a **Change
       it** button. Press **Cancel**. Then ask "what do you remember about the team": it must still
       say `#social` (`v1`).
-- [ ] **H2** Say "remember that team is #social". Expect: **no dialog**, and *Remembered: team =
-      #social*.
+- [ ] **H2** Type "remember the team is #social", and also "remember the team is social" (the live
+      finding: said aloud, the "#" never arrives). **Neither shows a dialog.** Expect *Remembered:
+      team = #social* for the first, *Already remembered "team" as #social.* for the second, and
+      "what do you remember about the team" still says `#social` (`v1`). If the terminal's `[main]`
+      line shows the model sent something else (another subject, say), note it.
 - [ ] **H3** With sound on, run `npx vite-node scripts/m30-say-refusal.ts --remember-change` and
       listen to the overwrite dialog as the app says it: *"Change what I remember for team from
       hash social to social?"* "Hash" must be audible, and the sentence clear. It runs no app, no
@@ -39,6 +43,8 @@ team" should say `#social`.
       - **If the model plans a `remember` that would change the team:** a dialog *Change what I
         remember for "team" from #social to …?* appears. Press **Cancel**. "What do you remember
         about the team" must still say `#social`.
+      - **If it plans `team` = social** (M32's plan): no dialog, and *Already remembered "team" as
+        #social.* Nothing is written.
       - **If it plans a send instead:** note what the preview or dialog showed, and press
         **Cancel**.
       - **If the result says "Remembered: …"** with no dialog, it saved a new fact, as in 5 of 27
@@ -101,13 +107,18 @@ C5's third trial is the hazard seen against the real model. The dialog read *Cha
 remember for "team" from #social to the design channel?*, and Cancel kept #social. No trial
 filed an issue, sent a message, reached a blocked host or changed a seeded fact.
 
-**Dry run, scripted (no model):** `npx vite-node scripts/m33-live.ts --scripted`, which scripts
-`remember team = social` with #social stored.
-- **Dialog:** *Change what I remember for "team" from #social to social?*, with the button
-  **Change it**.
-- **Cancel:** no result. The log row is `remember` with `{"subject":"team","value":"social"}`,
-  status `cancelled`. `team` = #social, v1, active.
-- **Approve:** *Updated "team": #social → social (v2).* v1 is inactive and v2 is active.
+*(The hazard counts above predate follow-up 2. Under today's rule, T1's and T2's `channel`
+facts are still new facts, and no counted hazard was a same-name value.)*
+
+**Dry run, scripted (no model),** after follow-up 2: `npx vite-node scripts/m33-live.ts
+--scripted`, with `team` = #social stored.
+- **`team` = social:** no dialog, *Already remembered "team" as #social.*, log row `ok`, `team` =
+  #social v1.
+- **`team` = #social:** no dialog, *Remembered: team = #social*, `team` = #social v1.
+- **`team` = #fun:** the dialog *Change what I remember for "team" from #social to #fun?*, with the
+  button **Change it**.
+  - **Cancelled:** no result, log row `cancelled`, `team` = #social v1.
+  - **Approved:** *Updated "team": #social → #fun (v2).* v1 is inactive and v2 is active.
 
 **Total: 42 real planning calls of the 45 allowed, est. ~$0.056.**
 
@@ -115,7 +126,9 @@ filed an issue, sent a message, reached a blocked host or changed a seeded fact.
 
 - **The rule** (`tests/remember.overwrite.test.ts`):
   - an empty store, the same value and a different value;
-  - a weaker form (#social → social) asks;
+  - the same channel with or without its "#" (follow-up 2): "social", "Social", "#Social" and
+    " social " against #social write nothing and keep #social; "#social" against a stored
+    "social" is a silent upgrade to v2; #fun, help and ##social still ask; in bot mode too;
   - the subject matches exactly, not by LIKE;
   - Cancel leaves the facts table unchanged (rows read back), and Approve writes v2 with v1
     inactive;
@@ -125,12 +138,14 @@ filed an issue, sent a message, reached a blocked host or changed a seeded fact.
   - the 200-character cap, and the spoken form.
 - **The phrasing set:** 4 corrections and 4 real remembers, each in two memory states. A dialog
   appears in exactly the 8 cases with a different value stored.
-- **The replay** (`tests/fixtures/rememberCalls/replay.ts`, 22 calls): the 12 real `remember` rows,
-  with the memory as it stood before each, M32's row and 9 scripted eval answers.
-  - A dialog on exactly rows 323, 389 and 435, M32's row and the six flagship/eval corrections.
+- **The replay** (`tests/fixtures/rememberCalls/replay.ts`, 24 calls): the 14 real `remember` rows
+  (with rows 672 and 674 from today's live run), the memory as it stood before each, M32's row and
+  9 scripted eval answers.
+  - A dialog on exactly rows 323, 389, 435 and 672, and the six flagship/eval corrections.
   - Cancelled, each of those leaves the facts unchanged; approved, it reproduces the recorded
     result.
-  - The other 12 reproduce their recorded result with no dialog.
+  - The other 14 reproduce their expected result with no dialog. Row 674 and M32's row are
+    now *Already remembered "team" as #social.*
 - **Row 475's refusal**, from `prepare`: the same text, `refused`, nothing written, no dialog
   (`tests/remember.bot.test.ts`).
 - **Mutations:** eight, each caught the first time (`spec.md` §9, M33):
@@ -143,12 +158,15 @@ filed an issue, sent a message, reached a blocked host or changed a seeded fact.
   - the same value counted as a change (2);
   - the cap removed (1).
 - **The dialog as spoken** (follow-up, `31aa8d0`), through the planner, heard and written.
-  - The value pairs: #social → social is heard "from hash social to social"; social → #social;
-    #social → #fun; and values with no "#".
+  - The value pairs, through the planner: #social → help, help → #social, #social → #fun, and
+    values with no "#". The same-name pair's wording ("from hash social to social", which H3
+    plays) is pinned at the function, since it no longer reaches a dialog.
   - Only a leading "#" is said, and only after the 200-character cut. The unread and nothing
     forms, and the chain prefix, are spoken too.
   - The written dialog is unchanged, and `remember` is the only tool with a spoken variant.
   - A bot-mode send, a webhook send and a Linear create are still spoken as before.
   - Two more mutations: the spoken form unchanged (caught by 4); "hash" in the written dialog
     too (caught by 22).
-- **3459 tests passed across 144 files, 96 skipped; both typechecks clean.**
+- **Follow-up 2's mutations,** each caught: equality on the raw strings (13); the bare form
+  overwriting the stored "#" form (11); the upgrade asking (1); a case-sensitive comparison (6).
+- **3482 tests passed across 144 files, 96 skipped; both typechecks clean.**

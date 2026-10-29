@@ -51,6 +51,7 @@ import type {
   PlannerOutcome,
   ToolChoice,
 } from "../src/core/types.ts";
+import { judge } from "../src/core/tools/remember.ts";
 import { createRunInstruction } from "../src/main/runInstruction.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import { FakeChannelDirectory } from "../tests/FakeChannelDirectory.ts";
@@ -240,7 +241,8 @@ function describeChoice(choice: ToolChoice): string {
   return `incomplete: ${choice.reason}`;
 }
 
-// A remember the model asked for whose subject already holds a DIFFERENT value (the hazard).
+// A remember the model asked for whose subject already holds a DIFFERENT value (the hazard) —
+// judged by remember's own rule, so "social" for a stored #social (the same channel) is not one.
 function hazards(choice: ToolChoice, facts: Record<string, string>): string[] {
   return stepsOf(choice)
     .filter((s) => s.tool === "remember" || s.tool === "functions.remember")
@@ -248,7 +250,7 @@ function hazards(choice: ToolChoice, facts: Record<string, string>): string[] {
       const subject = normalizeReference(String(s.arguments["subject"] ?? ""));
       const value = String(s.arguments["value"] ?? "").trim();
       const held = facts[subject];
-      return held !== undefined && held !== value ? [`${subject}: ${held} -> ${value}`] : [];
+      return held !== undefined && judge({ value: held }, value) === "change" ? [`${subject}: ${held} -> ${value}`] : [];
     });
 }
 
@@ -335,14 +337,22 @@ async function checkFakes(): Promise<boolean> {
 
 // --- The dry run: a scripted remember, no model ---------------------------------------------
 
+// With `team` = #social stored: "social" and "#social" name the same channel (no dialog, #social
+// kept at v1); "#fun" is a change (the dialog), shown cancelled and then approved.
 async function scriptedDryRun(): Promise<void> {
-  const choice: ToolChoice = { kind: "tool", name: "remember", input: { subject: "team", value: "social" } };
   const c = CASES.find((x) => x.id === "correction")!;
-  for (const answer of ["Cancel", "Approve"] as const) {
+  const runs: { value: string; answer: "Cancel" | "Approve" }[] = [
+    { value: "social", answer: "Cancel" },
+    { value: "#social", answer: "Cancel" },
+    { value: "#fun", answer: "Cancel" },
+    { value: "#fun", answer: "Approve" },
+  ];
+  for (const { value, answer } of runs) {
+    const choice: ToolChoice = { kind: "tool", name: "remember", input: { subject: "team", value } };
     const w = world(c, new FakeLLM(choice, FAKE_COMPLETION), answer === "Approve" ? [true] : []);
-    await w.run(c.instruction);
+    await w.run(`remember the team is ${value}`);
     const row = w.log.entries[w.log.entries.length - 1];
-    console.log(`\n[dry run] ${answer}`);
+    console.log(`\n[dry run] team = ${value}, any dialog answered ${answer}`);
     console.log(`  dialog:  ${JSON.stringify(w.shell.confirmMessages)}`);
     console.log(`  label:   ${JSON.stringify(w.shell.confirmLabels)}`);
     console.log(`  result:  ${JSON.stringify(w.shell.results)}`);

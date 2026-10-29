@@ -1396,32 +1396,61 @@ clipboard is still sent whole: only the previous turn ages out.
 "actually, post it in social instead" planned `remember` with `team` = `social`. `remember` was
 `reversible`, so it ran with no dialog. In the app that would replace `team` = `#social` with
 the bare word "social". The old row is kept, but nothing shows it again (`recall` lists active
-facts only) and nothing restores it. The real log has one such overwrite that nobody wanted:
-row 323, a statement ("Hello my name is …") that was not a correction, which replaced the stored
-name and stood for four days until row 435 put it back.
+facts only) and nothing restores it. The real log has one overwrite that nobody wanted: row 323,
+a statement ("Hello my name is …") that was not a correction. It replaced the stored name, and it
+stood for four days until row 435 put it back. *(M33's live finding then showed that "social"
+for a stored `#social` is not a change at all; see "The same channel, with or without its #".)*
 
 **The rule.** `remember`'s tier depends on its arguments (`RiskPolicy`). It is `dangerous` when
-an active fact with **exactly** the normalized subject holds a value **other than the one
-`prepare` settled**. Otherwise it is `reversible`. The match is exact, not `query`'s LIKE, so
-"channel" is not "bugs channel". The settled value is compared, not what was typed, so in bot
-mode "Social" for a channel fact holding `#social` is the same value. A first write, the same
-value again, and anything `prepare` refused stay silent. The rule does not depend on the
-instruction's wording: no word list and no prompt change. M28 showed that prompt rules regress
-the controls.
+an active fact with **exactly** the normalized subject holds a **different** value from the one
+`prepare` settled. Otherwise it is `reversible`.
+- **The match is exact,** not `query`'s LIKE, so "channel" is not "bugs channel".
+- **The settled value is compared,** not what was typed.
+- **"Different" has a precise meaning:** not the same text, and not the same name in another
+  form (below).
+- **Silent:** a first write, the same value again, the same name, and anything `prepare` refused.
+- **No word list and no prompt change:** the rule does not depend on the instruction's wording.
+  M28 showed that prompt rules regress the controls.
 
-**The dialog.** *Change what I remember for "team" from #social to social?*, built by
+**The same channel, with or without its # (added 2026-10-30, M33 live finding).** Two values
+name the same thing when they match once one leading "#" is set aside, ignoring case and
+surrounding spaces (`sameName`): `#social`, `social`, `#Social` and ` social `. Against an active
+value, `judge` decides:
+
+| Stored | New | What happens |
+|---|---|---|
+| `#social` | `#social` (the same text) | as before: refreshed, no new version, *Remembered: team = #social* |
+| `#social` | `social`, `Social`, `#Social` | **nothing written**: the stored form stands, *Already remembered "team" as #social.* |
+| `social` | `#social` | **an upgrade**: the "#" form is written silently as v2 |
+| `#social` | `#fun`, `help`, `##social` | a change: the dialog |
+
+**The live finding.** Sejal said "remember the team is #social" with `#social` stored, and was
+asked *Change what I remember for "team" from #social to social?*.
+- **What arrived:** row 674 logs the instruction as "remember the team is social". The "#" had not
+  reached the app, so the model sent `social`, as given.
+- **Nothing in code strips a "#".** The typed path flattens newlines and trims
+  (`CommandBar.tsx`); the transcript cleaner removes only bracketed and parenthesized text.
+  Speech-to-text cannot write a "#".
+- **What the code did miss:** the bot-mode channel check runs only for a value starting "#" or a
+  subject ending in "channel" (`remember.ts`, `channelFactValue`). So `team` = `social` was never
+  canonicalized, and the raw strings were compared.
+- **The decision is reversed.** M33's first build decided that a weaker form of the same channel
+  shows the dialog. For a same-name value that was wrong. A correction that names a different
+  value still asks.
+
+**The dialog.** *Change what I remember for "team" from #social to #fun?*, built by
 `changeQuestion` (`tools/remember.ts`) from the settled arguments. A value over 200 characters is
 cut with "..." in the dialog only, and the saved value stays whole. The button is a fixed "Change
 it". Inside a chain it gets the step prefix. A detached job waits at the pill, like every
 confirm. If memory cannot be read, the tier escalates and the dialog says *Change what I
-remember for "team" to social? I couldn't check what it holds now.* Cancel writes nothing and
+remember for "team" to #fun? I couldn't check what it holds now.* Cancel writes nothing and
 logs the row `cancelled`. Approve versions the old row as before (*Updated "team": #social →
-social (v2).*).
+#fun (v2).*).
 
 **As spoken.** The speech cleaner drops every "#" (right for "Send to #design-team?"), which
-would make the weaker-form case heard as "from social to social". So `remember` declares
-`speakConfirm` (§6). In the spoken words only, a value's leading "#" is said as "hash": *Change
-what I remember for team from hash social to social?* The dialog on screen is unchanged.
+would blur a change like `#social` → `help`. So `remember` declares `speakConfirm` (§6). In the
+spoken words only, a value's leading "#" is said as "hash": *Change what I remember for team
+from hash social to hash fun?* The dialog on screen is unchanged.
 
 **Known gaps.**
 - A first write is never asked about. In M33's live runs a correction wrote a junk new fact 5
@@ -1867,7 +1896,7 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `summarize`   | 1. Summarize selection               | no            | safe         | LLM summarizes `context.selectedText`; showResult | summarize the text you copied |
 | `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard. **In a chain (M29): returns only the rewritten text; no clipboard write, no header line** | reword the text you copied |
 | `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` | open a web page |
-| `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible / **dangerous** | `prepare` settles the subject and value (M33; the bot-mode channel check moved there) → `memory.write()` (versions old fact on conflict). **`dangerous` (M33) when an active fact with exactly this subject holds a different value:** confirmed first, *Change what I remember for "team" from #social to social?*, button "Change it"; a first write and the same value stay `reversible` | save a fact to memory |
+| `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible / **dangerous** | `prepare` settles the subject and value (M33; the bot-mode channel check moved there) → `memory.write()` (versions old fact on conflict). **`dangerous` (M33) when an active fact with exactly this subject holds a different value:** confirmed first, *Change what I remember for "team" from #social to #fun?*, button "Change it". A first write, the same value and the same name with or without its "#" (`social` for `#social`: nothing written, *Already remembered "team" as #social.*) stay `reversible` (§5b) | save a fact to memory |
 | `sendMessage` | 5. Format notes and send             | yes (channel only — `referenceArgs`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST | post a message to Slack |
 | `recall`      | 7. What do you remember about…       | reads         | safe         | `memory.query()` → showResult with metadata | look up a saved fact |
 | `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft | draft a reply in Gmail |
@@ -2344,10 +2373,11 @@ spoken. `(args, deps) => string | Promise<string>`, with the same rules as `conf
 reads only, and it runs in the same `try`, so a throw refuses the call before any dialog. The
 planner still puts the step prefix in front and runs the result through `toSpokenConfirm`,
 so the cleaning and the length cap stay in one place; only the words handed in differ. The
-dialog on screen is `confirmSummary`'s, unchanged. **Only `remember` declares it**: the
-cleaner drops every "#", so its *Change what I remember for "team" from #social to social?*
-would be heard as "from social to social". `spokenChangeQuestion` says a value's leading "#" as
-"hash" ("from hash social to social"), after the 200-character cut. Every other tool still has
+dialog on screen is `confirmSummary`'s, unchanged. **Only `remember` declares it.** The
+cleaner drops every "#", so *Change what I remember for "team" from #social to help?* would be
+heard without the "#" that tells a channel from a word. `spokenChangeQuestion` says a value's
+leading "#" as "hash" ("from hash social to help"), after the 200-character cut. (`#social` →
+`social` itself no longer reaches a dialog: the same channel, §5b.) Every other tool still has
 its dialog's first paragraph spoken, "#" dropped, as before (`tests/remember.overwrite.test.ts`
 replays a bot-mode send, a webhook send and a Linear create).
 
@@ -5786,7 +5816,10 @@ Post-v0:
       - `984fdc2`: the confirm and its tests.
       - `f813f52`: the scripted results and checklist.
       - `31aa8d0`: the "#" said as "hash" in the spoken dialog (follow-up, below).
-      - The checklist for the real app: this entry's latest commit.
+      - `3b12fd1`: the checklist for the real app.
+      - "social" and "#social" as the same channel (follow-up 2, below): this entry's latest
+        commit. **It supersedes the weaker-form decision recorded in sections 2 and 3:** #social
+        → social no longer reaches a dialog.
 
       **1. Settled in `prepare`** (`bdcebcf`). `remember`'s canonical subject, trimmed value and
       bot-mode channel check moved from its handler into `prepare`. The handler writes exactly
@@ -5946,6 +5979,83 @@ Post-v0:
 
       Both mutations were made and undone with the Edit tool. **3459 tests, 96 skipped**; both
       typechecks clean.
+
+      **4. Follow-up 2: "social" and "#social" are the same channel** (§5b, "The same channel,
+      with or without its #"; no model calls).
+
+      **The live finding (Sejal, the real app, 2026-10-30).** She said "remember the team is
+      #social" with `team` = #social stored (v1), and was asked *Change what I remember for
+      "team" from #social to social?*. She expected no dialog: "#social" and "social", typed or
+      spoken, should behave the same.
+
+      **What the diagnosis found** (a read-only copy of the action log, then scripted answers):
+      - **Row 674** (19:55:45 UTC, 01:25 her time): the instruction arrived as "remember the team
+        is social", without the "#". The model sent `{"subject":"team","value":"social"}`, and
+        `prepare` settled it unchanged. It was cancelled.
+      - **Row 672** ("remember the team is fun?") lost its "#" the same way. Its "?" looks like a
+        transcript's, but the log does not say whether the bar was typed into or spoken to.
+      - `team` is still #social, v1.
+      - **No code strips a "#":** not the bar's input (newlines flattened, trimmed), not the IPC
+        handler, and not the transcript cleaner (brackets and parentheses only).
+      - **Reproduced in bot mode,** with the directory fake listing social. "#social" was checked
+        in Slack, settled as #social, equal, and showed no dialog. "social" was not checked at
+        all: `channelFactValue` runs only for a value starting "#" or a subject ending in
+        "channel". It stayed "social", the raw strings differed, and the dialog appeared.
+      - **So the "#" was lost before the app saw the instruction, not by the model or by code.**
+        What code got wrong was the decision that a bare same-name value is a change.
+
+      **The fix** (`tools/remember.ts`, `sameName` and `judge`; the tier and the handler use the
+      same judgement):
+      - Values match ignoring one leading "#", case and surrounding spaces.
+      - **The stored "#" form stands** against a bare or differently-cased one: nothing is
+        written, and the result is *Already remembered "team" as #social.*
+      - **An upgrade:** a "#" form against a stored bare value is written silently as v2.
+      - **The very same text** is the old refresh.
+      - **A different value** (#fun, help, ##social) still asks.
+      - The written and spoken dialog code is unchanged. The "hash" speech stays.
+      - The harness's hazard count (`scripts/m33-live.ts`) uses the same judgement.
+
+      **Tests (+23, `tests/remember.overwrite.test.ts`, now 95):**
+      - **Same name, nothing written:** six value/stored pairs (bare, "Social", "SOCIAL",
+        "#Social", spaces, two bare forms).
+      - **Upgrade and same text:** the upgrade written silently as v2; the same text a plain
+        refresh.
+      - **Still a change:** #fun, help, social-team and ##social show the dialog.
+      - **Bot mode:** four forms of social give no dialog, with #social kept; #fun is refused
+        (that Slack has no #fun); #help shows the dialog.
+      - **`sameName` and `judge`** directly.
+      - **The replay** gains row 672 (still a dialog) and row 674 (now a no-op).
+
+      **Re-justified** (each test changed, and why):
+      - **The old weaker-form test** asserted a dialog for #social → social. It is now *"the same
+        channel without its # (#social → social) is NOT a change: no dialog, #social kept"*. Beside
+        it, *"a genuinely different value still asks (#social → help)"*.
+      - **Cancel and Approve** both used #social → social. They now use #social → #fun, and what
+        they check is unchanged.
+      - **The spoken pairs:** #social → social and social → #social no longer reach the planner's
+        dialog. The planner-level pairs are now #social → help, help → #social, #social → #fun and
+        tone. The "hash" wording for the same-name pair is pinned at the function.
+      - **The replay's M32 row** is renamed *"M32 correction (now a silent no-op that keeps
+        #social)"*: dialog false, result *Already remembered "team" as #social.*
+      - **The replay's dialog list:** M32's row left, row 672 joined, and the action-log count is
+        now 14.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Same name ignoring the "#" | equality compares the raw strings | 13 |
+      | The stored "#" form stands | the bare form overwrites it | 11 |
+      | An upgrade is silent | the upgrade asks | 1 |
+      | Case is ignored | a case-sensitive comparison | 6 |
+
+      All four were made and undone with the Edit tool.
+
+      **Dry run (no model,** `scripts/m33-live.ts --scripted`, with `team` = #social stored):
+      - `team` = social: no dialog, *Already remembered "team" as #social.*, #social v1.
+      - `team` = #social: no dialog, *Remembered: team = #social*, #social v1.
+      - `team` = #fun: the dialog *Change what I remember for "team" from #social to #fun?*.
+        Cancelled, #social v1; approved, *Updated "team": #social → #fun (v2).*
+
+      **3482 tests, 96 skipped**; both typechecks clean.
 
       **Model calls: 42 of the 45 allowed**, est. ~$0.056:
       - T1 12 (~$0.021), T2 12 (~$0.020), T3 3 (~$0.005);

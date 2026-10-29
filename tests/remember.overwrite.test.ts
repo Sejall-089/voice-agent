@@ -9,7 +9,7 @@ import { Planner } from "../src/core/planner.ts";
 import { buildRegistry, registry } from "../src/core/registry.ts";
 import { resolveRisk } from "../src/core/risk.ts";
 import { toSpokenConfirm } from "../src/core/speech.ts";
-import { DIALOG_VALUE_MAX, changeQuestion, rememberTool, spokenChangeQuestion } from "../src/core/tools/remember.ts";
+import { DIALOG_VALUE_MAX, changeQuestion, judge, rememberTool, sameName, spokenChangeQuestion } from "../src/core/tools/remember.ts";
 import type { Memory, MessageSender, ToolChoice, ToolDeps } from "../src/core/types.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import { FakeBotSender, harness } from "./botChainHarness.ts";
@@ -85,10 +85,22 @@ describe("when remember asks", () => {
     expect(w.shell.confirmLabels).toEqual(["Change it"]);
   });
 
-  it("a weaker form (#social -> social) is a different value, and asks", async () => {
+  // RE-JUSTIFIED (M33 live finding). This test used to assert a dialog for #social -> social, on
+  // the reasoning that a weaker form was a change. It is not: "social" names the same channel, and
+  // speech-to-text cannot write a "#". Now it is a silent no-op that keeps #social at v1.
+  it("the same channel without its # (#social -> social) is NOT a change: no dialog, #social kept", async () => {
     const w = world(remember("team", "social"), { facts: [["team", "#social"]] });
-    await w.planner.run("actually, post it in social instead");
-    expect(w.shell.confirmMessages).toEqual(['Change what I remember for "team" from #social to social?']);
+    const outcome = await w.planner.run("remember the team is social");
+    expect(outcome.status).toBe("ok");
+    expect(w.shell.confirmMessages).toEqual([]);
+    expect(w.shell.results).toEqual(['Already remembered "team" as #social.']);
+    expect(w.facts()).toEqual([{ subject: "team", value: "#social", version: 1, active: 1 }]);
+  });
+
+  it("a genuinely different value still asks (#social -> help)", async () => {
+    const w = world(remember("team", "help"), { facts: [["team", "#social"]] });
+    await w.planner.run("remember the team is help");
+    expect(w.shell.confirmMessages).toEqual(['Change what I remember for "team" from #social to help?']);
   });
 
   it("matches the subject EXACTLY: 'channel' is not 'bugs channel'", async () => {
@@ -107,30 +119,122 @@ describe("when remember asks", () => {
   });
 });
 
+// RE-JUSTIFIED (M33 live finding): both used #social -> social, which is no longer a change. They
+// now use #social -> #fun, a genuinely different value; what they check is unchanged.
 describe("what Cancel and Approve do", () => {
   it("Cancel leaves the facts table exactly as it was, and logs the row cancelled", async () => {
-    const w = world(remember("team", "social"), { facts: [["team", "#social"], ["tone", "warm"]] });
+    const w = world(remember("team", "#fun"), { facts: [["team", "#social"], ["tone", "warm"]] });
     const before = w.facts();
-    const outcome = await w.planner.run("actually, post it in social instead");
+    const outcome = await w.planner.run("actually, post it in fun instead");
 
+    expect(w.shell.confirmMessages).toEqual(['Change what I remember for "team" from #social to #fun?']);
     expect(outcome.status).toBe("cancelled");
     expect(w.facts()).toEqual(before);
     expect(w.shell.results).toEqual([]);
     expect(w.log.entries).toEqual([
-      expect.objectContaining({ tool: "remember", arguments: { subject: "team", value: "social" }, status: "cancelled" }),
+      expect.objectContaining({ tool: "remember", arguments: { subject: "team", value: "#fun" }, status: "cancelled" }),
     ]);
   });
 
   it("Approve writes v2 and keeps v1, inactive", async () => {
-    const w = world(remember("team", "social"), { facts: [["team", "#social"]], confirms: [true] });
-    const outcome = await w.planner.run("actually, post it in social instead");
+    const w = world(remember("team", "#fun"), { facts: [["team", "#social"]], confirms: [true] });
+    const outcome = await w.planner.run("actually, post it in fun instead");
 
     expect(outcome.status).toBe("ok");
-    expect(w.shell.results).toEqual(['Updated "team": #social → social (v2).']);
+    expect(w.shell.results).toEqual(['Updated "team": #social → #fun (v2).']);
     expect(w.facts()).toEqual([
       { subject: "team", value: "#social", version: 1, active: 0 },
-      { subject: "team", value: "social", version: 2, active: 1 },
+      { subject: "team", value: "#fun", version: 2, active: 1 },
     ]);
+  });
+});
+
+// M33 live finding: Sejal said "remember the team is #social" with #social stored, the "#" did not
+// reach the app (row 674 logs "...is social"), and she was asked to change #social to social.
+// "#social" and "social" — typed or spoken — now name the same channel.
+describe("the same channel with or without its #", () => {
+  it.each([
+    { stored: "#social", value: "social", why: "the bare form of the stored #social" },
+    { stored: "#social", value: "Social", why: "a different case" },
+    { stored: "#social", value: "SOCIAL", why: "all capitals" },
+    { stored: "#social", value: "#Social", why: "the # form in a different case" },
+    { stored: "#social", value: "  social  ", why: "surrounding spaces (trimmed in prepare)" },
+    { stored: "social", value: "Social", why: "two bare forms, different case" },
+  ])("$value against stored $stored ($why): no dialog, nothing written, the stored form kept", async ({ stored, value }) => {
+    const w = world(remember("team", value), { facts: [["team", stored]], confirms: [true] });
+    const outcome = await w.planner.run(`remember the team is ${value}`);
+    expect(outcome.status).toBe("ok");
+    expect(w.shell.confirmMessages).toEqual([]);
+    expect(w.shell.results).toEqual([`Already remembered "team" as ${stored}.`]);
+    expect(w.facts()).toEqual([{ subject: "team", value: stored, version: 1, active: 1 }]);
+  });
+
+  it("the # form against a stored bare value is an upgrade: written silently as v2", async () => {
+    const w = world(remember("team", "#social"), { facts: [["team", "social"]] });
+    const outcome = await w.planner.run("remember the team is #social");
+    expect(outcome.status).toBe("ok");
+    expect(w.shell.confirmMessages).toEqual([]);
+    expect(w.shell.results).toEqual(['Updated "team": social → #social (v2).']);
+    expect(w.facts()).toEqual([
+      { subject: "team", value: "social", version: 1, active: 0 },
+      { subject: "team", value: "#social", version: 2, active: 1 },
+    ]);
+  });
+
+  it("the very same text is still the plain re-assertion: no dialog, no new version", async () => {
+    const w = world(remember("team", "#social"), { facts: [["team", "#social"]] });
+    await w.planner.run("remember the team is #social");
+    expect(w.shell.confirmMessages).toEqual([]);
+    expect(w.shell.results).toEqual(["Remembered: team = #social"]);
+    expect(w.facts()).toEqual([{ subject: "team", value: "#social", version: 1, active: 1 }]);
+  });
+
+  it.each([
+    { stored: "#social", value: "#fun" },
+    { stored: "#social", value: "help" },
+    { stored: "#social", value: "social-team" },
+    { stored: "#social", value: "##social" },
+  ])("$value against $stored is a different value: the dialog", async ({ stored, value }) => {
+    const w = world(remember("team", value), { facts: [["team", stored]] });
+    await w.planner.run(`remember the team is ${value}`);
+    expect(w.shell.confirmMessages).toEqual([`Change what I remember for "team" from ${stored} to ${value}?`]);
+    expect(w.facts()).toEqual([{ subject: "team", value: stored, version: 1, active: 1 }]);
+  });
+
+  describe("bot mode (the real directory fake lists #social)", () => {
+    it.each(["social", "#social", "Social", "#Social"])("'%s' against stored #social: no dialog, #social at v1", async (value) => {
+      const h = harness(remember("team", value), { facts: { team: "#social" }, confirms: [true] });
+      const outcome = await h.planner.run(`remember the team is ${value}`);
+      expect(outcome.status).toBe("ok");
+      expect(h.shell.confirmMessages).toEqual([]);
+      expect(h.facts()).toEqual([{ subject: "team", value: "#social", active: 1 }]);
+    });
+
+    it("'#fun' against stored #social is refused (Slack here has no #fun), with no dialog", async () => {
+      const h = harness(remember("team", "#fun"), { facts: { team: "#social" }, confirms: [true] });
+      const outcome = await h.planner.run("remember the team is #fun");
+      expect(outcome.status).toBe("refused");
+      expect(h.shell.confirmMessages).toEqual([]);
+    });
+
+    it("'#help' against stored #social: the dialog", async () => {
+      const h = harness(remember("team", "#help"), { facts: { team: "#social" }, confirms: [] });
+      await h.planner.run("remember the team is #help");
+      expect(h.shell.confirmMessages).toEqual(['Change what I remember for "team" from #social to #help?']);
+      expect(h.facts()).toEqual([{ subject: "team", value: "#social", active: 1 }]);
+    });
+  });
+
+  it("sameName: one leading # aside, case and spaces ignored", () => {
+    expect(sameName("#social", "social")).toBe(true);
+    expect(sameName(" #Social ", "SOCIAL")).toBe(true);
+    expect(sameName("#social", "##social")).toBe(false);
+    expect(sameName("#social", "soc ial")).toBe(false);
+    expect(judge(undefined, "social")).toBe("first");
+    expect(judge({ value: "#social" }, "#social")).toBe("same");
+    expect(judge({ value: "#social" }, "social")).toBe("keep");
+    expect(judge({ value: "social" }, "#social")).toBe("upgrade");
+    expect(judge({ value: "#social" }, "#fun")).toBe("change");
   });
 });
 
@@ -296,9 +400,13 @@ describe("the dialog as spoken", () => {
     return { spoken: w.shell.spoken, dialogs: w.shell.confirmMessages };
   }
 
+  // RE-JUSTIFIED (M33 live finding): #social -> social and social -> #social used to be dialogs
+  // here; they name the same channel and no longer reach one (see "the same channel with or
+  // without its #"). The planner-level pairs are now genuinely different values with a "#" on
+  // either side; the wording for the same-name pair is still pinned below, at the function.
   it.each([
-    { stored: "#social", value: "social", heard: "from hash social to social" },
-    { stored: "social", value: "#social", heard: "from social to hash social" },
+    { stored: "#social", value: "help", heard: "from hash social to help" },
+    { stored: "help", value: "#social", heard: "from help to hash social" },
     { stored: "#social", value: "#fun", heard: "from hash social to hash fun" },
     { stored: "stiff and formal", value: "concise and warm", heard: "from stiff and formal to concise and warm" },
   ])("$stored -> $value is heard as '$heard'", async ({ stored, value, heard }) => {
@@ -306,6 +414,15 @@ describe("the dialog as spoken", () => {
     expect(spoken).toEqual([`Change what I remember for team ${heard}?`]);
     // The dialog on screen is untouched: the "#" as written, no "hash".
     expect(dialogs).toEqual([`Change what I remember for "team" from ${stored} to ${value}?`]);
+  });
+
+  it("the wording itself says 'hash' on either side (#social -> social, social -> #social)", () => {
+    expect(toSpokenConfirm(spokenChangeQuestion("team", { kind: "value", value: "#social" }, "social")).text).toBe(
+      "Change what I remember for team from hash social to social?",
+    );
+    expect(toSpokenConfirm(spokenChangeQuestion("team", { kind: "value", value: "social" }, "#social")).text).toBe(
+      "Change what I remember for team from social to hash social?",
+    );
   });
 
   it("only a LEADING # becomes 'hash'", () => {
@@ -445,18 +562,21 @@ describe("the replay: every recorded remember call", () => {
   }
 
   it("holds every row, with names and the clipboard dump as markers", () => {
-    expect(REMEMBER_CALLS.filter((c) => c.source === "action log")).toHaveLength(12);
+    expect(REMEMBER_CALLS.filter((c) => c.source === "action log")).toHaveLength(14);
     const text = JSON.stringify(REMEMBER_CALLS);
     expect(text).toContain(CLIPBOARD_MARKER);
     expect(text).not.toMatch(/Sejal|Lisa|Gupta|Don't change any code/);
   });
 
-  it("asks on exactly rows 323, 389, 435, M32's row and the flagship corrections", () => {
+  // RE-JUSTIFIED (M33 live finding): M32's row (`team` = social against #social) left this list —
+  // the same channel, so no dialog — and row 674 (the live finding, the same shape) never joins it.
+  // Row 672 (`fun` against #social) is a genuinely different value and does.
+  it("asks on exactly rows 323, 389, 435 and 672, and the flagship corrections", () => {
     expect(REMEMBER_CALLS.filter((c) => c.dialog).map((c) => c.id)).toEqual([
       "row 323",
       "row 389",
       "row 435",
-      "M32 correction",
+      "row 672",
       "demoTasks #6",
       "story step 4",
       "remember.test subject guard",
