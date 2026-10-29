@@ -5531,11 +5531,13 @@ Post-v0:
          from the focused page?) before changing anything. *(M32 found the cause: row 666's
          rewrite, through the previous turn and the clipboard, not the screen. See M32.)*
 
-- [ ] **M32 — small items: a second hotkey press during voice capture; a stale previous turn and
-      framed prose; the date and time together; Escape with the pill list open.** **In progress
-      (built 2026-10-23; no person has run `docs/M32-live-checklist.md`).** Four code commits
-      (`cee6da6`, `7f73d3e`, `ffff188`, `8c2afb6`) and a docs commit. Not pushed. Tests ran with
-      the scratch SQLite build throughout: the dev app held the real one.
+- [x] **M32 — small items: a second hotkey press during voice capture; a stale previous turn and
+      framed prose; the date and time together; Escape with the pill list open.** **Closed
+      2026-10-30, after a live run by a person (6 of 6 boxes ticked — `docs/M32-live-checklist.md`),
+      with fixes A and B unproven live and seven open findings (the close-out record is at the end
+      of this entry).** Four code commits (`cee6da6`, `7f73d3e`, `ffff188`, `8c2afb6`), the
+      scripted results and checklist (`4db4c6c`) and the human results (`03944ee`). Tests ran
+      with the scratch SQLite build throughout: the dev app held the real one.
 
       **1. A second instruction-hotkey press during voice capture** (`cee6da6`; §5b, "State, and
       the hotkeys"). Ignored and logged while the bar's `VoiceSession` is recording, stopped or
@@ -5651,13 +5653,68 @@ Post-v0:
         model's, possibly your clipboard's) is spoken, and background jobs only or also ones
         watched in the bar.
 
-      **Findings, open.**
+      **Findings at the build** (carried into the close-out's open findings below).
       1. **A correction can plan a memory write that replaces a fact.** "actually, post it in
          social instead" planned `remember team = social`. It is `reversible` and runs with no
          dialog; in the app it would overwrite `team` = `#social`.
       2. **A stale clipboard is still sent whole.** Only the previous turn ages out.
       3. **The spend gate's counter can be reused across runs** when a process ID repeats within
          12 hours. It fails closed (no call made), and costs a re-run.
+
+      **Live, by a person (6 of 6 ticked).**
+      - **H1** (passed, 2026-10-29): a second instruction-hotkey press during recording and
+        during transcription.
+      - **H2** (passed, 2026-10-29): the framed prose wording heard through Piper.
+      - **H3** (passed, 2026-10-29): the date and time answered together, heard.
+      - **H4** (passed, 2026-10-29): with the pill list open and another app in front (Win+R),
+        Escape reached that app and the list stayed open. **Decided: Escape does not close the
+        list**; no change.
+      - **H5** (passed, 2026-10-29): Word dictation landed at the caret. One Ctrl+Z removed the
+        dictated sentence with the 3-4 blank lines typed just before it; a sentence typed by hand
+        after 3-4 Enters undid the same way, so it is Word's own typing-run grouping, not the app.
+      - **H6** (passed, 2026-10-30): terminal dictation, reported as "h6 passes" with no further
+        detail.
+
+      **Close-out record (2026-10-30).**
+      - **Tests: 3384 passed across 143 files, 96 skipped; both typechecks clean.** Plain `npm
+        test` could not run: an electron instance still held the SQLite binary its pre-step
+        rebuilds (EBUSY/EPERM). The suite ran with `better-sqlite3` aliased to a scratch node build
+        of the same version (12.11.1).
+      - **Model calls:** 33 of the 40 allowed, est. ~$0.032.
+      - **Eval skipped** at the close (not run against the real model).
+      - **Mutations:** every one caught (the tables above).
+
+      **Proven vs. live-only.**
+      - **Fixes A and B are verified by tests and by the two log rows (647, 667), not live.** The
+        prose reply did not reproduce in the scripted run: 0 of 6 before the change and 0 of 6
+        after.
+      - **Seen live:** the hotkey guard (H1), the framed wording and the combined date-and-time
+        answer through real Piper (H2, H3), Escape's routing with the list open (H4), and
+        dictation into Word and a terminal (H5, H6).
+
+      **Open findings, not fixed in M32:**
+      1. **A correction can plan a memory write that overwrites a fact.** "actually, post it in
+         social instead" planned `remember` with `team` = `social`, which would replace `team` =
+         `#social` with the bare word "social". It is `reversible`, so there is no dialog. A real
+         hazard. **The first item of the next investigation:** how often a correction becomes a
+         `remember` call, and what the guard should be.
+      2. **"no, I meant the social channel" was refused by `sendMessage`'s own channel lookup** in
+         the scripted run, because the in-memory stand-in held only `#fun`. A test-setup artefact;
+         nothing to fix unless it reproduces.
+      3. **Prose replies.** A (the ten-minute cutoff) and B (the framed lead) are unproven live,
+         because the prose reply did not reproduce. Watch for it in real use.
+      4. **Left out of M32 on purpose.**
+         - "What did that job say?": its open decisions are which job, which states, a time
+           window, whether reading marks it seen, a new tool or `jobStatus`, how stored text is
+           spoken, and background jobs only.
+         - The investigation's fixes C, D and E: a content-free previous turn, re-asking once on
+           prose, and relabelling or capping the clipboard. Each needs an eval.
+      5. **M31's refusal rate is still open.** About half of live send requests are refused and
+         need re-asking. Candidate: re-ask once; needs an eval.
+      6. **From M31:** a Slack channel never taught to memory is not a destination; row 559's
+         missing Notion step.
+      7. **The spend gate refused a run once** because Windows reused a process ID from an earlier
+         run that held a slot. Re-running fixed it. Noted, not fixed.
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

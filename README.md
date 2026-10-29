@@ -1067,8 +1067,10 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M32 (small items) is built and in progress (23 Oct 2026); no person has run its checklist
-yet.**
+**M32 (small items) is closed (30 Oct 2026), after a live run by a person: all six boxes
+ticked.** Escape with the pill list open stays as it is, by decision. The stale-turn and
+framed-prose fixes are unproven live: the prose reply never reproduced. A new finding leads
+the next investigation: a correction can plan a memory write that overwrites a fact.
 - **A second instruction-hotkey press while the bar is recording or transcribing is ignored.**
 - **A previous turn over ten minutes old is no longer sent to the model, and a reply in the
   model's own words is framed as "Nothing ran. The model said: …".** The live prose reply M31

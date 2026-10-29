@@ -5,10 +5,10 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-23): M0-M31 shipped; M31 closed 2026-10-23 after a live run by a
-person, with six open findings (see M31 below).**
+**Current status (as of 2026-10-30): M0-M32 shipped; M32 closed 2026-10-30 after a live run by a
+person, with seven open findings (see M32 below).**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M31 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M32 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -122,6 +122,39 @@ only**. For M20 to M31 the status lives in `spec.md` (§9's entry for each, and 
 
   `npm test`: 3350 across 142 files, 96 skipped (run with a scratch SQLite build; the dev app
   held the real one).
+- **M32 - small items.** Closed 2026-10-30 after a live run by a person.
+  `docs/M32-live-checklist.md`: 6 ticked, 0 open (H1-H6, including the decision that Escape does
+  not close the pill list).
+  - **The changes.**
+    - A second instruction-hotkey press during voice capture is ignored; `VoiceLike` gained
+      `getState()`.
+    - A previous turn older than `PREVIOUS_TURN_MAX_AGE_MS` (10 minutes) is not sent to the
+      model, by an injected clock (the `Planner`'s new last parameter, `now`).
+    - A reply in the model's own words is shown and spoken after `PROSE_LEAD` ("Nothing ran. The
+      model said: ") through `toSpokenWithLead`, and `[main]` says `[reply: model prose]` or
+      `[reply: fixed refusal]`.
+    - `tellTime` takes `what: "both"`.
+    - New tests for Escape with the pill list open; no behaviour change.
+  - **The cause of M31's live prose reply** was row 666's rewrite, through the previous turn and
+    the clipboard, not the screen: the app captures only the clipboard.
+  - **New files.** `tests/previousTurnAndProse.test.ts`. `scripts/m30-say-refusal.ts` gained
+    `--framed-prose` and `--date-time`.
+  - **Evidence.** Scripted live with faked connectors, 33 calls: the prose reply 0 of 6 before and
+    after the change, so A and B are proven by tests and the two log rows, not live; the combined
+    time phrasings picked "both" 4 of 4 with no control regressed.
+  - **Open findings.**
+    - A correction can plan a `remember` that overwrites a fact (`team` = `#social` to "social");
+      the first item of the next investigation.
+    - A scripted channel refusal was a test-setup artefact.
+    - A and B are unproven live.
+    - Left out on purpose: "what did that job say?" (its decisions open) and fixes C/D/E (need an
+      eval).
+    - M31's refusal rate (about half of send requests) is still open.
+    - From M31: an untaught Slack channel; row 559's Notion step.
+    - The spend gate's process-ID reuse.
+
+  `npm test`: 3384 across 143 files, 96 skipped (run with a scratch SQLite build; an electron
+  instance held the real one).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -139,7 +172,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30, M31) and the twelve checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30, M31, M32) and the thirteen checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`
