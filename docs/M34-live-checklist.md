@@ -1,7 +1,8 @@
 # M34 — live verification checklist
 
-> **NOT YET RUN.** A ticked box means **a person at the keyboard saw or heard it** — no test,
-> eval or script earns a tick here. An open box means *not seen by a person*, not *failing*.
+> **RUN 2026-10-30, by a person (H1-H3). 3 ticked, 0 open.** A ticked box means **a person at the
+> keyboard saw or heard it** — no test, eval or script earns a tick here. An open box means *not
+> seen by a person*, not *failing*.
 >
 > M34 stops junk FIRST writes to memory and records whether an instruction was typed or spoken.
 > `spec.md` §5b ("A first write nobody named") and §9 (M34) have the design and the known limits.
@@ -29,7 +30,9 @@ what the app holds: "what do you remember about the team" should say `#social`.
 
 ## Human-only
 
-- [ ] **H1** Hear rule B's refusal as the app says it. Run, with sound on:
+- [x] **H1** *(Passed, Sejal, 2026-10-30. She ran `--first-write-refusal` with sound on and
+      reported "all three passed", with no further detail.)* Hear rule B's refusal as the app
+      says it. Run, with sound on:
 
       npx vite-node scripts/m30-say-refusal.ts --first-write-refusal
 
@@ -37,12 +40,16 @@ what the app holds: "what do you remember about the team" should say `#social`.
       remember the team is social."* (The speech cleaner drops the quotes and the "#", as it does
       for every tool.) It must be clear and natural. It runs no app, no model and no memory.
       *(Script-verified only: run with `--no-play` on 2026-10-30, it printed that sentence and
-      Piper wrote a 299,564-byte WAV. Not heard.)*
-- [ ] **H2** **Type** "remember the team is #social" into the bar, with `#social` stored.
+      Piper wrote a 299,564-byte WAV. Not heard at that point.)*
+- [x] **H2** *(Passed, Sejal, 2026-10-30. She typed "remember the team is #social" with `#social`
+      stored and reported "all three passed", with no further detail.)* **Type** "remember the
+      team is #social" into the bar, with `#social` stored.
       **Expect:** *Remembered: team = #social*, no dialog (the same-value refresh). Say which input
       you used (typed, keyboard). If the bar shows anything else, note it, and what the terminal's
       `[main]` line says.
-- [ ] **H3** **Say aloud** "remember the team is hash social" (press the hotkey, speak, press
+- [x] **H3** *(Passed, Sejal, 2026-10-30. She said "remember the team is hash social" by voice and
+      reported "all three passed", with no further detail; what the bar's Heard: line showed was
+      not recorded.)* **Say aloud** "remember the team is hash social" (press the hotkey, speak, press
       Enter). Note exactly what the bar's *Heard:* line showed. **Expect** one of:
       - *Already remembered "team" as #social.* or *Remembered: team = #social* — no dialog (the
         transcript said "social" or "#social");
