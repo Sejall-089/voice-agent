@@ -143,6 +143,39 @@ describe("refused before Slack is asked (bot mode)", () => {
   });
 });
 
+describe("the leading 'target:' is set aside, and nothing more", () => {
+  // The decision from the build: "target:" is the app's URL-fact prefix, never said. Each case
+  // below fails a different wrong version of that: never stripped, stripped anywhere, or a bare
+  // prefix treated as naming something.
+  it.each([
+    // Never stripped: "target" is not in the instruction, so this would be refused.
+    { subject: "target:dashboard", instruction: "remember my dashboard is https://dash.example.com", named: true },
+    // Stripped, the rest is still judged.
+    { subject: "target:foo", instruction: "remember my dashboard is https://dash.example.com", named: false },
+    // A bare prefix leaves no words, so it names nothing, even when "target" was said.
+    { subject: "target:", instruction: "remember the target: https://dash.example.com", named: false },
+    // Only at the start: "target" mid-subject is a word like any other, and was not said.
+    { subject: "my target:dashboard", instruction: "remember my dashboard is https://dash.example.com", named: false },
+  ])("'$subject' in '$instruction': $named", ({ subject, instruction, named }) => {
+    expect(subjectInInstruction(subject, instruction)).toBe(named);
+  });
+
+  it("through the planner: 'target:dashboard' from 'remember my dashboard is <url>' is saved as v1", async () => {
+    const w = world(remember("target:dashboard", "https://dash.example.com"));
+    const outcome = await w.planner.run("remember my dashboard is https://dash.example.com");
+    expect(outcome.status).toBe("ok");
+    expect(w.facts()).toEqual([{ subject: "target:dashboard", value: "https://dash.example.com", version: 1, active: 1 }]);
+  });
+
+  it("through the planner: 'target:foo' from the same instruction is refused, nothing written", async () => {
+    const w = world(remember("target:foo", "https://dash.example.com"));
+    const outcome = await w.planner.run("remember my dashboard is https://dash.example.com");
+    expect(outcome.status).toBe("refused");
+    expect(w.shell.results).toEqual([UNNAMED_FACT]);
+    expect(w.facts()).toEqual([]);
+  });
+});
+
 describe("a first write is judged by its EXACT subject, as the tier judges it", () => {
   // `resolve("dashboard")` also finds "target:dashboard". Judged that way, this write would not be
   // a first write, B would step aside, and the tier (exact subject: nothing stored) would save it
