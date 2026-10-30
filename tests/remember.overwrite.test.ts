@@ -4,12 +4,21 @@ import { InMemoryActionLog } from "../src/core/actionLog.ts";
 import { loadConnectorTools } from "../src/core/mcp/load.ts";
 import { SdkMcpConnection } from "../src/core/mcp/SdkConnection.ts";
 import { createDatabase } from "../src/core/memory/db.ts";
+import { normalizeReference } from "../src/core/memory/normalize.ts";
 import { SqliteMemory } from "../src/core/memory/SqliteMemory.ts";
 import { Planner } from "../src/core/planner.ts";
 import { buildRegistry, registry } from "../src/core/registry.ts";
 import { resolveRisk } from "../src/core/risk.ts";
 import { toSpokenConfirm } from "../src/core/speech.ts";
-import { DIALOG_VALUE_MAX, changeQuestion, judge, rememberTool, sameName, spokenChangeQuestion } from "../src/core/tools/remember.ts";
+import {
+  DIALOG_VALUE_MAX,
+  UNNAMED_FACT,
+  changeQuestion,
+  judge,
+  rememberTool,
+  sameName,
+  spokenChangeQuestion,
+} from "../src/core/tools/remember.ts";
 import type { Memory, MessageSender, ToolChoice, ToolDeps } from "../src/core/types.ts";
 import { MockShell } from "../src/main/shell/MockShell.ts";
 import { FakeBotSender, harness } from "./botChainHarness.ts";
@@ -507,28 +516,62 @@ describe("the dialog as spoken", () => {
 // The dialog appears only where a DIFFERENT value is already stored — the instruction's wording
 // plays no part, which is the point of B over a word-list check.
 describe("the phrasing set: corrections and real remembers", () => {
-  const PHRASES: { instruction: string; kind: "correction" | "remember"; subject: string; value: string; other: string }[] = [
-    { instruction: "actually, post it in social instead", kind: "correction", subject: "team", value: "social", other: "#general" },
-    { instruction: "no, send it to help", kind: "correction", subject: "team", value: "help", other: "#general" },
-    { instruction: "no, I meant the design channel", kind: "correction", subject: "team", value: "#design-team", other: "#general" },
-    { instruction: "actually it's #design-team", kind: "correction", subject: "team", value: "#design-team", other: "#general" },
-    { instruction: "remember that team is #social", kind: "remember", subject: "team", value: "#social", other: "#general" },
-    { instruction: "my name is Sam Placeholder", kind: "remember", subject: "name", value: "Sam Placeholder", other: "Alex Placeholder" },
-    { instruction: "the design channel is #design-team", kind: "remember", subject: "design channel", value: "#design-team", other: "#design-old" },
-    { instruction: "remember my dashboard is https://dash.example.com", kind: "remember", subject: "target:dashboard", value: "https://dash.example.com", other: "https://old.example.com" },
+  // `onEmpty` (M34): what happens with nothing stored. RE-JUSTIFIED AT M34 — until then all eight
+  // were written silently on empty memory. Rule B now refuses a first write whose subject the
+  // instruction never says, and three of the corrections are exactly that shape: "team" was
+  // never said, so writing `team` is the junk first write M33's trials saw. "actually it's
+  // #design-team" still writes: "#design-team" is the words "design" and "team", so the subject
+  // IS in the instruction.
+  const PHRASES: {
+    instruction: string;
+    kind: "correction" | "remember";
+    subject: string;
+    value: string;
+    other: string;
+    onEmpty: "written" | "refused";
+  }[] = [
+    { instruction: "actually, post it in social instead", kind: "correction", subject: "team", value: "social", other: "#general", onEmpty: "refused" },
+    { instruction: "no, send it to help", kind: "correction", subject: "team", value: "help", other: "#general", onEmpty: "refused" },
+    { instruction: "no, I meant the design channel", kind: "correction", subject: "team", value: "#design-team", other: "#general", onEmpty: "refused" },
+    { instruction: "actually it's #design-team", kind: "correction", subject: "team", value: "#design-team", other: "#general", onEmpty: "written" },
+    { instruction: "remember that team is #social", kind: "remember", subject: "team", value: "#social", other: "#general", onEmpty: "written" },
+    { instruction: "my name is Sam Placeholder", kind: "remember", subject: "name", value: "Sam Placeholder", other: "Alex Placeholder", onEmpty: "written" },
+    { instruction: "the design channel is #design-team", kind: "remember", subject: "design channel", value: "#design-team", other: "#design-old", onEmpty: "written" },
+    { instruction: "remember my dashboard is https://dash.example.com", kind: "remember", subject: "target:dashboard", value: "https://dash.example.com", other: "https://old.example.com", onEmpty: "written" },
   ];
 
-  it.each(PHRASES)("$kind '$instruction', memory empty: no dialog", async ({ instruction, subject, value }) => {
-    const w = world(remember(subject, value));
-    await w.planner.run(instruction);
-    expect(w.shell.confirmMessages).toEqual([]);
-    expect(w.facts()).toEqual([{ subject, value, version: 1, active: 1 }]);
-  });
+  it.each(PHRASES.filter((p) => p.onEmpty === "written"))(
+    "$kind '$instruction', memory empty: written silently as v1",
+    async ({ instruction, subject, value }) => {
+      const w = world(remember(subject, value));
+      const outcome = await w.planner.run(instruction);
+      expect(outcome.status).toBe("ok");
+      expect(w.shell.confirmMessages).toEqual([]);
+      expect(w.facts()).toEqual([{ subject, value, version: 1, active: 1 }]);
+    },
+  );
 
+  it.each(PHRASES.filter((p) => p.onEmpty === "refused"))(
+    "$kind '$instruction', memory empty: refused by rule B, nothing written, no dialog",
+    async ({ instruction, subject, value }) => {
+      const w = world(remember(subject, value));
+      const outcome = await w.planner.run(instruction);
+      expect(outcome.status).toBe("refused");
+      expect(w.shell.results).toEqual([UNNAMED_FACT]);
+      expect(w.shell.confirmMessages).toEqual([]);
+      expect(w.facts()).toEqual([]);
+      expect(w.log.entries).toMatchObject([{ tool: "remember", status: "refused", result: UNNAMED_FACT }]);
+    },
+  );
+
+  // Rule B never judges a replacement. The precondition (a fact with this exact subject is active)
+  // is asserted, so a B that also fired on overwrites would show here as a refusal, not a dialog.
   it.each(PHRASES)("$kind '$instruction', a different value stored: the dialog", async ({ instruction, subject, value, other }) => {
     const w = world(remember(subject, value), { facts: [[subject, other]] });
+    expect(w.facts()).toEqual([{ subject, value: other, version: 1, active: 1 }]);
     await w.planner.run(instruction);
     expect(w.shell.confirmMessages).toEqual([`Change what I remember for "${subject}" from ${other} to ${value}?`]);
+    expect(w.shell.results).not.toContain(UNNAMED_FACT);
     expect(w.facts()).toEqual([{ subject, value: other, version: 1, active: 1 }]);
   });
 });
@@ -562,7 +605,8 @@ describe("the replay: every recorded remember call", () => {
   }
 
   it("holds every row, with names and the clipboard dump as markers", () => {
-    expect(REMEMBER_CALLS.filter((c) => c.source === "action log")).toHaveLength(14);
+    // RE-JUSTIFIED AT M34: 14 → 17, with rows 676-678 (M33's human checks).
+    expect(REMEMBER_CALLS.filter((c) => c.source === "action log")).toHaveLength(17);
     const text = JSON.stringify(REMEMBER_CALLS);
     expect(text).toContain(CLIPBOARD_MARKER);
     expect(text).not.toMatch(/Sejal|Lisa|Gupta|Don't change any code/);
@@ -607,6 +651,32 @@ describe("the replay: every recorded remember call", () => {
       expect(cancelled.shell.confirmMessages).toEqual([]);
       expect(outcome.status).toBe(call.status);
       expect(cancelled.shell.results).toEqual([shown]);
+      // M34: a refusal writes nothing.
+      if (call.status === "refused") expect(cancelled.facts()).toEqual(before);
     }
+  });
+
+  // M34, rule B. Every first write on record: the junk is refused and nothing is written; every
+  // genuine one gets past B (it may still be refused for its own reason — row 475 by Slack).
+  it("rule B: all 5 junk first writes are refused, and every genuine recorded first write gets past it", async () => {
+    const firstWrites = REMEMBER_CALLS.filter((c) => c.firstWrite !== undefined);
+    const outcomes: Record<string, string[]> = { junk: [], genuine: [] };
+    for (const call of firstWrites) {
+      // The precondition: nothing is stored under this subject, so this IS a first write.
+      expect(call.before.some(([subject]) => subject === normalizeReference(call.arguments.subject)), call.id).toBe(false);
+      const w = replayWorld(call, []);
+      const outcome = await w.planner.run(call.instruction);
+      const refusedByB = outcome.status === "refused" && outcome.result === UNNAMED_FACT;
+      outcomes[call.firstWrite ?? "genuine"]?.push(`${call.id}: ${refusedByB ? "refused by B" : "passed B"}`);
+    }
+    expect(outcomes["junk"]).toEqual([
+      "M33 T1 #1: channel:fun = social: refused by B",
+      "M33 T1 #2: channel:fun = social: refused by B",
+      "M33 T2: channel = #social: refused by B",
+      "M33 T3 #1: channel = #social: refused by B",
+      "M33 T3 #3: channel = #social: refused by B",
+    ]);
+    expect(outcomes["genuine"]?.every((line) => line.endsWith("passed B")), outcomes["genuine"]?.join("\n")).toBe(true);
+    expect(outcomes["genuine"]).toHaveLength(13);
   });
 });

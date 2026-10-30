@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { UNNAMED_FACT } from "../src/core/tools/remember.ts";
 import { slackRefusalText } from "../src/core/tools/sendMessage.ts";
 import type { ChannelLookup, DirectoryFailure, ToolChoice } from "../src/core/types.ts";
 import { bugChain, harness, plan, step, type HarnessOptions } from "./botChainHarness.ts";
@@ -89,7 +90,17 @@ describe("slackRefusalText: what did not happen", () => {
 // dialog itself answers. Every result, refusal and status line is a statement.
 describe("bot mode: nothing but a real question or a dialog title asks anything", () => {
   const send = (channel: string): ToolChoice => ({ kind: "tool", name: "sendMessage", input: { channel } });
-  const scenarios: { choice: ToolChoice; options: HarnessOptions }[] = [
+  // RE-JUSTIFIED AT M34. Every scenario ran under "do it". From M34 a FIRST `remember` whose
+  // subject the instruction never says is refused before Slack is asked (rule B), so the two
+  // remember scenarios would have checked B's sentence instead of the Slack refusals they were
+  // written for. They now say their subject, and each scenario states which refusal it reaches
+  // (`reaches`); B's own refusal is a scenario of its own, under "do it".
+  const scenarios: {
+    choice: ToolChoice;
+    options: HarnessOptions;
+    instruction?: string;
+    reaches?: "slack" | "rule B";
+  }[] = [
     { choice: send("#bug"), options: {} },
     { choice: send("#help"), options: {} },
     { choice: send("#help"), options: { failOn: { 0: "rate_limited" } } },
@@ -101,19 +112,36 @@ describe("bot mode: nothing but a real question or a dialog title asks anything"
     { choice: bugChain("the bugs channel"), options: { asks: ["#bug", "#bug-reports"] } },
     { choice: bugChain("the bugs channel"), options: { asks: ["#help"], failOn: { 3: "timeout" } } },
     { choice: plan([step("summarize", {}, "x"), step("sendMessage", { channel: "{step1}" }, "y")]), options: {} },
-    { choice: { kind: "tool", name: "remember", input: { subject: "bugs channel", value: "#bug" } } as ToolChoice, options: {} },
+    {
+      choice: { kind: "tool", name: "remember", input: { subject: "bugs channel", value: "#bug" } } as ToolChoice,
+      options: {},
+      instruction: "remember the bugs channel is #bug",
+      reaches: "slack",
+    },
     {
       choice: { kind: "tool", name: "remember", input: { subject: "team", value: "#help" } } as ToolChoice,
       options: { failOn: { 0: "auth" } },
+      instruction: "remember the team is #help",
+      reaches: "slack",
+    },
+    {
+      choice: { kind: "tool", name: "remember", input: { subject: "team", value: "#help" } } as ToolChoice,
+      options: {},
+      reaches: "rule B",
     },
   ];
 
   it("across refusals, sends, asks and remember", async () => {
     let questions = 0;
     let dialogs = 0;
-    for (const { choice, options } of scenarios) {
+    for (const { choice, options, instruction, reaches } of scenarios) {
       const h = harness(choice, options);
-      await h.planner.run("do it");
+      await h.planner.run(instruction ?? "do it");
+      if (reaches === "slack") expect(h.directory.calls.length, instruction).toBeGreaterThan(0);
+      if (reaches === "rule B") {
+        expect(h.shell.results).toEqual([UNNAMED_FACT]);
+        expect(h.directory.calls).toEqual([]);
+      }
 
       for (const text of [...h.shell.results, ...h.notified()]) {
         expect(text, text).not.toContain("?");

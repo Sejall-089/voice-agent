@@ -153,11 +153,21 @@ describe("bot mode — no new text mentions a webhook", () => {
       harness({ kind: "tool", name: "remember", input: { subject: "bugs channel", value: "#nope" } }),
       harness({ kind: "tool", name: "remember", input: { subject: "team", value: "#help" } }),
     ];
+    // RE-JUSTIFIED AT M34. INSTRUCTION ("file this bug on GitHub and tell the channel") names
+    // neither "bugs channel" nor "team", so from M34 both remember runs are first writes rule B
+    // refuses before Slack is asked — and this sweep would no longer see remember's Slack texts.
+    // They now say their subject, so one is refused by Slack (#nope) and one is saved (#help).
+    const instructions = new Map([
+      [runs[7], "remember the bugs channel is #nope"],
+      [runs[8], "remember the team is #help"],
+    ]);
     const texts: string[] = [];
     for (const h of runs) {
-      await h.planner.run(INSTRUCTION);
+      await h.planner.run(instructions.get(h) ?? INSTRUCTION);
       texts.push(...h.texts());
     }
+    expect(runs[7]?.directory.calls).toEqual(["#nope"]);
+    expect(runs[8]?.facts()).toEqual([{ subject: "team", value: "#help", active: 1 }]);
     expect(texts.length).toBeGreaterThan(runs.length);
     for (const text of texts) expect(text, text).not.toMatch(/webhook/i);
   });

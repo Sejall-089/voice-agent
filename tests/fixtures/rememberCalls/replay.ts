@@ -16,14 +16,21 @@
 // row 591's value — a 1,481-character clipboard dump — with a marker of its length. Nothing else
 // in these rows is personal: a public dashboard URL, channel names, a tone.
 //
+//   - M34: rows 676-678 (the M33 human checks), and M33's live-model harness — the five junk
+//     first writes its correction trials planned and the two first-write controls (C1, C3). The
+//     harness's seed held a placeholder name, never hers.
+//
 // `mode` is the Slack mode the row ran in: bot mode began with M22 (2026-10-11).
 // `dialog` is M33's expectation: true exactly where the call replaces a DIFFERENT value.
 // `status` and `result` are what the app recorded (results with the same markers), or, for a
-// scripted answer, what that test asserts; a dialog row reaches them only when approved.
+// scripted answer, what that test asserts; a dialog row reaches them only when approved. From
+// M34 a junk first write's `status` and `result` are rule B's refusal, not what M33's harness saw.
+// `firstWrite` (M34): set on every call whose subject held nothing — "junk" for the writes nobody
+// asked for, which rule B must refuse, and "genuine" for the ones it must let through.
 
 export interface RememberCall {
   id: string;
-  source: "action log" | "M32 scripted run" | "scripted eval";
+  source: "action log" | "M32 scripted run" | "scripted eval" | "M33 harness";
   instruction: string;
   arguments: { subject: string; value: string };
   mode: "webhook" | "bot";
@@ -31,7 +38,13 @@ export interface RememberCall {
   dialog: boolean;
   status: "ok" | "refused" | "error";
   result: string;
+  firstWrite?: "genuine" | "junk";
 }
+
+// Rule B's refusal (src/core/tools/remember.ts, UNNAMED_FACT), written out here so the fixture
+// does not agree with the code by construction.
+const UNNAMED =
+  'I did not save that. Say what to remember and what it is called, for example "remember the team is #social".';
 
 const TONE = ["tone", "concise, warm, and direct"] as const;
 const DASHBOARD = ["target:dashboard", "https://github.com/dashboard"] as const;
@@ -61,10 +74,19 @@ const OCT_12 = [
 ] as const;
 const OCT_22 = [...OCT_12, ["alt channel", "#help"], ["second channel", "#help"], ["third channel", "#fun"]] as const;
 
+// scripts/m33-live.ts's SEED, as its trials began (M34).
+const HARNESS_SEED: readonly (readonly [string, string])[] = [
+  ["team", "#social"],
+  ["social channel", "#social"],
+  ["third channel", "#fun"],
+  ["name", "Sam Placeholder"],
+];
+
 export const REMEMBER_CALLS: readonly RememberCall[] = [
   // --- The real action log ---
   {
     id: "row 14",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "remember my dashboard is https://github.com/dashboard",
     arguments: { subject: "target:dashboard", value: "https://github.com/dashboard" },
@@ -76,6 +98,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "row 21",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "remember the team is #social",
     arguments: { subject: "team", value: "#social" },
@@ -87,6 +110,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "row 81",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "remember my name is [first name]",
     arguments: { subject: "name", value: "[first name]" },
@@ -110,6 +134,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "row 350",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "remember the social channel is #social",
     arguments: { subject: "channel:social", value: "#social" },
@@ -121,6 +146,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "row 354",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "remember the social channel is #social",
     arguments: { subject: "social channel", value: "#social" },
@@ -132,6 +158,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "row 388",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "remember the bugs channel is #your-real-channel",
     arguments: { subject: "bugs channel", value: "#your-real-channel" },
@@ -180,6 +207,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   {
     // Refused by M22's check (now in `prepare`): Slack had no #fun then.
     id: "row 475",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "remember the second channel is fun channel",
     arguments: { subject: "the second channel", value: "fun channel" },
@@ -192,6 +220,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "row 591",
+    firstWrite: "genuine",
     source: "action log",
     instruction: "Samurai is this.",
     arguments: { subject: "Samurai", value: CLIPBOARD_MARKER },
@@ -247,9 +276,107 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
     result: 'Already remembered "team" as #social.',
   },
 
+  // --- 2026-10-30, M33's human checks (rows 676-678, after the same-channel fix) ---
+  {
+    // H2: the same value again — a refresh, no new version.
+    id: "row 676",
+    source: "action log",
+    instruction: "remember the team is #social",
+    arguments: { subject: "team", value: "#social" },
+    mode: "bot",
+    before: [...OCT_22, ["samurai", CLIPBOARD_MARKER]],
+    dialog: false,
+    status: "ok",
+    result: "Remembered: team = #social",
+  },
+  {
+    // H2: typed bare on purpose — the same channel, nothing written.
+    id: "row 677",
+    source: "action log",
+    instruction: "remember the team is social",
+    arguments: { subject: "team", value: "social" },
+    mode: "bot",
+    before: [...OCT_22, ["samurai", CLIPBOARD_MARKER]],
+    dialog: false,
+    status: "ok",
+    result: 'Already remembered "team" as #social.',
+  },
+  {
+    id: "row 678",
+    source: "action log",
+    instruction: "remember the team is #social",
+    arguments: { subject: "team", value: "#social" },
+    mode: "bot",
+    before: [...OCT_22, ["samurai", CLIPBOARD_MARKER]],
+    dialog: false,
+    status: "ok",
+    result: "Remembered: team = #social",
+  },
+
+  // --- M33's live-model harness (scripts/m33-live.ts): the junk first writes, and two controls ---
+  // Its seed: team = #social, social channel = #social, third channel = #fun, and a placeholder
+  // name. Each junk write was saved silently under M33; rule B refuses it, nothing written.
+  ...(["T1 #1", "T1 #2"] as const).map(
+    (trial): RememberCall => ({
+      id: `M33 ${trial}: channel:fun = social`,
+      source: "M33 harness",
+      instruction: "actually, post it in social instead",
+      arguments: { subject: "channel:fun", value: "social" },
+      mode: "bot",
+      before: HARNESS_SEED,
+      dialog: false,
+      status: "refused",
+      result: UNNAMED,
+      firstWrite: "junk",
+    }),
+  ),
+  ...([
+    ["T2", HARNESS_SEED],
+    ["T3 #1", HARNESS_SEED.filter(([subject]) => subject !== "team")],
+    ["T3 #3", HARNESS_SEED.filter(([subject]) => subject !== "team")],
+  ] as const).map(
+    ([trial, before]): RememberCall => ({
+      id: `M33 ${trial}: channel = #social`,
+      source: "M33 harness",
+      instruction: "actually, post it in social instead",
+      arguments: { subject: "channel", value: "#social" },
+      mode: "bot",
+      before,
+      dialog: false,
+      status: "refused",
+      result: UNNAMED,
+      firstWrite: "junk",
+    }),
+  ),
+  {
+    id: "M33 C1: team on empty memory",
+    source: "M33 harness",
+    instruction: "remember that team is #social",
+    arguments: { subject: "team", value: "#social" },
+    mode: "bot",
+    before: HARNESS_SEED.filter(([subject]) => subject !== "team"),
+    dialog: false,
+    status: "ok",
+    result: "Remembered: team = #social",
+    firstWrite: "genuine",
+  },
+  {
+    id: "M33 C3: name on empty memory",
+    source: "M33 harness",
+    instruction: "my name is Sam Placeholder",
+    arguments: { subject: "name", value: "Sam Placeholder" },
+    mode: "bot",
+    before: HARNESS_SEED.filter(([subject]) => subject !== "name"),
+    dialog: false,
+    status: "ok",
+    result: "Remembered: name = Sam Placeholder",
+    firstWrite: "genuine",
+  },
+
   // --- The scripted evals and flagship tests ---
   {
     id: "demoTasks #4",
+    firstWrite: "genuine",
     source: "scripted eval",
     instruction: "remember my upwork is https://upwork.com/me",
     arguments: { subject: "target:upwork", value: "https://upwork.com/me" },
@@ -272,6 +399,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "story step 2",
+    firstWrite: "genuine",
     source: "scripted eval",
     instruction: "my dashboard is https://old.example.com",
     arguments: { subject: "target:dashboard", value: "https://old.example.com" },
@@ -294,6 +422,7 @@ export const REMEMBER_CALLS: readonly RememberCall[] = [
   },
   {
     id: "remember.test new fact",
+    firstWrite: "genuine",
     source: "scripted eval",
     instruction: "remember my tone is concise and warm",
     arguments: { subject: "tone", value: "concise and warm" },

@@ -1,4 +1,4 @@
-import { UnresolvedReferenceError } from "../errors.ts";
+import { UnresolvedReferenceError, UserFixableError } from "../errors.ts";
 import { normalizeReference } from "../memory/normalize.ts";
 import { userSource } from "../memory/source.ts";
 import { resolveSlackName, slackRefusalText } from "./sendMessage.ts";
@@ -55,6 +55,39 @@ function replaced(args: ToolInput, memory: Pick<Memory, "query">): Fact | null {
   const value = typeof args["value"] === "string" ? args["value"] : "";
   const { judgement, current } = writeJudgement(subject, value, memory);
   return judgement === "change" && current !== undefined ? current : null;
+}
+
+// M34 (rule B). A FIRST write is saved silently (it replaces nothing, so it is `reversible`), and
+// in M33's live trials a correction — "actually, post it in social instead" — planned one five
+// times in 27: `channel:fun` = social, `channel` = #social. Nobody had said "channel" or "fun". So
+// a first write is refused unless every word of its subject is one the INSTRUCTION used: the
+// user's own words, never the previous turn or the clipboard (the "fun" in T1's junk came from the
+// previous turn). Words split on anything not a letter or digit ("#design-team" is two words), and
+// a trailing "s" on either side still matches ("bugs channel" for "bug channel"). One leading
+// "target:" is set aside first: it is this app's URL-fact convention, which the description below
+// tells the model to add, not a word anyone says. `name` and `tone` are exempt — "call me Sam" and
+// "I like short replies" name them without the word. A replacement is never judged here: it is
+// asked about (M33), and the flagship corrections ("no, I meant #general" → team) must keep working.
+export const UNNAMED_FACT =
+  'I did not save that. Say what to remember and what it is called, for example "remember the team is #social".';
+
+const EXEMPT_SUBJECTS: readonly string[] = ["name", "tone"];
+
+const wordsOf = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 0);
+
+const sameWord = (a: string, b: string): boolean => a === b || a === `${b}s` || b === `${a}s`;
+
+// Does the instruction name every word of this (normalized) subject? A subject with no words at
+// all names nothing, so it does not.
+export function subjectInInstruction(subject: string, instruction: string): boolean {
+  if (EXEMPT_SUBJECTS.includes(subject)) return true;
+  const said = wordsOf(instruction);
+  const words = wordsOf(subject.replace(/^target:/, ""));
+  return words.length > 0 && words.every((word) => said.some((other) => sameWord(word, other)));
 }
 
 // M33. In the dialog only, a long value is cut; what is saved stays whole.
@@ -203,6 +236,20 @@ export const rememberTool: Tool = {
 
     if (subject.length === 0 || value.length === 0) {
       throw new Error("I need both what to remember and what its value is.");
+    }
+
+    // M34, rule B: a first write whose subject the user never said is refused here — before
+    // Slack is asked anything, and before any tier or dialog. Only a first write: the same
+    // judgement the tier and the handler use. A memory that cannot be read leaves it unknown,
+    // and the tier escalates to its dialog as in M33.
+    let judgement: Judgement | "unknown";
+    try {
+      judgement = writeJudgement(subject, value, deps.memory).judgement;
+    } catch {
+      judgement = "unknown";
+    }
+    if (judgement === "first" && !subjectInInstruction(subject, deps.instruction)) {
+      throw new UserFixableError(UNNAMED_FACT);
     }
 
     // M22. In bot mode a CHANNEL fact is checked against Slack before it is saved, and saved as
