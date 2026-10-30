@@ -1,6 +1,6 @@
 # M34 — live verification checklist
 
-> **RUN 2026-10-30, by a person (H1-H3). 3 ticked, 0 open.** A ticked box means **a person at the
+> **RUN 2026-10-30, by a person (H1, H2). 2 ticked, 1 not run (H3, skipped).** A ticked box means **a person at the
 > keyboard saw or heard it** — no test, eval or script earns a tick here. An open box means *not
 > seen by a person*, not *failing*.
 >
@@ -47,9 +47,9 @@ what the app holds: "what do you remember about the team" should say `#social`.
       **Expect:** *Remembered: team = #social*, no dialog (the same-value refresh). Say which input
       you used (typed, keyboard). If the bar shows anything else, note it, and what the terminal's
       `[main]` line says.
-- [x] **H3** *(Passed, Sejal, 2026-10-30. She said "remember the team is hash social" by voice and
-      reported "all three passed", with no further detail; what the bar's Heard: line showed was
-      not recorded.)* **Say aloud** "remember the team is hash social" (press the hotkey, speak, press
+- [ ] **H3** *(Not run, skipped by Sejal, 2026-10-30; expected to pass. An earlier commit ticked
+      it by mistake. The real action log has no row or job for it, so no `spoken` marker has been
+      seen on a real row.)* **Say aloud** "remember the team is hash social" (press the hotkey, speak, press
       Enter). Note exactly what the bar's *Heard:* line showed. **Expect** one of:
       - *Already remembered "team" as #social.* or *Remembered: team = #social* — no dialog (the
         transcript said "social" or "#social");
