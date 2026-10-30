@@ -26,13 +26,19 @@
 // the fake directory and fake sender, memory keeps a write, and a request to any host but
 // api.openai.com is refused. A failed check stops the run with nothing sent.
 //
+// M34 reuses it for rules B and D (a first write whose subject was never said; a clipboard-sized
+// value): four more cases, a per-case clipboard, `newFacts` in each record (every active subject
+// the seed did not hold — a junk first write shows here), and a second dry run.
+//
 //   npx vite-node scripts/m33-live.ts --check            # the fake checks only (no model)
 //   npx vite-node scripts/m33-live.ts --scripted         # the dry run: a scripted remember (no model)
+//   npx vite-node scripts/m33-live.ts --first-writes     # M34's dry run: rules B and D (no model)
 //   npx vite-node scripts/m33-live.ts --case correction --trials 12 --label T1    # DRY: count and cost
 //   REAL_MODEL=1 REAL_MODEL_MAX_CALLS=12 npx vite-node scripts/m33-live.ts --case correction --trials 12 --label T1
 //
 // Cases: correction, correction-no-team, remember-team-empty, remember-team-same, name-empty,
-// team-to-fun, meant-design. `--json <path>` also writes every trial's record.
+// team-to-fun, meant-design; M34: team-empty, dashboard-empty, samurai-long. `--json <path>` also
+// writes every trial's record.
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
 import { InMemoryActionLog } from "../src/core/actionLog.ts";
@@ -60,6 +66,7 @@ import { FakeMcpServer } from "../tests/FakeMcpServer.ts";
 import { FakeSender } from "../tests/FakeSender.ts";
 import { realModelGate } from "../tests/eval/realModel.ts";
 import { LONG_TRACE } from "../tests/fixtures/planChoice/clipboards.ts";
+import { ROW_591_SHAPE } from "../tests/fixtures/rememberCalls/replay.ts";
 
 // --- The network: api.openai.com only -------------------------------------------------------
 
@@ -91,6 +98,7 @@ const CHANNELS = [
 
 // The seed (the investigation's channel facts, and a placeholder where her name is).
 const PLACEHOLDER_NAME = "Sam Placeholder";
+const PLACEHOLDER_URL = "https://dash.example.com";
 const SEED: Record<string, string> = {
   team: "#social",
   "social channel": "#social",
@@ -127,6 +135,8 @@ interface Case {
   instruction: string;
   facts: Record<string, string>;
   previous: SeededTurn | null;
+  // M34. What is on the clipboard; M28's long trace when absent.
+  clipboard?: string;
 }
 
 const without = (key: string): Record<string, string> =>
@@ -140,6 +150,11 @@ const CASES: Case[] = [
   { id: "name-empty", instruction: `my name is ${PLACEHOLDER_NAME}`, facts: without("name"), previous: null },
   { id: "team-to-fun", instruction: "remember the team is #fun", facts: SEED, previous: null },
   { id: "meant-design", instruction: "no, I meant the design channel", facts: SEED, previous: CANCELLED_SEND },
+  // M34's controls for rules B and D.
+  { id: "team-empty", instruction: "remember the team is #social", facts: without("team"), previous: null },
+  { id: "dashboard-empty", instruction: `remember my dashboard is ${PLACEHOLDER_URL}`, facts: SEED, previous: null },
+  // Row 591's shape, neutral text: a misheard "Summarize this." with a long, many-line clipboard.
+  { id: "samurai-long", instruction: "Samurai is this.", facts: SEED, previous: null, clipboard: ROW_591_SHAPE },
 ];
 
 const PREVIOUS_TURN_AGE_MS = 40_000;
@@ -151,7 +166,7 @@ interface FactRow {
   active: number;
 }
 
-function world(c: Pick<Case, "facts" | "previous">, llm: LLMClient, confirms: boolean[] = []) {
+function world(c: Pick<Case, "facts" | "previous" | "clipboard">, llm: LLMClient, confirms: boolean[] = []) {
   const server = new FakeMcpServer({ timeline: [] });
   const connectors = loadConnectorTools({
     configText: JSON.stringify({
@@ -177,7 +192,7 @@ function world(c: Pick<Case, "facts" | "previous">, llm: LLMClient, confirms: bo
   }
 
   const shell = new MockShell({
-    context: { selectedText: LONG_TRACE, activeApp: null, activeWindowTitle: null },
+    context: { selectedText: c.clipboard ?? LONG_TRACE, activeApp: null, activeWindowTitle: null },
     confirms,
   });
   const sender = new FakeBotSender();
@@ -361,6 +376,50 @@ async function scriptedDryRun(): Promise<void> {
   }
 }
 
+// --- M34's dry run: rules B and D, no model --------------------------------------------------
+
+// Scripted remember calls through the same world. B: a first write whose subject the instruction
+// never said is refused with no Slack call and nothing written. D: a clipboard-sized value is
+// refused. Controls: a first write that names its subject is saved as v1; a replacement still asks.
+async function firstWriteDryRun(): Promise<boolean> {
+  const caseOf = (id: string): Case => CASES.find((x) => x.id === id)!;
+  const runs: { label: string; c: Case; subject: string; value: string; expect: "refused (B)" | "refused (D)" | "written v1" | "dialog" }[] = [
+    { label: "B: channel:fun = social", c: caseOf("correction"), subject: "channel:fun", value: "social", expect: "refused (B)" },
+    { label: "B: channel = #social", c: caseOf("correction-no-team"), subject: "channel", value: "#social", expect: "refused (B)" },
+    { label: "D: samurai = row 591's shape", c: caseOf("samurai-long"), subject: "Samurai", value: ROW_591_SHAPE, expect: "refused (D)" },
+    { label: "control: team = #social, team empty", c: caseOf("team-empty"), subject: "team", value: "#social", expect: "written v1" },
+    { label: "control: name, name empty", c: caseOf("name-empty"), subject: "name", value: PLACEHOLDER_NAME, expect: "written v1" },
+    { label: "control: team = #fun against #social", c: caseOf("team-to-fun"), subject: "team", value: "#fun", expect: "dialog" },
+  ];
+  let ok = true;
+  for (const run of runs) {
+    const choice: ToolChoice = { kind: "tool", name: "remember", input: { subject: run.subject, value: run.value } };
+    const w = world(run.c, new FakeLLM(choice, FAKE_COMPLETION));
+    await w.run(run.c.instruction);
+    const subject = normalizeReference(run.subject);
+    const stored = w.facts().filter((f) => f.subject === subject && f.active === 1);
+    const results = w.shell.results;
+    const seen =
+      w.shell.confirmMessages.length > 0
+        ? "dialog"
+        : results.some((r) => r.startsWith("I did not save that."))
+          ? "refused (B)"
+          : results.some((r) => r.startsWith("That is too long"))
+            ? "refused (D)"
+            : stored.length === 1 && stored[0]?.version === 1
+              ? "written v1"
+              : "other";
+    const pass = seen === run.expect && (seen !== "refused (B)" || w.directory.calls.length === 0);
+    ok &&= pass;
+    console.log(`\n[first writes] ${pass ? "ok  " : "FAIL"} ${run.label} under "${run.c.instruction}": ${seen} (expected ${run.expect})`);
+    console.log(`  result:    ${JSON.stringify(results.map((r) => (r.length > 120 ? `${r.slice(0, 120)}...` : r)))}`);
+    console.log(`  dialog:    ${JSON.stringify(w.shell.confirmMessages)}`);
+    console.log(`  slack:     directory asked ${JSON.stringify(w.directory.calls)}`);
+    console.log(`  ${subject}: ${JSON.stringify(stored.map((f) => ({ value: f.value.length > 60 ? `[${f.value.length} chars]` : f.value, version: f.version })))}`);
+  }
+  return ok;
+}
+
 // --- Main -----------------------------------------------------------------------------------
 
 const argv = process.argv.slice(2);
@@ -377,6 +436,9 @@ if (argv.includes("--check")) process.exit(0);
 if (argv.includes("--scripted")) {
   await scriptedDryRun();
   process.exit(0);
+}
+if (argv.includes("--first-writes")) {
+  process.exit((await firstWriteDryRun()) ? 0 : 1);
 }
 
 const caseId = flag("--case", "");
@@ -416,6 +478,12 @@ for (let trial = 1; trial <= TRIALS; trial += 1) {
   const hazard = client.answers.flatMap((a) => hazards(a, theCase.facts));
   const active = Object.fromEntries(w.facts().filter((f) => f.active === 1).map((f) => [f.subject, `${f.value} (v${f.version})`]));
   const changed = Object.entries(theCase.facts).filter(([s, v]) => !w.facts().some((f) => f.subject === s && f.value === v && f.active === 1));
+  // M34. Every fact the trial added under a subject the seed did not hold: a junk first write, or
+  // a control's genuine one.
+  const newFacts = w
+    .facts()
+    .filter((f) => f.active === 1 && !(f.subject in theCase.facts))
+    .map((f) => `${f.subject} = ${f.value.length > 60 ? `[${f.value.length} chars]` : f.value} (v${f.version})`);
   const record = {
     label: LABEL,
     case: caseId,
@@ -427,6 +495,7 @@ for (let trial = 1; trial <= TRIALS; trial += 1) {
     results: w.shell.results,
     activeFacts: active,
     changedFacts: changed.map(([s]) => s),
+    newFacts,
     created: w.server.created.length,
     sent: w.sender.calls.length,
     blocked: blocked.slice(before),
