@@ -58,6 +58,14 @@ const SOCIAL_CHANNEL = ["social channel", "#social"] as const;
 // Row 591's value, as a marker. The real one was a pasted prompt.
 export const CLIPBOARD_MARKER = "[clipboard: 1481 chars]";
 
+// M34. Row 591's SHAPE, for rule D: 25 lines, 1,481 characters in all, of neutral filler — the
+// length and the line breaks are what the rule judges, never what the text says.
+export const ROW_591_SHAPE: string = (() => {
+  const lines = Array.from({ length: 25 }, (_, i) => `Line ${String(i + 1).padStart(2, "0")} of a pasted note.`);
+  const body = lines.join("\n");
+  return body + "x".repeat(1481 - body.length);
+})();
+
 // Before row 475 (and after): the bugs channel was deactivated by hand, then answered as "help".
 const OCT_12 = [
   TONE,

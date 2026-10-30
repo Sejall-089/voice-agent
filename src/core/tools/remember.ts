@@ -90,6 +90,18 @@ export function subjectInInstruction(subject: string, instruction: string): bool
   return words.length > 0 && words.every((word) => said.some((other) => sameWord(word, other)));
 }
 
+// M34 (rule D). A fact is a line someone said, not a pasted document. Row 591 ("Samurai is this.",
+// a misheard "Summarize this.") saved a 1,481-character, 25-line clipboard dump as a fact. Any write
+// — first, replacement or the same value again — whose value holds a line break or runs past
+// FACT_VALUE_MAX characters is refused, and nothing is saved. A typed instruction cannot hold a line
+// break (the bar flattens them), so one in a value came from the clipboard or a screen.
+export const FACT_VALUE_MAX = 500;
+export const TOO_LONG_FACT = "That is too long to remember as a fact. Nothing was saved.";
+
+function clipboardSized(value: string): boolean {
+  return /[\r\n]/.test(value) || value.length > FACT_VALUE_MAX;
+}
+
 // M33. In the dialog only, a long value is cut; what is saved stays whole.
 export const DIALOG_VALUE_MAX = 200;
 const forDialog = (value: string): string =>
@@ -237,6 +249,10 @@ export const rememberTool: Tool = {
     if (subject.length === 0 || value.length === 0) {
       throw new Error("I need both what to remember and what its value is.");
     }
+
+    // M34, rule D: a clipboard-sized value is refused for every write, before anything else is
+    // judged or asked.
+    if (clipboardSized(value)) throw new UserFixableError(TOO_LONG_FACT);
 
     // M34, rule B: a first write whose subject the user never said is refused here — before
     // Slack is asked anything, and before any tier or dialog. Only a first write: the same
