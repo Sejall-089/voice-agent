@@ -206,6 +206,22 @@ describe("inside a chain", () => {
     expect(w.sender.calls).toEqual([]);
     expect(w.facts()).toEqual([]);
   });
+
+  // M34's live run, F2 #4: the correction planned the send FIRST, then `remember channel = social`.
+  // Live, the send was cancelled, so step 2 never ran. Approved here, step 2 is reached and refused.
+  it("plan 'send > remember channel' (live F2 #4), send approved: sent once, step 2 refused, nothing written", async () => {
+    const choice = plan([
+      step("sendMessage", { channel: "social", notes: "an update" }, "post it"),
+      step("remember", { subject: "channel", value: "social" }, "save the channel"),
+    ]);
+    const w = world(choice, { facts: [["team", "#social"]], confirms: [true] });
+    const outcome = await w.planner.run("actually, post it in social instead");
+    expect(w.sender.calls).toHaveLength(1);
+    expect(outcome.status).toBe("refused");
+    expect(outcome.chain).toMatchObject({ completed: 1, total: 2 });
+    expect(outcome.result).toContain(UNNAMED_FACT);
+    expect(w.facts()).toEqual([{ subject: "team", value: "#social", version: 1, active: 1 }]);
+  });
 });
 
 // Pinned on purpose, so a change in either direction is a decision someone makes in front of this

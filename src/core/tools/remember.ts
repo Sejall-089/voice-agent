@@ -6,8 +6,9 @@ import type { Fact, Memory, PrepareDeps, Tool, ToolDeps, ToolInput } from "../ty
 
 // M33 (live finding). Two values NAME THE SAME THING when they match once one leading "#" is set
 // aside, with case and surrounding spaces ignored: "#social", "social" and " #Social " are one
-// channel. Speech-to-text cannot write a "#" at all, so "remember the team is #social", said
-// aloud, arrives as "social" — and was being asked about as if it changed the team.
+// channel. "remember the team is #social" arrived as "social" (M33's row 674, cause unproven; M34
+// found it looked typed, and whether speech-to-text ever writes a "#" is unverified) — and was
+// being asked about as if it changed the team.
 export function sameName(a: string, b: string): boolean {
   const name = (value: string): string => value.trim().replace(/^#/, "").trim().toLowerCase();
   return name(a) === name(b);

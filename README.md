@@ -430,12 +430,22 @@ saying is not cut off and run half-said. **"What's the date and time?"** gets bo
 you taught it, a dialog shows both: *Change what I remember for "team" from #social to #fun?*,
 with a **Change it** button. Cancel keeps the old value. A new fact, or the same value said again,
 is saved with no dialog, as before. **"#social" and "social" are the same channel**, typed or
-spoken (speech-to-text can't write a "#"). Saying "remember the team is social" with `#social`
+spoken. Saying "remember the team is social" with `#social`
 stored changes nothing: *Already remembered "team" as #social.* The "#" form over a stored bare
 name is saved quietly. This is there because a correction can be misread as a memory write.
 Spoken, a value's leading "#" is said as "hash" ("from hash social to hash fun"), so the
 difference can be heard too. Other dialogs are spoken as before. See spec.md §5b, "A fact that replaces a different
 value".
+
+**A new fact must be one you named (M34).** A first write is refused unless every word of what it
+would be saved as is a word you said: *I did not save that. Say what to remember and what it is
+called, for example "remember the team is #social".* So "remember the team is #social", "my name
+is …" and "remember my dashboard is …" are saved as before, but a correction like "actually, post
+it in social instead" can no longer quietly save a fact called `channel`. Your name and tone are
+exempt ("call me Sam", "I like short replies"). A value with a line break, or over 500 characters,
+is never saved: *That is too long to remember as a fact. Nothing was saved.* (That is the shape of
+a pasted clipboard.) Replacing a fact still asks, as above. See spec.md §5b, "A first write nobody
+named".
 
 **Not built:** branching ("if I'm free at 3, book it, otherwise..."), any new tools, and anything
 that outlives the instruction — a chain runs to completion or stops, it doesn't go away and ping
@@ -1077,6 +1087,21 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 ---
 
 ## Status — what's proved, and what isn't
+
+**M34 (stop junk first writes; record typed vs spoken) is in progress (30 Oct 2026): built,
+scripted and dry-run; the three human checks are not yet run.**
+- **A new fact must be one you named** (rule B), and **a clipboard-sized value is never saved**
+  (rule D). Every recorded first write was replayed: M33's five junk writes are refused, and all
+  13 genuine ones still save.
+- **Each instruction's job now records whether it was typed or spoken** (`jobs.input`), for
+  reading the log. The planner is never told.
+- **Where the "#" went missing (M33) is still not proven.** Every stage inside the app is ruled
+  out, and the two rows look typed: most likely the keypress never reached the box.
+- Scripted against the real model with every connector faked (27 calls, ~$0.027): no junk fact
+  was written, all 9 control writes saved, and a real change still asked. The live model never
+  reached either rule, so their evidence is the replay, the dry run and 11 caught mutations.
+  **3549 tests green across 147 files, 96 skipped.** See `docs/M34-live-checklist.md` and
+  `spec.md` §9 (M34).
 
 **M33 (confirm before `remember` replaces a different value) is closed (30 Oct 2026), after a
 live run by a person: three of four boxes ticked.** The fourth, optional, was not run: it could

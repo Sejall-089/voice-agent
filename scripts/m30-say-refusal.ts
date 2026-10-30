@@ -16,6 +16,7 @@
 //   npx vite-node scripts/m30-say-refusal.ts --framed-prose   # M32: a model's reply, after the lead
 //   npx vite-node scripts/m30-say-refusal.ts --date-time      # M32: "what's the date and time"
 //   npx vite-node scripts/m30-say-refusal.ts --remember-change  # M33: the change-a-fact dialog, as spoken
+//   npx vite-node scripts/m30-say-refusal.ts --first-write-refusal  # M34: rule B's refusal of a first write
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -26,7 +27,7 @@ import { localZone } from "../src/core/llm/prompt.ts";
 import { PROSE_LEAD } from "../src/core/planner.ts";
 import { toSpokenConfirm, toSpokenResult, toSpokenWithLead } from "../src/core/speech.ts";
 import type { SpokenText } from "../src/core/speech.ts";
-import { spokenChangeQuestion } from "../src/core/tools/remember.ts";
+import { UNNAMED_FACT, spokenChangeQuestion } from "../src/core/tools/remember.ts";
 import { formatTimeAnswer } from "../src/core/tools/tellTime.ts";
 import { PiperSynthesizer } from "../src/core/synthesizers/PiperSynthesizer.ts";
 
@@ -49,7 +50,10 @@ const engine = new PiperSynthesizer({
 
 const has = (flag: string): boolean => process.argv.includes(flag);
 // Each wording through the same function the app uses for it.
-const spoken: SpokenText = has("--remember-change")
+const spoken: SpokenText = has("--first-write-refusal")
+  ? // M34: a refusal is spoken through toSpokenResult, as the planner's refuseUserFixable does.
+    toSpokenResult(UNNAMED_FACT)
+  : has("--remember-change")
   ? // M33: said before the dialog opens — `remember`'s spoken variant ("hash" for a leading #),
     // through toSpokenConfirm, exactly as the planner does it.
     toSpokenConfirm(spokenChangeQuestion("team", { kind: "value", value: "#social" }, "social"))

@@ -1430,7 +1430,9 @@ asked *Change what I remember for "team" from #social to social?*.
   reached the app, so the model sent `social`, as given.
 - **Nothing in code strips a "#".** The typed path flattens newlines and trims
   (`CommandBar.tsx`); the transcript cleaner removes only bracketed and parenthesized text.
-  Speech-to-text cannot write a "#".
+  ~~Speech-to-text cannot write a "#".~~ *(M34: unverified, and wrong to assume. Whisper can
+  write a "#"; whether it does for a spoken "hash social" is M34's H3. Rows 672 and 674 look
+  typed, not spoken. See M34 in §9.)*
 - **What the code did miss:** the bot-mode channel check runs only for a value starting "#" or a
   subject ending in "channel" (`remember.ts`, `channelFactValue`). So `team` = `social` was never
   canonicalized, and the raw strings were compared.
@@ -1460,6 +1462,59 @@ from hash social to hash fun?* The dialog on screen is unchanged.
 - "forget" is still not built.
 - The `remember` description's "do NOT re-run the previous action" still pulls corrections
   toward a memory write. It is not edited (M28).
+- *(M34: the first gap is narrowed by rule B and rule D, below.)*
+
+### A first write nobody named, and a value nobody typed (added 2026-10-30, M34)
+
+**The hazard (M33's live trials).** A first write replaces nothing, so it is `reversible` and has
+no dialog. A correction, "actually, post it in social instead", planned one in 5 of 27 trials:
+`channel:fun` = social twice and `channel` = #social three times. Nobody had said "channel" or
+"fun". A junk fact under a generic subject changes what a reference means: `channel` = #social
+would make "tell the channel" go to #social and skip the question that would have asked (the
+send's dialog still shows it). Row 591 ("Samurai is this.", a misheard "Summarize this.") saved a
+1,481-character, 25-line clipboard dump as a fact.
+
+**Rule B** (`remember.prepare`, `subjectInInstruction`). A **first** write is refused unless every
+word of its normalized subject is a word of the instruction.
+- **First** is `writeJudgement`'s answer, the same exact-subject judgement the tier and the
+  handler use (`PrepareDeps.memory` gained a read-only `query` for it). A replacement asks (M33)
+  and a refresh is silent, as before; B never judges either. The flagship corrections ("no, I
+  meant #general" → `team`) are replacements and keep working.
+- **Words** split on anything not a letter or digit ("#design-team" is "design" and "team"); a
+  trailing "s" matches either way ("bugs channel" for "bug channel"); case is ignored.
+- **One leading `target:` is set aside** first. It is this app's URL-fact convention, which the
+  tool's description tells the model to add; nobody says it. (Decided with Sejal at the build:
+  without it, row 14's "remember my dashboard is …" was refused.)
+- **`name` and `tone` are exempt:** "call me Sam" and "I like short replies" name them without the
+  word.
+- **Only the instruction counts,** never the previous turn or the clipboard. T1's "fun" came from
+  the previous turn.
+- **Before Slack:** B runs before the bot-mode channel lookup, so a refused write asks Slack
+  nothing.
+- **A memory that cannot be read** leaves B out, and the tier escalates to its dialog as in M33.
+- **The refusal** (`UNNAMED_FACT`), logged `refused`, nothing written: *I did not save that. Say
+  what to remember and what it is called, for example "remember the team is #social".* Plain
+  ASCII, no "?", under the spoken cap.
+
+**Rule D** (`remember.prepare`, `FACT_VALUE_MAX`). **Every** write (first, replacement or the same
+value) whose value holds a line break or is longer than 500 characters is refused, before B and
+before Slack: *That is too long to remember as a fact. Nothing was saved.* The bar flattens line
+breaks, so one in a value came from the clipboard or a screen. A value is trimmed first, so a line
+break only at its ends does not count.
+
+**The ask path is untouched.** `settleReferences` saves a typed answer with `memory.write`, never
+through `remember`, so neither rule applies to it. It asks only in bot mode, where the answer must
+be a channel Slack has.
+
+**Known limits.**
+- **Paraphrased first writes are refused** (pinned as KNOWN REGRESSION in
+  `tests/remember.firstWrite.test.ts`): "I like short replies" → `reply style`, "I go by Sam" →
+  `nickname`, "my standup is at ten" → `meeting time`. The refusal says the form that works.
+- **B cannot catch a junk write whose subject IS in the instruction.** "Samurai is this." names
+  "samurai"; only D stops it, and only because the value was clipboard-sized. A short value
+  there would be saved.
+- **A statement that is not a request** ("Hello my name is …", row 323's shape) passes B as a
+  first write. M33's dialog covers it only as a replacement.
 
 ### Deliberately deferred
 
@@ -1872,6 +1927,15 @@ first (`core/memory/db.ts`): `job_id`, and `detached` — whether the job was de
 wrote the row. `getLast()`, which supplies the previous turn to the next planning call, skips
 detached rows. `ActionStatus` gains `expired`.
 
+**How the instruction arrived (M34).** `jobs` gains `input` by the same guarded migration:
+`typed` or `spoken`, decided by the instruction hotkey's one test (typed text non-empty → typed;
+otherwise the transcript → spoken) and passed `runInstruction(instruction, input)` →
+`JobManager.submit` → the job store. NULL on older rows and for any job not submitted by the
+hotkey (read as "not recorded"). Action-log rows join to it by `job_id`. It is for a person
+reading the log; **the planner is never told**, and a test pins that the model is asked the same
+thing for both (§4a). Windows voice typing (Win+H) into the bar arrives as typing and is marked
+`typed`.
+
 ### Deliberately not built
 
 Resuming a job after a restart; cancelling a handler in flight; a job that asks a question
@@ -1896,7 +1960,7 @@ Each tool = `{ name, description, inputSchema, irreversible, handler }`. The
 | `summarize`   | 1. Summarize selection               | no            | safe         | LLM summarizes `context.selectedText`; showResult | summarize the text you copied |
 | `rewrite`     | 2. Rewrite selection in my tone      | yes (tone)    | reversible   | LLM rewrites using stored tone; copyToClipboard. **In a chain (M29): returns only the rewritten text; no clipboard write, no header line** | reword the text you copied |
 | `openTarget`  | 3. Open a named target               | yes (targets) | reversible   | resolve name→URL, `openUrl` | open a web page |
-| `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible / **dangerous** | `prepare` settles the subject and value (M33; the bot-mode channel check moved there) → `memory.write()` (versions old fact on conflict). **`dangerous` (M33) when an active fact with exactly this subject holds a different value:** confirmed first, *Change what I remember for "team" from #social to #fun?*, button "Change it". A first write, the same value and the same name with or without its "#" (`social` for `#social`: nothing written, *Already remembered "team" as #social.*) stay `reversible` (§5b) | save a fact to memory |
+| `remember`    | 4. Remember X · 6. Correction sticks | writes        | reversible / **dangerous** | `prepare` settles the subject and value (M33; the bot-mode channel check moved there) → `memory.write()` (versions old fact on conflict). **`dangerous` (M33) when an active fact with exactly this subject holds a different value:** confirmed first, *Change what I remember for "team" from #social to #fun?*, button "Change it". A first write, the same value and the same name with or without its "#" (`social` for `#social`: nothing written, *Already remembered "team" as #social.*) stay `reversible` (§5b). **`prepare` refuses (M34):** a first write whose subject words are not all in the instruction (rule B; one leading `target:` set aside, `name`/`tone` exempt), and any value with a line break or over 500 characters (rule D) | save a fact to memory |
 | `sendMessage` | 5. Format notes and send             | yes (channel only — `referenceArgs`) | **dangerous**| resolve channel, refusing an unknown one before the confirm → LLM formats notes → Slack webhook POST | post a message to Slack |
 | `recall`      | 7. What do you remember about…       | reads         | safe         | `memory.query()` → showResult with metadata | look up a saved fact |
 | `draftReply`  | 8. Reply to the open Gmail email      | yes (tone)    | caution      | read open email → compose → open reply box → insert draft | draft a reply in Gmail |
@@ -6173,6 +6237,172 @@ Post-v0:
          - a third connector, with the add-connector skill;
          - screen Q&A;
          - the demo recording.
+
+- [ ] **M34 — stop junk first writes; record typed vs spoken.** **IN PROGRESS (2026-10-30):
+      built, scripted and dry-run; the human checks (`docs/M34-live-checklist.md`, H1-H3) are not
+      yet run.** For M33's open findings 1, 2, 4 and 7. Commits:
+      - `f405bd0`: the typed/spoken marker, and the "#" tests (E2, E3).
+      - `87180ef`: `PrepareDeps.memory` gains `query`; one `writeJudgement` for `remember`. No
+        behaviour change.
+      - `f07677e`: rule B.
+      - `562c524`: rule D.
+      - `6d10502`: the harness cases and the first-write dry run.
+      - The scripted verification and checklist: this entry's commit.
+
+      **1. The investigation: where the "#" goes missing** (read-only, a copy of the real log; no
+      model call).
+      - **The cause is not proven.** Every stage inside the app is ruled out with evidence:
+        - **The bar** handles one key (Enter) and only flattens newlines and trims
+          (`CommandBar.tsx`). 48 logged rows keep a "#", including rows 676 and 678 ("remember the
+          team is #social", typed in M33's H2), on renderer code unchanged since before row 674.
+        - **The voice path** is not what ran: the hotkey uses the typed text whenever it is not
+          empty (`instructionHotkey.ts`), and `cleanTranscript` removes only `[...]` and `(...)`.
+        - **The log writer** passes the string unchanged; the `jobs` table, written by a separate
+          path, holds the same "#"-less text for both jobs.
+        - **Keyboard layouts:** both installed (English (India), US) type "#" on Shift+3.
+      - **Rows 672 and 674 look typed.** Of 297 distinct instructions, 56 start with a capital and
+        end in punctuation, full of mishearings ("Samurai is a tease."): that is Whisper. Her typed
+        rows are lowercase, and she types "?" ("what's the time?", row 577, against row 599's
+        spoken "What's the time?"). 672 ("remember the team is fun?") and 674 have the typed shape.
+      - **Most likely, the keypress never reached the box.** That is outside the app and cannot be
+        shown after the fact; the marker below is how the next case will be told apart.
+      - **M33's claim that speech-to-text cannot write a "#" is unverified, and wrong to assume.**
+        Whisper can write one; whether it does for a spoken "hash social" is H3. §5b's line is
+        struck through, and the code comment in `remember.ts` corrected.
+      - **The log did not record typed vs spoken** (finding 7). Built below.
+
+      **2. Commit 1: the marker** (`f405bd0`; §5c, "Action log"). `jobs.input` = `typed` |
+      `spoken`, NULL before M34; rows join by `job_id`; the planner is never told. E2: the bar
+      keeps "remember the team is #social" typed key by key, microphone idle and recording. E3:
+      `WhisperCppTranscriber` keeps the "#" in " Remember the team is #social." from a stand-in CLI
+      (`tests/fixtures/fakeWhisper.mjs`), run through a new `argsPrefix` seam that main.ts never sets
+      (Node will not spawn a `.cmd` shim without a shell; Piper has the same seam).
+      - **Tests** (`tests/instructionInput.test.ts`, 11; `CommandBar.test.tsx`, +2): typed, spoken,
+        whitespace-only (spoken); through the real hotkey, runner, planner and a real SQLite file,
+        reopened, joined on `job_id`; a job with no marker is NULL; an M27-era `jobs` table gains
+        the column and its old row reads as unknown; a stray value reads as unknown; the same
+        instruction typed and spoken gives the model identical input and runs the same thing.
+      - **Re-justified:** `jobStore.test.ts`'s column pin ("no jobs column can hold captured
+        context") gains `input`, a fixed word and not content; `pill.lifecycle.test.ts`'s
+        migrate list for an M23 table gains `jobs.input`.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | Typed/spoken is recorded | the two swapped | 4 |
+      | The marker reaches the database | written as NULL | 2 |
+
+      **3. Commit 2** (`87180ef`): `PrepareDeps.memory` is `resolve` + `query`, both reads.
+      `remember`'s tier and handler ask one `writeJudgement`. **Deviation:** `prepare`'s own use of
+      it landed with rule B in commit 3, because the repo's `noUnusedLocals` rejects a judgement
+      computed and not used. **Re-justified:** `sendMessage.test.ts`'s exact-keys pin now expects
+      `query` and `resolve`, and still no `write`.
+
+      **4. Rule B** (`f07677e`; §5b, "A first write nobody named"). **Decision at the build:** the
+      rule as written refused row 14, demoTasks #4 and story step 2 (`target:dashboard`: "target"
+      is the app's own prefix). Stopped and asked; Sejal chose to set one leading `target:` aside.
+      - **Replay** (`tests/fixtures/rememberCalls/replay.ts`, now 34 calls: 17 action-log rows
+        (14 → 17, rows 676-678), M32's row, 7 from M33's harness, 9 scripted evals):
+
+        | First write | Calls | Rule B |
+        |---|---|---|
+        | Junk: `channel:fun` = social (M33 T1) | 2 | refused, nothing written |
+        | Junk: `channel` = #social (M33 T2, T3 ×2) | 3 | refused, nothing written |
+        | Genuine: rows 14, 21, 81, 350, 354, 388, 475, 591; M33 C1, C3; demoTasks #4; story step 2; remember.test's new fact | 13 | all pass |
+
+        Every other call reproduces its recorded result; the dialog is on the same 10 calls as at
+        M33. (The ask path's facts are not `remember` calls and are not in the replay.)
+      - **Tests** (`tests/remember.firstWrite.test.ts`, 32): the word rule (order, ":" and "#"
+        splits, `target:` once and only at the start, plurals, case, a word inside a word, a
+        subject with no words); the exemptions; the previous turn and the clipboard do not count;
+        refused before Slack in bot mode; the exact subject (`dashboard` with only
+        `target:dashboard` stored is a first write); replacements and refreshes untouched; a chain
+        (`remember channel > send`, refused at step 1, nothing sent), and the live F2 #4 shape
+        (`send > remember channel`, send approved: sent once, step 2 refused, nothing written);
+        the KNOWN REGRESSION set; the text.
+      - **Re-justified, each because B changes what it reaches:**
+        - **The phrasing set** (`remember.overwrite.test.ts`): on empty memory three corrections
+          ("actually, post it in social instead", "no, send it to help", "no, I meant the design
+          channel") are now refused (the junk shape); "actually it's #design-team" is still written
+          ("team" is in "#design-team"); the four real remembers are written. With a different value
+          stored all eight still ask, and the test now asserts the stored fact first.
+        - **`m22.texts.test.ts`:** its remember scenarios ran under "do it", so B would have
+          refused them before the Slack refusals they check. They now say their subject and assert
+          Slack was asked; B's own refusal joins the no-"?" sweep as a scenario.
+        - **`preflight.bot.test.ts`:** the same, under "file this bug on GitHub and tell the
+          channel"; it now asserts Slack was asked for `#nope` and `team` = #help was saved.
+        - **The replay's row count** (14 → 17); a refused row now also asserts nothing was written.
+        - `remember.bot.test.ts`'s first writes all name their subject ("remember $subject is
+          $value") and are unchanged.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | B refuses junk first writes | B removed | 18 |
+      | B never judges a replacement | B applied to overwrites | 15 |
+      | Only the instruction's words count | the previous turn's words counted | 2 |
+      | B comes before Slack | B moved after the Slack lookup | 2 |
+      | Plurals match | plural tolerance removed | 2 |
+      | A first write is judged by its exact subject | judged with `resolve` | 1 |
+      | `name` and `tone` are exempt | exemption removed | 3 |
+
+      **5. Rule D** (`562c524`; §5b). Tests (`tests/remember.longValue.test.ts`, 11): row 591's shape
+      (1,481 characters, 25 lines of neutral filler) refused under "Samurai is this."; 500 saved,
+      501 refused; `\n`, `\r\n` and `\r` inside a short value refused; a line break only at the
+      ends trimmed away; a replacement refused before its dialog; a long same-value refresh
+      refused; a 100-character URL saved; the ask path saves its answer untouched.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | D refuses a line break | newline rule removed | 3 |
+      | D's cap is 500 | `>=` for `>` | 1 |
+
+      All 11 of M34's mutations were caught the first time, each made and undone with the Edit
+      tool and the tree checked for markers after.
+
+      **6. The harness and dry run** (`6d10502`). `scripts/m33-live.ts` gains the cases
+      `team-empty`, `dashboard-empty` and `samurai-long` (row 591's shape on the clipboard), a
+      per-case clipboard, `newFacts` per record, and `--first-writes`. The five fake checks
+      passed before any call. Dry run, no model: `channel:fun` and `channel` refused by B with
+      no Slack call and nothing written; `samurai` refused by D; `team` and `name` saved as v1;
+      `team` = #fun against #social shows the dialog, cancelled, #social kept.
+
+      **7. Live, after B and D** (27 calls of the 30 approved, est. ~$0.027; gpt-5-mini through
+      the spend gate; the M33 fakes; a fresh log per trial; memory kept and read back):
+
+      | Setup | Trials | Planned | Ended | New facts |
+      |---|---|---|---|---|
+      | F1: "actually, post it in social instead", cancelled create 40 s before, `team` not stored | 6 | lone send to social ×6 | send dialog, cancelled | none |
+      | F2: the same, `team` = #social | 6 | lone send ×5; plan send > `remember channel = social` ×1 | send dialog, cancelled ×6 | none |
+      | C1: "remember the team is #social", empty | 3 | `remember team` ×3 | saved, no dialog | `team` (v1) ×3 |
+      | C2: "my name is Sam Placeholder", empty | 3 | `remember name` ×3 | saved, no dialog | `name` (v1) ×3 |
+      | C3: "remember my dashboard is https://dash.example.com" | 3 | `remember target:dashboard` ×3 | saved, no dialog | `target:dashboard` (v1) ×3 |
+      | C4: "Samurai is this.", row 591's shape copied | 3 | prose ×1; `rewrite` tone "samurai" ×2 | no remember | none |
+      | C5: "remember the team is #fun", #social stored | 3 | `remember team = #fun` ×3 | the dialog, cancelled ×3 | none |
+
+      **Pass:** 0 junk facts written in the 12 correction trials; 9 of 9 control writes saved; 3 of
+      3 dialogs; no seeded fact changed; nothing created, sent or blocked. **Neither rule was
+      reached by the live model:** no correction planned a first-write `remember` that ran (F2 #4
+      put it behind a cancelled send), and C4 never planned `remember`. The evidence for B and D is
+      the replay, the dry run and the mutations; F2 #4's shape is replayed without a model.
+
+      **Build record (2026-10-30).** `npm test` (plain; no electron process held the SQLite
+      binary): **3549 passed across 147 files, 96 skipped**. Both typechecks clean.
+
+      **Recorded, not fixed:**
+      1. **"forget" is deferred.** No stored junk changes a send target today; row 396 ("forget the
+         bugs channel") shows Sejal has tried it.
+      2. **Stored junk is left as it is:** `bugs channel`, `main channel` and `issue channel` =
+         bare `help` (M31's check cannot see them; "remember the bugs channel is #help" would
+         upgrade each silently, M33); the `samurai` clipboard dump (row 591); the duplicate
+         `channel:social` = #social.
+      3. **The unknown-channel gap** (M31's finding 2) is still M35's: a cache-only directory method
+         and its seven decisions (M33's entry).
+      4. **Windows voice typing (Win+H)** into the bar is marked `typed`: the marker cannot see it.
+      5. **Two pinned regressions** (three cases): paraphrased first-write subjects are refused.
+      6. **B cannot catch "Samurai is this." shapes** when the word is in the instruction; only D's
+         size rule stopped row 591.
+      7. **Live, a misheard "Summarize this." planned `rewrite`** (C4, 2 of 3) with tone "samurai".
+         In the app that rewrites and replaces the clipboard (`reversible`, unnarrated). Not M34's;
+         noted for the clipboard findings (M28, M32).
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —
