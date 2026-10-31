@@ -1431,7 +1431,8 @@ asked *Change what I remember for "team" from #social to social?*.
 - **Nothing in code strips a "#".** The typed path flattens newlines and trims
   (`CommandBar.tsx`); the transcript cleaner removes only bracketed and parenthesized text.
   ~~Speech-to-text cannot write a "#".~~ *(M34: unverified, and wrong to assume. Whisper can
-  write a "#"; whether it does for a spoken "hash social" is M34's H3. Rows 672 and 674 look
+  write a "#"; whether it does for a spoken "hash social" is untested (M34's H3 was not run,
+  skipped by choice). Rows 672 and 674 look
   typed, not spoken. See M34 in §9.)*
 - **What the code did miss:** the bot-mode channel check runs only for a value starting "#" or a
   subject ending in "channel" (`remember.ts`, `channelFactValue`). So `team` = `social` was never
@@ -6238,16 +6239,20 @@ Post-v0:
          - screen Q&A;
          - the demo recording.
 
-- [ ] **M34 — stop junk first writes; record typed vs spoken.** **IN PROGRESS (2026-10-30):
-      built, scripted and dry-run; the human checks (`docs/M34-live-checklist.md`, H1-H3) are not
-      yet run.** For M33's open findings 1, 2, 4 and 7. Commits:
+- [x] **M34 — stop junk first writes; record typed vs spoken.** **Closed 2026-10-30, after a
+      live run by a person (2 of 3 boxes ticked; H3 not run, skipped by Sejal —
+      `docs/M34-live-checklist.md`), with seven open findings (the close-out record is at the end
+      of this entry).** For M33's open findings 1, 2, 4 and 7. Commits:
       - `f405bd0`: the typed/spoken marker, and the "#" tests (E2, E3).
       - `87180ef`: `PrepareDeps.memory` gains `query`; one `writeJudgement` for `remember`. No
         behaviour change.
       - `f07677e`: rule B.
       - `562c524`: rule D.
       - `6d10502`: the harness cases and the first-write dry run.
-      - The scripted verification and checklist: this entry's commit.
+      - `a0e04b4`: the scripted verification and checklist.
+      - `1ae4ca8`: the human results; `e3c9369` corrected it (H3 had been ticked by mistake).
+      - `573c609`: the `target:` prefix rule pinned (close-out, below).
+      - The close-out docs: this entry's last commit.
 
       **1. The investigation: where the "#" goes missing** (read-only, a copy of the real log; no
       model call).
@@ -6267,7 +6272,8 @@ Post-v0:
       - **Most likely, the keypress never reached the box.** That is outside the app and cannot be
         shown after the fact; the marker below is how the next case will be told apart.
       - **M33's claim that speech-to-text cannot write a "#" is unverified, and wrong to assume.**
-        Whisper can write one; whether it does for a spoken "hash social" is H3. §5b's line is
+        Whisper can write one; whether it does for a spoken "hash social" was to be H3, which was
+        not run (section 9). §5b's line is
         struck through, and the code comment in `remember.ts` corrected.
       - **The log did not record typed vs spoken** (finding 7). Built below.
 
@@ -6387,22 +6393,93 @@ Post-v0:
       **Build record (2026-10-30).** `npm test` (plain; no electron process held the SQLite
       binary): **3549 passed across 147 files, 96 skipped**. Both typechecks clean.
 
-      **Recorded, not fixed:**
-      1. **"forget" is deferred.** No stored junk changes a send target today; row 396 ("forget the
-         bugs channel") shows Sejal has tried it.
-      2. **Stored junk is left as it is:** `bugs channel`, `main channel` and `issue channel` =
-         bare `help` (M31's check cannot see them; "remember the bugs channel is #help" would
-         upgrade each silently, M33); the `samurai` clipboard dump (row 591); the duplicate
-         `channel:social` = #social.
-      3. **The unknown-channel gap** (M31's finding 2) is still M35's: a cache-only directory method
-         and its seven decisions (M33's entry).
-      4. **Windows voice typing (Win+H)** into the bar is marked `typed`: the marker cannot see it.
-      5. **Two pinned regressions** (three cases): paraphrased first-write subjects are refused.
-      6. **B cannot catch "Samurai is this." shapes** when the word is in the instruction; only D's
-         size rule stopped row 591.
-      7. **Live, a misheard "Summarize this." planned `rewrite`** (C4, 2 of 3) with tone "samurai".
-         In the app that rewrites and replaces the clipboard (`reversible`, unnarrated). Not M34's;
-         noted for the clipboard findings (M28, M32).
+      **8. The `target:` prefix, pinned at close-out** (`573c609`). The build's decision had two
+      tests (`target:dashboard` passes, `target:target` is refused) and no mutation row. Six tests
+      were added to `tests/remember.firstWrite.test.ts` (32 → 38):
+      - `target:dashboard` from "remember my dashboard is <url>" passes;
+      - `target:foo` from the same instruction is refused;
+      - a bare `target:` is refused, even when "target" was said;
+      - `target:` mid-subject ("my target:dashboard") is not stripped;
+      - the same pass and refusal through the real planner, with the facts read back.
+
+      | Rule | Mutation | Caught by |
+      |---|---|---|
+      | One leading `target:` is set aside | the prefix never stripped | 9 |
+      | ...and only at the start | stripped anywhere (`/target:/`) | 1 (the mid-subject case; it would have survived without it) |
+
+      **9. The human checks** (`docs/M34-live-checklist.md`, 2026-10-30):
+      - **H1** (passed): `--first-write-refusal` with sound on; Sejal reported it passed, with no
+        further detail.
+      - **H2** (passed): typed "remember the team is #social" with #social stored; Sejal reported
+        it passed, with no further detail.
+      - **H3: not run**, skipped by Sejal by choice (expected to pass). It was ticked by mistake in
+        `1ae4ca8` and unticked in `e3c9369`.
+
+      **10. The log check** (a read-only copy of her real `memory.db`, taken at close-out; the real
+      file was not written):
+      - **H2 is row 680** (2026-10-30 22:48:45 local), `remember the team is #social`. The "#"
+        survived, `jobs.input` = **typed**, and it ended `ok` with *Remembered: team = #social*.
+      - **`jobs.input` works as designed on her real data.** 680's job is the first and only one
+        marked. All 147 older jobs read NULL, so they show as unknown.
+      - **No spoken row exists:** H3 was not run, so the `spoken` marker has not yet been seen on a
+        real row. Tests pin it end to end through a real SQLite file.
+      - **No new fact was written:** 19 fact rows before and after. `team` = #social is still v1
+        at confidence 0.8; only its updated time moved (the same-value refresh).
+
+      **Close-out record (2026-10-30).**
+      - **Tests: 3555 passed across 147 files, 96 skipped; both typechecks clean.** Plain `npm
+        test` ran with the dev app closed.
+      - **Model calls:** 27 of the 30 allowed, est. ~$0.027, all in section 7. The close-out made
+        none.
+      - **Eval skipped** (not run against the real model).
+      - **Mutations: 13, all caught:**
+        - the marker: 2;
+        - rule B: 7;
+        - rule D: 2;
+        - the `target:` prefix: 2 (section 8; one would have survived without the mid-subject
+          test added there).
+      - **Replay:** 34 calls. The 5 junk first writes are refused with nothing written; the 13
+        genuine first writes pass. Every other call gives its recorded result, and the dialog
+        appears on the same 10 calls as at M33.
+      - **Live:** 0 junk writes in the 12 correction trials; 9 of 9 control writes saved; 3 of 3
+        dialogs; nothing created, sent or blocked.
+
+      **Proven vs. live-only.**
+      - **The real model never reached rule B or rule D in the 27 live trials.** The proof for
+        both is the replay, the dry run and the mutations.
+      - **The "#" cause is not proven** (section 1). Every app stage is ruled out, and the most
+        likely cause is that the keypress never reached the box.
+      - **Seen only live:** B's refusal spoken through real Piper (H1); a typed "#" kept and marked
+        `typed` in her real log (H2 and the log check).
+      - **Not seen live:** a `spoken` row (H3 not run).
+
+      **Open findings, not fixed in M34:**
+      1. **Memory housekeeping.**
+         - "forget" is still unbuilt.
+         - Stored junk was left as is: `bugs channel`, `main channel` and `issue channel` = bare
+           `help`, which M31's check cannot see; the `samurai` clipboard dump (row 591); the
+           duplicate `channel:social` = #social.
+         - Sejal may re-teach the bare channels as "#help" herself.
+      2. **The unknown-channel gap (M31)** is still open. It needs a cache-only directory method
+         (an interface change, so Plan Mode) and the seven decisions in M33's investigation.
+      3. **Paraphrase regressions, pinned in tests** (three cases: "I like short replies" →
+         `reply style`, "I go by Sam" → `nickname`, "my standup is at ten" → `meeting time`). A
+         first write whose subject words are not in the instruction is refused.
+      4. **B cannot catch a "Samurai is this."-shaped write** when the subject word is in the
+         instruction. Only D's size rule stopped row 591.
+      5. **Windows voice typing (Win+H)** into the bar is marked `typed`. The marker cannot see it.
+      6. **The missing "#" in rows 672 and 674 is still unexplained.** The marker will show whether
+         the next occurrence was typed or spoken.
+      7. **The older queue:**
+         - re-ask once on a refusal (needs an eval);
+         - "what did that job say?";
+         - a third connector, with the add-connector skill;
+         - screen Q&A;
+         - the demo recording.
+
+      *Also noted, not an M34 finding:* live, a misheard "Samurai is this." planned `rewrite` (C4,
+      2 of 3) with tone "samurai". In the app, that rewrites and replaces the clipboard
+      (`reversible`, unnarrated). It belongs with the clipboard findings (M28, M32).
 
 **v0 status: complete.** *(The counts in this paragraph are history, as of M19, 2026-10-09; the
 current count is in M27's close-out record above.)* **1214 tests green** (`npm test`) across 63 files, plus 55 skipped —

@@ -5,10 +5,10 @@ philosophy, and design principles — those are still accurate and don't go
 stale. Everything else is a dated log; later files supersede earlier ones
 for *status*, not for reasoning or philosophy.
 
-**Current status (as of 2026-10-30): M0-M33 shipped; M33 closed 2026-10-30 after a live run by a
-person, with eight open findings (see M33 below).**
+**Current status (as of 2026-10-30): M0-M34 shipped; M34 closed 2026-10-30 after a live run by a
+person, with seven open findings (see M34 below).**
 There is no context file past `PROJECT_CONTEXT_UPDATE_9.md`, which is current **through M19
-only**. For M20 to M33 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
+only**. For M20 to M34 the status lives in `spec.md` (§9's entry for each, and §6e / §6f / §5c /
 §4d for the design) and in each milestone's live checklist:
 
 - **M20 - GitHub issues, the second connector.** `docs/M20-live-checklist.md`: 15 boxes
@@ -195,6 +195,52 @@ only**. For M20 to M33 the status lives in `spec.md` (§9's entry for each, and 
       Q&A, the demo recording.
 
   `npm test`: 3482 across 144 files, 96 skipped (plain `npm test`; nothing held the SQLite binary).
+- **M34 - stop junk first writes; record typed vs spoken.** Closed 2026-10-30 after a live run
+  by a person. `docs/M34-live-checklist.md`: 2 ticked, 1 not run (H3, the spoken check, skipped
+  by choice).
+  - **The changes.**
+    - **The marker:** `jobs.input` = `typed` | `spoken`, NULL (unknown) before M34, added by the
+      guarded migration. `JobManager.submit` and the job runner take it, and the instruction
+      hotkey sets it from the same test that picks typed text over the transcript. Action-log
+      rows join to it by `job_id`. The planner is never told.
+    - `PrepareDeps.memory` is `resolve` + `query` (both reads). `remember`'s tier, `prepare` and
+      handler share one `writeJudgement`.
+    - **Rule B** (`subjectInInstruction`, `UNNAMED_FACT`): a FIRST write is refused unless every
+      word of its subject is a word of the instruction. Plurals match. `name` and `tone` are
+      exempt. A replacement is never judged (it asks, M33). Bot mode refuses before Slack is asked.
+    - **The `target:` decision:** one leading `target:` is set aside before judging, since it is
+      the app's URL prefix and nobody says it. Only at the start, and a bare `target:` names
+      nothing.
+    - **Rule D** (`FACT_VALUE_MAX` = 500, `TOO_LONG_FACT`): any write whose value has a line break
+      or is over 500 characters is refused.
+    - `WhisperCppTranscriber` gained an `argsPrefix` test seam; main.ts never sets it.
+  - **New files.**
+    - `tests/instructionInput.test.ts`;
+    - `tests/remember.firstWrite.test.ts`;
+    - `tests/remember.longValue.test.ts`;
+    - `tests/fixtures/fakeWhisper.mjs`.
+    - The replay (`tests/fixtures/rememberCalls/replay.ts`) grew to 34 calls and gained
+      `ROW_591_SHAPE`.
+    - `scripts/m33-live.ts` gained three cases and `--first-writes`.
+    - `scripts/m30-say-refusal.ts` gained `--first-write-refusal`.
+  - **Evidence.**
+    - The replay: 5 junk first writes refused, 13 genuine ones pass.
+    - 13 mutations, all caught.
+    - Scripted live with faked connectors, 27 calls: 0 junk writes, 9 of 9 controls. The live
+      model never reached B or D.
+    - Her real-app H1-H2. The log check found H2's row 680 marked `typed` with its "#", and no
+      new fact.
+  - **Open findings (M35 candidates).**
+    - "forget" unbuilt; stored junk left as is (bare `help` channel facts, `samurai`, the
+      duplicate `channel:social`).
+    - The unknown-channel gap (a cache-only directory method; Plan Mode; seven decisions).
+    - Paraphrased first writes refused (three pinned cases).
+    - B cannot see "Samurai is this."-shaped writes.
+    - Win+H voice typing is marked `typed`.
+    - The missing "#" in rows 672 and 674, cause still unknown.
+    - The older queue.
+
+  `npm test`: 3555 across 147 files, 96 skipped (plain `npm test`; nothing held the SQLite binary).
 
 An open box in a checklist means *not seen by a person*, not *failing*; each checklist says
 which. `docs/M19-live-checklist.md` and `docs/M18-live-checklist.md` also still have open items.
@@ -212,7 +258,7 @@ This index is re-checked at every milestone close-out (`.claude/skills/milestone
 ## Read order for a fresh session
 1. `PROJECT_CONTEXT.md` — philosophy, still current
 2. `PROJECT_CONTEXT_UPDATE_9.md` — status through M19
-3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30, M31, M32, M33) and the fourteen checklists above — status since
+3. `spec.md` §9 (M20, M21, M22, M23, M24, M25, M26, M27, M28, M29, M30, M31, M32, M33, M34) and the fifteen checklists above — status since
 4. Only if you need the history of *how* we got here: `PROJECT_CONTEXT_UPDATE.md`
    through `PROJECT_CONTEXT_UPDATE_8.md` in numeric order, plus
    `future_scope_post_m14.md`

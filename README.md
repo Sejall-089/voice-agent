@@ -1088,8 +1088,12 @@ no inbox, no Notion account, no Google account, no OAuth flow, and no OS keystro
 
 ## Status — what's proved, and what isn't
 
-**M34 (stop junk first writes; record typed vs spoken) is in progress (30 Oct 2026): built,
-scripted and dry-run; the three human checks are not yet run.**
+**M34 (stop junk first writes; record typed vs spoken) is closed (30 Oct 2026), after a live
+run by a person: two of three boxes ticked.** The refusal was heard through the real speech
+engine. A typed "remember the team is #social" kept its "#" and was marked `typed` in the real
+log, and no new fact was written. The spoken check (H3) was not run, by choice, so no real row
+is marked `spoken` yet. Seven findings stay open (`spec.md` §9, M34), including "forget", the
+unknown-channel gap and the still-unexplained missing "#".
 - **A new fact must be one you named** (rule B), and **a clipboard-sized value is never saved**
   (rule D). Every recorded first write was replayed: M33's five junk writes are refused, and all
   13 genuine ones still save.
@@ -1099,8 +1103,8 @@ scripted and dry-run; the three human checks are not yet run.**
   out, and the two rows look typed: most likely the keypress never reached the box.
 - Scripted against the real model with every connector faked (27 calls, ~$0.027): no junk fact
   was written, all 9 control writes saved, and a real change still asked. The live model never
-  reached either rule, so their evidence is the replay, the dry run and 11 caught mutations.
-  **3549 tests green across 147 files, 96 skipped.** See `docs/M34-live-checklist.md` and
+  reached either rule, so their evidence is the replay, the dry run and 13 caught mutations.
+  **3555 tests green across 147 files, 96 skipped.** See `docs/M34-live-checklist.md` and
   `spec.md` §9 (M34).
 
 **M33 (confirm before `remember` replaces a different value) is closed (30 Oct 2026), after a
@@ -1111,8 +1115,8 @@ write a junk fact to the real memory. In the real app:
 - the spoken "hash" was heard clearly.
 
 The hazard never reproduced live. The fix is proven by tests, dry runs, one real catch in a
-control trial, and the real-app check. Eight findings stay open for M34. The first is that a "#"
-went missing from two logged instructions, for reasons not yet found.
+control trial, and the real-app check. It closed with eight open findings, which M34 took up.
+The first was that a "#" went missing from two logged instructions, for reasons not yet found.
 - **`remember` now asks before replacing a value you taught it.** A new fact and the same value
   stay silent.
 - **Its saved value is settled before the dialog**, Slack's channel check included, so the

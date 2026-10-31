@@ -7,10 +7,11 @@ truth for scope, stack, and decisions.
 - **Use Plan Mode for anything structural** (new module, interface change, data model
   edit). Propose the plan, wait for approval, then implement.
 - **Build milestone by milestone** (spec.md §9 — every milestone there is ticked through
-  M33, which closed on 2026-10-30 with eight open findings recorded in its entry, the M34
-  candidates: a "#" missing from instructions (cause unknown), new facts never asked about, the
-  unknown-channel gap, memory housekeeping ("forget", bare channel facts), and the older queue.
-  The next one is whatever is agreed and added to that list). Do not jump ahead. Each
+  M34, which closed on 2026-10-30 with seven open findings recorded in its entry, the M35
+  candidates: memory housekeeping ("forget", stored junk, bare channel facts), the
+  unknown-channel gap, paraphrased first writes refused, "Samurai is this."-shaped writes rule B
+  cannot see, Win+H voice typing marked `typed`, the missing "#" (cause still unknown), and the
+  older queue. The next one is whatever is agreed and added to that list). Do not jump ahead. Each
   milestone must run and be committable before starting the next.
 - **Respect the scope guardrails** (spec.md §2, which is the list — this is a summary of it).
   If a task seems to need anything still OUT of scope (auto-clicking or any vision-driven

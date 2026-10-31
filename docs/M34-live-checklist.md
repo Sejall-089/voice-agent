@@ -63,6 +63,14 @@ job's `input` (`SELECT a.id, a.instruction, j.input FROM action_log a JOIN jobs 
 a.job_id ORDER BY a.id DESC LIMIT 5`). Expected: H2's row `typed` with its "#"; H3's row `spoken`.
 This is the first evidence for M33's finding 1 (a "#" missing from rows 672 and 674).
 
+*Close-out result (2026-10-30, a read-only copy, nothing written to the real file):*
+- *H2 is row 680* (22:48:45 local), `remember the team is #social`. The "#" survived,
+  `jobs.input` = `typed`, `ok`, *Remembered: team = #social*.
+- *The marker:* 680's job is the only one marked; the 147 older jobs read NULL (unknown).
+- *H3 was not run,* so there is no `spoken` row.
+- *No new fact was written* (19 rows before and after). `team` is still #social v1; only its
+  updated time moved.
+
 ## Script-verified (no tick)
 
 **2026-10-30.** None of this was watched by a person.
